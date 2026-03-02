@@ -1080,12 +1080,20 @@
 
         // Evaluar si usuario es apto
         function esUsuarioApto(usuario, deudaMax) {
-            const tieneDeudaValida = usuario.deudaTotal <= deudaMax;
-            const tieneCultivo = usuario.cultivo1 && usuario.cultivo1.trim() !== '';
-            const tieneArea = usuario.area1 > 0;
-            
-            return tieneDeudaValida && tieneCultivo && tieneArea;
-        }
+    // Deuda válida: sin deuda (0) O deuda menor/igual al mínimo permitido
+    const deuda = parseFloat(usuario.deudaTotal) || 0;
+    const tieneDeudaValida = deuda <= deudaMax;
+    const tieneCultivo = usuario.cultivo1 && usuario.cultivo1.trim() !== '';
+    const tieneArea = parseFloat(usuario.area1) > 0;
+    
+    return tieneDeudaValida && tieneCultivo && tieneArea;
+}
+
+// Función separada solo para clasificar derecho de uso (sin requerir cultivo/área)
+function tieneDerechoDeUso(usuario, deudaMax) {
+    const deuda = parseFloat(usuario.deudaTotal) || 0;
+    return deuda <= deudaMax;
+}
 
         function generarAvanceSiembra(nombreToma) {
             const caudales = {
@@ -1347,11 +1355,11 @@ function abrirProgramacionNoAptosToma() {
     
     // Filtrar usuarios no aptos
     usuariosNoAptosDisponibles = usuarios.filter(u => {
-        const tieneDeuda = parseFloat(u.deudaTotal) > 0;
-        const noEsApto = !esUsuarioApto(u, deudaMax);
-        const noExcluido = !debeExcluirse(u);
-        return tieneDeuda && noEsApto && noExcluido;
-    });
+    const deuda = parseFloat(u.deudaTotal) || 0;
+    const sinDerechoDeUso = !tieneDerechoDeUso(u, deudaMax);
+    const noExcluido = !debeExcluirse(u);
+    return deuda > 0 && sinDerechoDeUso && noExcluido;
+});
     
     // Agregar información de la toma a cada usuario
     usuariosNoAptosDisponibles.forEach(u => {
@@ -3602,12 +3610,12 @@ function cargarUsuariosNoAptosPorToma(nombreToma) {
     }
     
     // Filtrar usuarios no aptos de esta toma específica
-    usuariosNoAptosDisponibles = usuarios.filter(u => {
-        const tieneDeuda = parseFloat(u.deudaTotal) > 0;
-        const noEsApto = !esUsuarioApto(u, deudaMax);
-        const noExcluido = !debeExcluirse(u);
-        return tieneDeuda && noEsApto && noExcluido;
-    });
+   usuariosNoAptosDisponibles = usuarios.filter(u => {
+    const deuda = parseFloat(u.deudaTotal) || 0;
+    const sinDerechoDeUso = !tieneDerechoDeUso(u, deudaMax);
+    const noExcluido = !debeExcluirse(u);
+    return deuda > 0 && sinDerechoDeUso && noExcluido;
+});
     
     // Agregar información de la toma a cada usuario
     usuariosNoAptosDisponibles.forEach(u => {
