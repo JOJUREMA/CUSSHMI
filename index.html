@@ -885,8 +885,8 @@
             .tabla-matriz td:last-child {
                 max-width: 50px !important;
                 min-width: 45px !important;
-                background-color: #90EE90 !important;
-                color: #000000 !important;
+                background-color: transparent !important;
+                color: inherit !important;
                 font-weight: bold !important;
                 font-size: 8pt !important;
             }
@@ -3260,7 +3260,7 @@ function expandirUsuarioNoAptoPorCultivos(usuarioBase) {
                                 <td rowspan="${filas}">S/ ${u.deudaCampana.toFixed(2)}</td>
                                 <td rowspan="${filas}">S/ ${u.deudaAtrasada.toFixed(2)}</td>
                                 <td rowspan="${filas}">S/ ${u.deudaConvenio.toFixed(2)}</td>
-                                <td rowspan="${filas}"><strong>S/ ${u.deudaTotal.toFixed(2)}</strong></td>
+                                <td rowspan="${filas}" style="color:#dc3545;font-weight:bold;"><strong>S/ ${u.deudaTotal.toFixed(2)}</strong></td>
                             `;
                         }
                     }
@@ -3277,7 +3277,7 @@ function expandirUsuarioNoAptoPorCultivos(usuarioBase) {
                         ${stats.tipo === 'aptos' 
                             ? `<td><strong>S/ ${usuarios.reduce((sum,u)=>sum+u.debito,0).toFixed(2)}</strong></td>`
                             : `<td colspan="3" style="text-align:right"><strong>TOTAL DEUDA:</strong></td>
-                                <td><strong>S/ ${stats.totalDeuda.toFixed(2)}</strong></td>`
+                                <td style="color:#dc3545;font-weight:bold;"><strong>S/ ${stats.totalDeuda.toFixed(2)}</strong></td>`
                         }
                     </tr>
                 </tbody>
@@ -3481,7 +3481,7 @@ tomasResumen.sort((a, b) => {
                 <div class="encabezado-hoja">
                     <h2>COMISIÓN DE USUARIOS DEL SUB SECTOR HIDRÁULICO MARGEN IZQUIERDA</h2>
                     <p><strong>CUSSHMI - Unidad de Operación y Tarifas</strong></p>
-                    <p style="font-size: 10pt; color: #dc3545; margin-top: 5px;">
+                    <p style="font-size: 18pt; color: #b30000 !important; margin-top: 6px; font-weight: 900; letter-spacing: 0.25px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">
                         📋 HOJA 2: USUARIOS SIN DERECHO DE USO DE RIEGO (CON DEUDA)
                     </p>
                     <p style="font-size: 7pt;">Deuda Máxima Permitida: S/ ${deudaMax.toFixed(2)} | 
@@ -3498,7 +3498,7 @@ tomasResumen.sort((a, b) => {
                         <p>Área Total (ha)</p>
                     </div>
                     <div class="stat-box">
-                        <h4>S/ ${totalGeneralDeuda.toFixed(2)}</h4>
+                        <h4 style="color:#b30000 !important; font-size:18pt; font-weight:900; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">S/ ${totalGeneralDeuda.toFixed(2)}</h4>
                         <p>Deuda Total</p>
                     </div>
                 </div>
@@ -3526,7 +3526,7 @@ tomasResumen.sort((a, b) => {
                         <p>Total Usuarios</p>
                     </div>
                     <div class="stat-box">
-                        <h4>S/ ${totalGeneralDeuda.toFixed(2)}</h4>
+                        <h4 style="color:#b30000 !important; font-size:18pt; font-weight:900; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">S/ ${totalGeneralDeuda.toFixed(2)}</h4>
                         <p>Deuda Total General</p>
                     </div>
                     <div class="stat-box">
@@ -3680,9 +3680,9 @@ function generarMatrizCultivosToma(tipo, deudaMax) {
         totalToma += area;
         
         if (area > 0) {
-            html += `<td style="text-align: right; color: #000000; font-weight: 600; font-size: 7.5pt; padding: 2px;">${area.toFixed(2)}</td>`;
+            html += `<td style="text-align: right; color: #000000; font-weight: 700; font-size: 10.5pt; padding: 2px;">${area.toFixed(2)}</td>`;
         } else {
-            html += `<td style="text-align: center; color: #999; font-size: 7.5pt; padding: 2px;">-</td>`;
+            html += `<td style="text-align: center; color: #999; font-size: 9.8pt; padding: 2px;">-</td>`;
         }
     });
     
@@ -3690,12 +3690,12 @@ function generarMatrizCultivosToma(tipo, deudaMax) {
     html += '</tr>';
 });
 
-html += '<tr style="background: #228B22; color: #000000; font-weight: bold;">';
-html += '<td style="font-size: 8pt; padding: 2px; color: #000000; text-align: center; font-weight: bold;">TOTAL</td>';
+html += '<tr style="background: transparent; color: #000000; font-weight: bold;">';
+html += '<td style="font-size: 10.5pt; padding: 2px; color: #c75b5b; text-align: center; font-weight: 900; background: transparent;">TOTAL</td>';
 
 cultivosGrupo.forEach(cultivo => {
     const total = totalesPorCultivo[cultivo];
-    html += `<td style="text-align: right; font-size: 7.5pt; padding: 2px; color: #000000; font-weight: bold;">${total.toFixed(2)}</td>`;
+    html += `<td style="text-align: right; font-size: 10.5pt; padding: 2px; color: #c75b5b; font-weight: 900;">${total.toFixed(2)}</td>`;
 });
 
 html += `<td style="text-align: right; font-size: 8pt; padding: 2px; background-color: #006400 !important; color: #FFFFFF !important; font-weight: bold;">${granTotal.toFixed(2)}</td>`;
@@ -3808,11 +3808,12 @@ const ordenTomas = [
         });
         
         // Generar tabla para este grupo
+        const esNoAptosPrint = tipo === 'noAptos';
         let html = '<table class="report-table tabla-matriz" style="margin-bottom: 15px;">';
         
         // Encabezado
         html += '<thead><tr>';
-        html += '<th style="width: 70px; background: #667eea; color: white; font-size: 7pt; font-weight: bold; vertical-align: middle;">TOMA</th>';
+        html += `<th style="width: 70px; background: #667eea; color: ${esNoAptosPrint ? '#b30000' : 'white'}; font-size: 9.5pt; font-weight: bold; vertical-align: middle;">TOMA</th>`;
         
         cultivosGrupo.forEach(cultivo => {
             const nombreFormateado = formatearNombreCultivoDosLineas(cultivo);
@@ -3831,7 +3832,7 @@ const ordenTomas = [
             ">${nombreFormateado}</th>`;
         });
         
-        html += '<th style="width: 50px; background: #155724; color: white; font-size: 7pt; font-weight: bold; vertical-align: middle;">TOTAL</th>';
+        html += `<th style="width: 50px; background: #155724; color: ${esNoAptosPrint ? '#b30000' : 'white'}; font-size: 9.5pt; font-weight: bold; vertical-align: middle;">TOTAL</th>`;
         html += '</tr></thead>';
         
         // Cuerpo - ✅ AHORA EN EL ORDEN DEFINIDO DE GRUPOS
@@ -3842,32 +3843,32 @@ const ordenTomas = [
             let totalToma = 0;
             
             html += `<tr style="background-color: ${bgColor};">`;
-            html += `<td style="font-weight: bold; font-size: 7.5pt; border-right: 1px solid #333; padding: 2px; text-align: center;">${toma}</td>`;
+            html += `<td style="font-weight: bold; font-size: 9.5pt; border-right: 1px solid #333; padding: 2px; text-align: center; color: ${esNoAptosPrint ? '#b30000' : '#000000'};">${toma}</td>`;
             
             cultivosGrupo.forEach(cultivo => {
                 const area = datosPorToma[toma][cultivo] || 0;
                 totalToma += area;
                 
                 if (area > 0) {
-                    html += `<td style="text-align: right; color: #000000; font-weight: 600; font-size: 7.5pt; padding: 2px;">${area.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right; color: #000000; font-weight: 700; font-size: 10.5pt; padding: 2px;">${area.toFixed(2)}</td>`;
                 } else {
-                    html += `<td style="text-align: center; color: #999; font-size: 7.5pt; padding: 2px;">-</td>`;
+                    html += `<td style="text-align: center; color: #999; font-size: 9.8pt; padding: 2px;">-</td>`;
                 }
             });
             
-            html += `<td style="text-align: right; font-weight: bold; background: #90EE90; color: #000000; font-size: 8pt; padding: 2px;">${totalToma.toFixed(2)}</td>`;
+            html += `<td style="text-align: right; font-weight: 800; background: transparent; color: ${esNoAptosPrint ? '#c75b5b' : '#000000'}; font-size: 10pt; padding: 2px;">${totalToma.toFixed(2)}</td>`;
         });
         
         // Fila de totales
-        html += '<tr style="background: #228B22; color: #000000; font-weight: bold;">';
-        html += '<td style="font-size: 8pt; padding: 2px; color: #000000; text-align: center; font-weight: bold;">TOTAL</td>';
+        html += `<tr style="background: ${esNoAptosPrint ? 'transparent' : '#228B22'}; color: #000000; font-weight: bold;">`;
+        html += `<td style="font-size: 10.5pt; padding: 2px; color: ${esNoAptosPrint ? '#c75b5b' : '#000000'}; text-align: center; font-weight: 900; background: ${esNoAptosPrint ? 'transparent' : '#228B22'};">TOTAL</td>`;
         
         cultivosGrupo.forEach(cultivo => {
             const total = totalesPorCultivo[cultivo];
-            html += `<td style="text-align: right; font-size: 7.5pt; padding: 2px; color: #000000; font-weight: bold;">${total.toFixed(2)}</td>`;
+            html += `<td style="text-align: right; font-size: 10.5pt; padding: 2px; color: ${esNoAptosPrint ? '#c75b5b' : '#000000'}; font-weight: 900;">${total.toFixed(2)}</td>`;
         });
         
-        html += `<td style="text-align: right; font-size: 8pt; padding: 2px; background-color: #006400 !important; color: #FFFFFF !important; font-weight: bold;">${granTotal.toFixed(2)}</td>`;
+        html += `<td style="text-align: right; font-size: 10pt; padding: 2px; background: ${esNoAptosPrint ? 'transparent' : '#006400'} !important; color: ${esNoAptosPrint ? '#c75b5b' : '#FFFFFF'} !important; font-weight: 800;">${granTotal.toFixed(2)}</td>`;
         html += '</tr>';
         
         html += '</tbody></table>';
@@ -3989,11 +3990,12 @@ function generarMatrizCultivosTomaPrint(tipo, deudaMax) {
         });
         
         // Generar tabla para este grupo
+        const esNoAptosPrint = tipo === 'noAptos';
         let html = '<table class="report-table tabla-matriz" style="margin-bottom: 15px;">';
         
         // Encabezado
         html += '<thead><tr>';
-        html += '<th style="width: 70px; background: #667eea; color: white; font-size: 7pt; font-weight: bold; vertical-align: middle;">TOMA</th>';
+        html += `<th style="width: 70px; background: #667eea; color: ${esNoAptosPrint ? '#b30000' : 'white'}; font-size: 9.5pt; font-weight: bold; vertical-align: middle;">TOMA</th>`;
         
         cultivosGrupo.forEach(cultivo => {
             const nombreFormateado = formatearNombreCultivoDosLineas(cultivo);
@@ -4011,8 +4013,7 @@ function generarMatrizCultivosTomaPrint(tipo, deudaMax) {
                 padding: 4px 2px;
             ">${nombreFormateado}</th>`;
         });
-        
-        html += '<th style="width: 50px; background: #155724; color: white; font-size: 7pt; font-weight: bold; vertical-align: middle;">TOTAL</th>';
+        html += `<th style="width: 50px; background: #155724; color: ${esNoAptosPrint ? '#b30000' : 'white'}; font-size: 9.5pt; font-weight: bold; vertical-align: middle;">TOTAL</th>`;
         html += '</tr></thead>';
         
         // Cuerpo - AHORA EN EL ORDEN CORRECTO DE GRUPOS
@@ -4023,32 +4024,32 @@ function generarMatrizCultivosTomaPrint(tipo, deudaMax) {
             let totalToma = 0;
             
             html += `<tr style="background-color: ${bgColor};">`;
-            html += `<td style="font-weight: bold; font-size: 7.5pt; border-right: 1px solid #333; padding: 2px; text-align: center;">${toma}</td>`;
+            html += `<td style="font-weight: bold; font-size: 9.5pt; border-right: 1px solid #333; padding: 2px; text-align: center; color: ${esNoAptosPrint ? '#b30000' : '#000000'};">${toma}</td>`;
             
             cultivosGrupo.forEach(cultivo => {
                 const area = datosPorToma[toma][cultivo] || 0;
                 totalToma += area;
                 
                 if (area > 0) {
-                    html += `<td style="text-align: right; color: #000000; font-weight: 600; font-size: 7.5pt; padding: 2px;">${area.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right; color: #000000; font-weight: 700; font-size: 10.5pt; padding: 2px;">${area.toFixed(2)}</td>`;
                 } else {
-                    html += `<td style="text-align: center; color: #999; font-size: 7.5pt; padding: 2px;">-</td>`;
+                    html += `<td style="text-align: center; color: #999; font-size: 9.8pt; padding: 2px;">-</td>`;
                 }
             });
             
-            html += `<td style="text-align: right; font-weight: bold; background: #90EE90; color: #000000; font-size: 8pt; padding: 2px;">${totalToma.toFixed(2)}</td>`;
+            html += `<td style="text-align: right; font-weight: 800; background: transparent; color: ${esNoAptosPrint ? '#c75b5b' : '#000000'}; font-size: 10pt; padding: 2px;">${totalToma.toFixed(2)}</td>`;
         });
         
         // Fila de totales
-        html += '<tr style="background: #228B22; color: #000000; font-weight: bold;">';
-        html += '<td style="font-size: 8pt; padding: 2px; color: #000000; text-align: center; font-weight: bold;">TOTAL</td>';
+        html += `<tr style="background: ${esNoAptosPrint ? 'transparent' : '#228B22'}; color: #000000; font-weight: bold;">`;
+        html += `<td style="font-size: 10.5pt; padding: 2px; color: ${esNoAptosPrint ? '#c75b5b' : '#000000'}; text-align: center; font-weight: 900; background: ${esNoAptosPrint ? 'transparent' : '#228B22'};">TOTAL</td>`;
         
         cultivosGrupo.forEach(cultivo => {
             const total = totalesPorCultivo[cultivo];
-            html += `<td style="text-align: right; font-size: 7.5pt; padding: 2px; color: #000000; font-weight: bold;">${total.toFixed(2)}</td>`;
+            html += `<td style="text-align: right; font-size: 10.5pt; padding: 2px; color: ${esNoAptosPrint ? '#c75b5b' : '#000000'}; font-weight: 900;">${total.toFixed(2)}</td>`;
         });
         
-        html += `<td style="text-align: right; font-size: 8pt; padding: 2px; background-color: #006400 !important; color: #FFFFFF !important; font-weight: bold;">${granTotal.toFixed(2)}</td>`;
+        html += `<td style="text-align: right; font-size: 10pt; padding: 2px; background: ${esNoAptosPrint ? 'transparent' : '#006400'} !important; color: ${esNoAptosPrint ? '#c75b5b' : '#FFFFFF'} !important; font-weight: 800;">${granTotal.toFixed(2)}</td>`;
         html += '</tr>';
         
         html += '</tbody></table>';
@@ -4518,7 +4519,13 @@ function formatearNombreCultivoDosLineas(nombreCultivo) {
                 <title>Reporte Consolidado - CUSSHMI</title>
                 <style>
                     @page { size: landscape; margin: 5mm; }
-                    body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+                    body { margin: 0; padding: 0; font-family: Arial, sans-serif; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                    #printContainer, #printContainer * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                    #printContainer .encabezado-hoja h2 { font-size: 16pt !important; }
+                    #printContainer .encabezado-hoja p { font-size: 8.8pt !important; }
+                    #printContainer .stat-box h4 { font-size: 17pt !important; }
+                    #printContainer .report-table th { font-size: 10pt !important; }
+                    #printContainer .report-table td { font-size: 10pt !important; }
                     ${document.querySelector('style').innerHTML}
                 </style>
             </head>
@@ -4581,6 +4588,9 @@ function formatearNombreCultivoDosLineas(nombreCultivo) {
                 .header-print h1 { color:#0070c0; font-size: 18px; margin: 0 0 8px 0; }
                 .header-print h2 { color:#333; font-size: 14px; margin: 4px 0; }
                 .header-print p { color:#666; font-size: 11px; margin: 3px 0; }
+                .header-print .reporte-no-aptos { color:#dc3545; font-size: 13px; font-weight: bold; }
+                .header-print .toma-no-aptos { color:#dc3545; font-size: 13px; font-weight: bold; }
+                .deuda-total-no-aptos { color:#dc3545 !important; font-weight:bold; }
                 .report-table { width:100%; border-collapse:collapse; margin-top:12px; font-size: 11px; }
                 .report-table thead { background:#0070c0; color:#fff; }
                 .report-table th, .report-table td { border:1px solid #333; padding:6px; }
@@ -4593,8 +4603,8 @@ function formatearNombreCultivoDosLineas(nombreCultivo) {
             <div class="header-print">
                 <h1>COMISIÓN DE USUARIOS DEL SUB SECTOR HIDRÁULICO MARGEN IZQUIERDA</h1>
                 <h2>CUSSHMI - Unidad de Operación y Tarifas</h2>
-                <p><strong>REPORTE:</strong> ${tipoReporteSelect?.value === 'noAptos' ? 'USUARIOS SIN DERECHO DE USO DE RIEGO (CON DEUDA)' : 'USUARIOS CON DERECHO DE USO DE RIEGO'}</p>
-                <p><strong>TOMA:</strong> ${tomaSelect?.value || 'No especificada'}</p>
+                <p style="${tipoReporteSelect?.value === 'noAptos' ? 'color:#dc3545;font-size:16px;font-weight:700;' : 'color:#666;font-size:11px;'} margin:3px 0;"><strong>REPORTE:</strong> ${tipoReporteSelect?.value === 'noAptos' ? 'USUARIOS SIN DERECHO DE USO DE RIEGO (CON DEUDA)' : 'USUARIOS CON DERECHO DE USO DE RIEGO'}</p>
+                <p style="${tipoReporteSelect?.value === 'noAptos' ? 'color:#dc3545;font-size:16px;font-weight:700;' : 'color:#666;font-size:11px;'} margin:3px 0;"><strong>TOMA:</strong> ${tomaSelect?.value || 'No especificada'}</p>
                 <p><strong>Fecha de generación:</strong> ${new Date().toLocaleString('es-PE')}</p>
             </div>
             ${clon.innerHTML}
@@ -12794,3 +12804,11 @@ function exportarG3Excel() {
     </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
