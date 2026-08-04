@@ -10491,7 +10491,7 @@ function mostrarMensajeGuardadoExitoso(nombreToma, cantidadCultivos, totalTomas 
 // la interfaz como reforzado en las políticas de la base de datos.
 async function eliminarProgramacionTomaUI(tomaNombre) {
     if (!tomaNombre) return;
-    if (!esAdminOProgramador) { alert('Solo un administrador o programador puede eliminar una programación.'); return; }
+    if (!esAdmin) { alert('Solo un administrador puede eliminar una programación.'); return; }
 
     const confirmado = confirm(
         '¿Eliminar COMPLETAMENTE la programación de la toma "' + tomaNombre + '"?\n\n' +
@@ -10627,9 +10627,9 @@ async function mostrarConsolidadoDemandas() {
 
         ${bannerSemanaVencidaHtml(consolidadoDemandas[0]?.semanaInicio, consolidadoDemandas[0]?.semanaFin)}
 
-        ${esAdminOProgramador ? `
+        ${esAdmin ? `
         <div style="margin:0 0 15px;padding:10px 14px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <label style="font-size:12px;font-weight:600;color:#7a5c00;">🗑️ Eliminar una toma programada por error (admin o programador):</label>
+            <label style="font-size:12px;font-weight:600;color:#7a5c00;">🗑️ Eliminar una toma programada por error (solo administrador):</label>
             <select id="selectTomaEliminar" style="padding:5px;border-radius:4px;border:1px solid #ccc;">
                 ${consolidadoDemandas.map(t => `<option value="${t.toma}">${t.toma}</option>`).join('')}
             </select>
