@@ -10491,7 +10491,7 @@ function mostrarMensajeGuardadoExitoso(nombreToma, cantidadCultivos, totalTomas 
 // la interfaz como reforzado en las políticas de la base de datos.
 async function eliminarProgramacionTomaUI(tomaNombre) {
     if (!tomaNombre) return;
-    if (!esAdmin) { alert('Solo un administrador puede eliminar una programación.'); return; }
+    if (!esAdminOProgramador) { alert('Solo un administrador o programador puede eliminar una programación.'); return; }
 
     const confirmado = confirm(
         '¿Eliminar COMPLETAMENTE la programación de la toma "' + tomaNombre + '"?\n\n' +
@@ -10545,6 +10545,28 @@ async function eliminarProgramacionTomaUI(tomaNombre) {
     } else {
         volverAReporteActual();
     }
+}
+
+// Diego/Saúl (programadores) reportaron seguir viendo en el G2/Consolidado
+// la programación de la semana pasada aunque ya hubieran "actualizado".
+// No se pudo reproducir el paso exacto que hace cada uno, así que en vez de
+// adivinar se agrega esta advertencia visible en ambas pantallas: si la
+// semana que se está mostrando ya terminó (su fecha de fin ya pasó respecto
+// al reloj de esta misma computadora), es matemáticamente imposible que sea
+// "la semana que viene" — se avisa en rojo sin importar cuál haya sido la
+// causa (no se rehizo "Avance de Siembra", o el reloj del equipo está mal).
+function bannerSemanaVencidaHtml(semanaInicioISO, semanaFinISO) {
+    if (!semanaFinISO) return '';
+    const hoyISO = formatearFechaISO(new Date());
+    if (semanaFinISO >= hoyISO) return '';
+    return `
+        <div style="margin:10px 0 15px; padding:12px 16px; background:#f8d7da; border:2px solid #dc3545;
+            border-radius:6px; color:#721c24; font-weight:600; font-size:13px; text-align:center;">
+            ⚠️ ATENCIÓN: esta programación es de la semana del ${formatearFecha(semanaInicioISO)} al
+            ${formatearFecha(semanaFinISO)}, que <u>ya terminó</u>. Si estás esperando ver la semana que viene,
+            vuelve a hacer "Avance de Siembra" para generarla de nuevo — y revisa también la fecha/hora de
+            esta computadora (esquina inferior derecha de Windows), podría estar mal configurada.
+        </div>`;
 }
 
 async function mostrarConsolidadoDemandas() {
@@ -10603,9 +10625,11 @@ async function mostrarConsolidadoDemandas() {
             </div>
         </div>
 
-        ${esAdmin ? `
+        ${bannerSemanaVencidaHtml(consolidadoDemandas[0]?.semanaInicio, consolidadoDemandas[0]?.semanaFin)}
+
+        ${esAdminOProgramador ? `
         <div style="margin:0 0 15px;padding:10px 14px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <label style="font-size:12px;font-weight:600;color:#7a5c00;">🗑️ Eliminar una toma programada por error (solo administrador):</label>
+            <label style="font-size:12px;font-weight:600;color:#7a5c00;">🗑️ Eliminar una toma programada por error (admin o programador):</label>
             <select id="selectTomaEliminar" style="padding:5px;border-radius:4px;border:1px solid #ccc;">
                 ${consolidadoDemandas.map(t => `<option value="${t.toma}">${t.toma}</option>`).join('')}
             </select>
@@ -11230,8 +11254,10 @@ async function mostrarAnexoG2() {
             </div>
         </div>
 
+        ${bannerSemanaVencidaHtml(consolidadoDemandas[0]?.semanaInicio, consolidadoDemandas[0]?.semanaFin)}
+
         <div style="text-align:right; margin-bottom:10px;">
-            <button onclick="exportarAnexoG2AExcel()" 
+            <button onclick="exportarAnexoG2AExcel()"
                 style="background:#217346; color:white; border:none; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; margin-right:8px; font-size:12px;">
                 📊 Excel
             </button>
