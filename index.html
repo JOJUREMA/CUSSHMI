@@ -2561,6 +2561,37 @@ const COMISIONES = {
         // Procesar datos del workbook
         function procesarWorkbook() {
             tomasData = {};
+
+            // Cargar un Excel nuevo solo llena tomasData (padrón de usuarios por
+            // toma) — el Anexo G2/G3 se arma aparte, con "Avance de Siembra" ⇒
+            // confirmar semana ⇒ Cálculo de las Demandas, guardado en
+            // consolidadoDemandas/semanaPDA. Si esos quedaban de una carga
+            // anterior (otra semana), el Anexo G2 los seguía mostrando tal cual
+            // — sin ningún aviso — hasta que alguien rehiciera ese paso para la
+            // semana nueva. Se avisa acá en vez de dejarlo pasar en silencio:
+            // si ya hay algo programado en pantalla, se pregunta si es de la
+            // MISMA semana (se conserva) o de otra (se limpia, para que
+            // mostrarAnexoG2() no pueda mostrar un reporte desactualizado sin
+            // que quien cargó el Excel se dé cuenta).
+            if (consolidadoDemandas.length > 0 || semanaPDA?.fechaInicio) {
+                const semanaTexto = semanaPDA?.fechaInicio
+                    ? `la semana del ${formatearFecha(semanaPDA.fechaInicio)} al ${formatearFecha(semanaPDA.fechaFin)}`
+                    : 'una semana anterior';
+                const esNuevaSemana = confirm(
+                    `Ya hay una programación cargada en pantalla (Anexo G2/G3) para ${semanaTexto}.\n\n` +
+                    `¿Este Excel es para una SEMANA DISTINTA?\n\n` +
+                    `Sí = se borra esa programación de pantalla (tendrás que rehacer "Avance de Siembra" para la semana nueva).\n` +
+                    `No = se conserva tal cual (por ejemplo, si solo estás corrigiendo el padrón de usuarios de la misma semana).`
+                );
+                if (esNuevaSemana) {
+                    consolidadoDemandas = [];
+                    semanaPDA = { fechaInicio: null, fechaFin: null };
+                    window.usuariosG3 = {};
+                    window.turnosDeRiego = {};
+                    window._notaAnexoG2 = '';
+                }
+            }
+
             tomaSelect.innerHTML = '<option value="">-- Selecciona una toma --</option>';
             tomaSelect.innerHTML += '<option value="CONSOLIDADO">📊 TODAS LAS TOMAS (Consolidado)</option>';
 
