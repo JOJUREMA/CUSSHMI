@@ -255,12 +255,14 @@
                 select.appendChild(opt);
             });
 
-            // Por defecto se abre la semana que el PDA programa normalmente
-            // (lunes después del próximo jueves), no la semana calendario de
-            // hoy — así el celular coincide con lo que el escritorio acaba de
-            // programar en vez de mostrar "la semana pasada" por defecto.
-            select.value = semanaObjetivo;
-            cargarPda(semanaObjetivo);
+            // Por defecto se abre la semana calendario EN VIGENCIA (la que se
+            // está regando ahora mismo), no la semana que el PDA programa por
+            // adelantado — así coincide con lo que el personal de campo
+            // necesita ver la mayoría de los días. La semana del PDA (y
+            // cualquier otra con programación) queda disponible en el mismo
+            // desplegable, etiquetada, para quien quiera revisarla.
+            select.value = semanaActual;
+            cargarPda(semanaActual);
         }
 
         document.getElementById('selectSemana').addEventListener('change', function (e) {
