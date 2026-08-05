@@ -14424,19 +14424,14 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
     // cultivo puede tener caudal 0 en días donde otro cultivo sí riega (ej. ARROZ lunes-miércoles,
     // PLÁTANO jueves-domingo). Usar la lista de días de la toma completa haría que ese cultivo
     // quedara agendado en un día sin caudal propio, mostrando 0.0000 m³/s.
-    function ajustarADiaActivo(minAbs, claveCultivo) {
+    // Ventana de riego de un cultivo en un día concreto (offset desde el inicio de semana): desde
+    // cuándo hasta cuándo hay caudal declarado para ese cultivo ese día, según "HORAS DE RIEGO POR
+    // DÍA". Compartida entre ajustarADiaActivo (decide en qué día ARRANCA un turno nuevo) y
+    // saltarSiNoCabeEnElDia (decide si un turno CABE completo en lo que resta del día en que
+    // arrancó, más abajo).
+    function ventanaDiaCultivo(diaOffset, claveCultivo) {
         const diasDelCultivo = (claveCultivo && diasActivosPorCultivo[claveCultivo]) || diasActivosOffsets;
-        if (!diasDelCultivo) return minAbs;
-        // ⚠️ Cada día programado abre a las "horaInicioBaseMin" (normalmente 08:00) y
-        // dura 24h, es decir su ventana real va de 08:00 a 08:00 del día siguiente — NO
-        // coincide con el día calendario (medianoche a medianoche). Si un turno termina
-        // en la madrugada (ej. domingo 00:23), esos minutos siguen dentro de la ventana
-        // del día ANTERIOR (sábado 08:00 → domingo 08:00), no en la del domingo. Restar
-        // "horaInicioBaseMin" antes de dividir entre 1440 clasifica el minuto en la
-        // ventana de 24h a la que realmente pertenece, evitando un salto artificial
-        // hasta las 08:00 (que le restaba horas al cierre real de la semana).
-        const diaOffset = Math.floor((minAbs - horaInicioBaseMin) / 1440);
-        const esActivo = diasDelCultivo.indexOf(diaOffset) !== -1;
+        const esActivo = !diasDelCultivo || diasDelCultivo.indexOf(diaOffset) !== -1;
         const horasCultivoMap = horasPorCultivoPorDiaOffset[diaOffset];
         const horasCultivoEspecificas = claveCultivo && horasCultivoMap ? horasCultivoMap[claveCultivo] : undefined;
         const horasDia = Number.isFinite(horasCultivoEspecificas)
@@ -14463,6 +14458,22 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
 
         const inicioDelDia = diaOffset * 1440 + horaInicioBaseMin + desplazamientoMin;
         const finDelDia = inicioDelDia + horasDia * 60;
+        return { esActivo, inicioDelDia, finDelDia };
+    }
+
+    function ajustarADiaActivo(minAbs, claveCultivo) {
+        const diasDelCultivo = (claveCultivo && diasActivosPorCultivo[claveCultivo]) || diasActivosOffsets;
+        if (!diasDelCultivo) return minAbs;
+        // ⚠️ Cada día programado abre a las "horaInicioBaseMin" (normalmente 08:00) y
+        // dura 24h, es decir su ventana real va de 08:00 a 08:00 del día siguiente — NO
+        // coincide con el día calendario (medianoche a medianoche). Si un turno termina
+        // en la madrugada (ej. domingo 00:23), esos minutos siguen dentro de la ventana
+        // del día ANTERIOR (sábado 08:00 → domingo 08:00), no en la del domingo. Restar
+        // "horaInicioBaseMin" antes de dividir entre 1440 clasifica el minuto en la
+        // ventana de 24h a la que realmente pertenece, evitando un salto artificial
+        // hasta las 08:00 (que le restaba horas al cierre real de la semana).
+        const diaOffset = Math.floor((minAbs - horaInicioBaseMin) / 1440);
+        const { esActivo, inicioDelDia, finDelDia } = ventanaDiaCultivo(diaOffset, claveCultivo);
         // Sigue dentro de la ventana activa de este cultivo — pero nunca antes de que empiece
         // su propio turno (relevante solo en días por turnos, donde el cursor puede llegar
         // "temprano" heredado del inicio común del día).
@@ -14470,6 +14481,26 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         // Buscar el siguiente día activo PARA ESTE CULTIVO y saltar directamente a su hora de inicio
         const siguiente = diasDelCultivo.find(o => o > diaOffset);
         if (siguiente === undefined) return minAbs; // no hay más días programados para este cultivo: se deja tal cual
+        return siguiente * 1440 + horaInicioBaseMin;
+    }
+
+    // ⚠️ Bug reportado: un turno automático (no simultáneo) que ARRANCA dentro de la ventana del
+    // día (porque otro usuario ya consumió parte de esas horas) podía seguir entregando agua más
+    // allá de las horas que "HORAS DE RIEGO POR DÍA" declaró para ese día — ej. quedaban 0.75h el
+    // martes pero el turno completo (3.75h) se quedaba entero el martes, de 10:15 a 14:00, en vez
+    // de pasar al viernes. Si el turno completo no cabe en lo que resta del día en que arrancó, se
+    // mueve ENTERO al siguiente día activo del cultivo (no se parte entre dos días — así lo pidió
+    // el usuario). Si tampoco cabe entero en ningún día siguiente, se deja en el último día
+    // probado tal cual (mismo respaldo que el comportamiento anterior, para no dejar un turno sin
+    // horario).
+    function saltarSiNoCabeEnElDia(inicioMinAbs, tiempoMinNecesarios, claveCultivo) {
+        const diasDelCultivo = (claveCultivo && diasActivosPorCultivo[claveCultivo]) || diasActivosOffsets;
+        if (!diasDelCultivo) return inicioMinAbs; // sin restricción por día: comportamiento anterior
+        const diaOffset = Math.floor((inicioMinAbs - horaInicioBaseMin) / 1440);
+        const { esActivo, finDelDia } = ventanaDiaCultivo(diaOffset, claveCultivo);
+        if (!esActivo || inicioMinAbs + tiempoMinNecesarios <= finDelDia + 0.01) return inicioMinAbs;
+        const siguiente = diasDelCultivo.find(o => o > diaOffset);
+        if (siguiente === undefined) return inicioMinAbs; // no hay más días activos: se deja tal cual
         return siguiente * 1440 + horaInicioBaseMin;
     }
 
@@ -14488,7 +14519,6 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         // de SU PROPIO cultivo (ajustado para saltar al siguiente día activo si ya se agotaron las
         // horas del día actual).
         let inicioMinAbs = esParalelo ? minutosInicio[uIdx - 1] : ajustarADiaActivo(cursorPorCultivo[claveCultivoActual], claveCultivoActual);
-        minutosInicio[uIdx] = inicioMinAbs;
 
         // Si inicia un grupo, calcular cuántos riegan simultáneamente (grupo = usuario actual + consecutivos con checkbox)
         if (!esParalelo) {
@@ -14507,29 +14537,45 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         // Misma clasificación por ventana de 24h (08:00→08:00) que usa ajustarADiaActivo,
         // no por día calendario — para que un inicio en la madrugada siga tomando el
         // caudal del día programado al que realmente pertenece su turno.
-        const diaOffsetUsuario = Math.floor((inicioMinAbs - horaInicioBaseMin) / 1440);
-        const mapaCultivoDelDia = toma.caudalPorCultivoPorDiaOffset ? toma.caudalPorCultivoPorDiaOffset[diaOffsetUsuario] : null;
-        const claveCultivoUsuario = _normCultivo(u.cultivo);
-        const caudalCultivoUsuario = (mapaCultivoDelDia && Number.isFinite(mapaCultivoDelDia[claveCultivoUsuario]))
-            ? mapaCultivoDelDia[claveCultivoUsuario]
-            : null;
-        const caudalDelDia = (caudalCultivoUsuario !== null)
-            ? caudalCultivoUsuario
-            : ((toma.caudalPorDiaOffset && Number.isFinite(toma.caudalPorDiaOffset[diaOffsetUsuario]))
-                ? toma.caudalPorDiaOffset[diaOffsetUsuario]
-                : caudalTotalM3s); // sin programación diaria/por cultivo detallada: se conserva el comportamiento anterior
+        //
+        // El caudal/tiempo dependen de en qué día cae inicioMinAbs, y si el turno automático no
+        // cabe entero en lo que resta de ese día, inicioMinAbs se mueve al siguiente día activo
+        // (saltarSiNoCabeEnElDia) — lo que a su vez puede cambiar el caudal del día y por tanto el
+        // tiempo necesario. Se reintenta hasta que el turno quede en un día donde cabe entero, o
+        // hasta agotar los días activos del cultivo (máximo 8 intentos, más que suficiente para
+        // una semana de 7 días).
+        let diaOffsetUsuario, caudalDelDia, caudalUsuarioAuto, tiempoHrsAuto;
+        for (let intento = 0; intento < 8; intento++) {
+            diaOffsetUsuario = Math.floor((inicioMinAbs - horaInicioBaseMin) / 1440);
+            const mapaCultivoDelDia = toma.caudalPorCultivoPorDiaOffset ? toma.caudalPorCultivoPorDiaOffset[diaOffsetUsuario] : null;
+            const claveCultivoUsuario = _normCultivo(u.cultivo);
+            const caudalCultivoUsuario = (mapaCultivoDelDia && Number.isFinite(mapaCultivoDelDia[claveCultivoUsuario]))
+                ? mapaCultivoDelDia[claveCultivoUsuario]
+                : null;
+            caudalDelDia = (caudalCultivoUsuario !== null)
+                ? caudalCultivoUsuario
+                : ((toma.caudalPorDiaOffset && Number.isFinite(toma.caudalPorDiaOffset[diaOffsetUsuario]))
+                    ? toma.caudalPorDiaOffset[diaOffsetUsuario]
+                    : caudalTotalM3s); // sin programación diaria/por cultivo detallada: se conserva el comportamiento anterior
 
-        // ⚠️ Diagnóstico: si el día SÍ tiene desglose por cultivo pero el cultivo de este usuario
-        // no aparece en él, se está usando el caudal total del día como respaldo — avisar para
-        // poder corregir la programación en "HORAS DE RIEGO POR DÍA".
-        if (mapaCultivoDelDia && caudalCultivoUsuario === null) {
-            console.warn(`⚠️ G3 [${toma.nombreToma}]: el usuario "${u.nombre}" (cultivo "${u.cultivo}") no tiene caudal programado para su cultivo el día correspondiente; se usó el caudal total del día como respaldo.`);
-            window._g3AvisosCaudalCultivo = window._g3AvisosCaudalCultivo || {};
-            window._g3AvisosCaudalCultivo[tomaIdx] = (window._g3AvisosCaudalCultivo[tomaIdx] || 0) + 1;
+            // ⚠️ Diagnóstico: si el día SÍ tiene desglose por cultivo pero el cultivo de este usuario
+            // no aparece en él, se está usando el caudal total del día como respaldo — avisar para
+            // poder corregir la programación en "HORAS DE RIEGO POR DÍA".
+            if (mapaCultivoDelDia && caudalCultivoUsuario === null) {
+                console.warn(`⚠️ G3 [${toma.nombreToma}]: el usuario "${u.nombre}" (cultivo "${u.cultivo}") no tiene caudal programado para su cultivo el día correspondiente; se usó el caudal total del día como respaldo.`);
+                window._g3AvisosCaudalCultivo = window._g3AvisosCaudalCultivo || {};
+                window._g3AvisosCaudalCultivo[tomaIdx] = (window._g3AvisosCaudalCultivo[tomaIdx] || 0) + 1;
+            }
+
+            caudalUsuarioAuto = currentGroupLen > 0 ? (caudalDelDia / currentGroupLen) : 0;
+            tiempoHrsAuto     = caudalUsuarioAuto > 0 ? u.volCorregido / caudalUsuarioAuto / 3600 : 0;
+
+            if (esParalelo) break; // los turnos simultáneos siempre comparten el inicio del líder, nunca cambian de día
+            const inicioAjustado = saltarSiNoCabeEnElDia(inicioMinAbs, tiempoHrsAuto * 60, claveCultivoActual);
+            if (inicioAjustado === inicioMinAbs) break; // cabe entero en este día (o no hay más días activos): listo
+            inicioMinAbs = inicioAjustado; // se movió entero al siguiente día activo: recalcular caudal/tiempo para ese día
         }
-
-        const caudalUsuarioAuto = currentGroupLen > 0 ? (caudalDelDia / currentGroupLen) : 0;
-        const tiempoHrsAuto     = caudalUsuarioAuto > 0 ? u.volCorregido / caudalUsuarioAuto / 3600 : 0;
+        minutosInicio[uIdx] = inicioMinAbs;
 
         const manualOn = !!document.getElementById('chkEdicionManualG3')?.checked;
         const override = u?._manualOverride || null; // {enabled, caudalM3s, tiempoHrs, overrideCaudal}
