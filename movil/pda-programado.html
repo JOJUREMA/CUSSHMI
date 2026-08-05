@@ -200,6 +200,30 @@
             return y + '-' + m + '-' + d;
         }
 
+        // El PDA no se programa para "la semana calendario actual" — el flujo
+        // normal de escritorio (calcularSemanaEvaluacionAutomatica, botón
+        // "Avance de Siembra") siempre programa la semana que EMPIEZA el lunes
+        // después del próximo jueves. Si el móvil abría por defecto la semana
+        // calendario de hoy (obtenerLunesActual), casi siempre mostraba "la
+        // semana pasada" en vez de lo recién programado — se reportó
+        // exactamente así: se programó la semana del 10/08 al 16/08, pero el
+        // celular abría la semana del 03/08 al 09/08 por defecto. Replica acá
+        // el mismo cálculo del escritorio para que el móvil abra, por defecto,
+        // la misma semana que el escritorio acaba de programar.
+        function calcularSemanaObjetivoPorDefecto() {
+            var hoy = new Date();
+            var diaSemana = hoy.getDay();
+            var fechaHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+            var diasParaJueves = 4 - diaSemana;
+            if (diasParaJueves < 0) diasParaJueves += 7;
+            var fechaInicio = new Date(fechaHoy);
+            fechaInicio.setDate(fechaHoy.getDate() + diasParaJueves + 4);
+            var y = fechaInicio.getFullYear();
+            var m = String(fechaInicio.getMonth() + 1).padStart(2, '0');
+            var d = String(fechaInicio.getDate()).padStart(2, '0');
+            return y + '-' + m + '-' + d;
+        }
+
         // Arma el selector con la semana actual (siempre primera, aunque
         // todavía no tenga nada guardado) más las semanas que sí tienen
         // programación confirmada — antes solo se podía ver la semana
@@ -207,11 +231,15 @@
         async function poblarSelectorSemanas() {
             var select = document.getElementById('selectSemana');
             var semanaActual = obtenerLunesActual();
+            var semanaObjetivo = calcularSemanaObjetivoPorDefecto();
 
             var resultado = await CusshmiDatos.listarSemanasConProgramacion(comisionKeyActual);
             var semanas = (resultado.ok && resultado.semanas) ? resultado.semanas : [];
             if (!semanas.some(function (s) { return s.semanaInicio === semanaActual; })) {
-                semanas.unshift({ semanaInicio: semanaActual, semanaFin: null, esActual: true });
+                semanas.unshift({ semanaInicio: semanaActual, semanaFin: null });
+            }
+            if (semanaObjetivo !== semanaActual && !semanas.some(function (s) { return s.semanaInicio === semanaObjetivo; })) {
+                semanas.unshift({ semanaInicio: semanaObjetivo, semanaFin: null });
             }
 
             select.innerHTML = '';
@@ -219,12 +247,20 @@
                 var opt = document.createElement('option');
                 opt.value = s.semanaInicio;
                 var etiqueta = 'Semana del ' + formatearFecha(s.semanaInicio) + (s.semanaFin ? ' al ' + formatearFecha(s.semanaFin) : '');
-                if (s.semanaInicio === semanaActual) etiqueta += ' (actual)';
+                var sufijos = [];
+                if (s.semanaInicio === semanaActual) sufijos.push('semana calendario actual');
+                if (s.semanaInicio === semanaObjetivo) sufijos.push('semana del PDA');
+                if (sufijos.length) etiqueta += ' (' + sufijos.join(' — ') + ')';
                 opt.textContent = etiqueta;
                 select.appendChild(opt);
             });
 
-            cargarPda(semanaActual);
+            // Por defecto se abre la semana que el PDA programa normalmente
+            // (lunes después del próximo jueves), no la semana calendario de
+            // hoy — así el celular coincide con lo que el escritorio acaba de
+            // programar en vez de mostrar "la semana pasada" por defecto.
+            select.value = semanaObjetivo;
+            cargarPda(semanaObjetivo);
         }
 
         document.getElementById('selectSemana').addEventListener('change', function (e) {
