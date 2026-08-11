@@ -231,6 +231,18 @@
                     <label for="inputCutExpediente">CUT del expediente en trámite</label>
                     <input type="text" id="inputCutExpediente" autocomplete="off">
                 </div>
+                <div class="campo">
+                    <label for="inputCanalDerivacion">Canal de derivación</label>
+                    <input type="text" id="inputCanalDerivacion" autocomplete="off">
+                </div>
+                <div class="campo">
+                    <label for="inputFuenteAgua">Fuente de agua</label>
+                    <input type="text" id="inputFuenteAgua" autocomplete="off">
+                </div>
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputTipoUso">Tipo de uso</label>
+                <input type="text" id="inputTipoUso" autocomplete="off" placeholder="ej. Agrario">
             </div>
             <div class="indicador-clasificacion" id="indicadorClasificacion" style="display:none;"></div>
 
@@ -449,6 +461,9 @@
                 claseDerecho: '',
                 volumenM3Anio: '',
                 cutExpediente: '',
+                tipoUso: 'Agrario', // valor típico en una Junta de Usuarios de riego; queda editable
+                canalDerivacion: '',
+                fuenteAgua: '',
                 clasificacion: '',
                 estadoPredio: '',
                 observaciones: '',
@@ -467,6 +482,7 @@
                 base.numeroDocumento = coincidencia.numero_documento || '';
                 base.areaTotalHa = coincidencia.area_total_ha != null ? coincidencia.area_total_ha : '';
                 base.areaBajoRiegoHa = coincidencia.area_bajo_riego_ha != null ? coincidencia.area_bajo_riego_ha : '';
+                base.tipoUso = coincidencia.tipo_uso || base.tipoUso;
                 base.tieneDerecho = coincidencia.numero_resolucion ? 'si' : '';
                 base.numeroResolucion = coincidencia.numero_resolucion || '';
                 base.claseDerecho = coincidencia.clase_derecho || '';
@@ -498,6 +514,9 @@
                     claseDerecho: r.clase_derecho || '',
                     volumenM3Anio: r.volumen_m3_anio != null ? r.volumen_m3_anio : '',
                     cutExpediente: r.cut_expediente || '',
+                    tipoUso: r.tipo_uso || '',
+                    canalDerivacion: r.canal_derivacion || '',
+                    fuenteAgua: r.fuente_agua || '',
                     clasificacion: r.clasificacion || '',
                     estadoPredio: r.estado_predio || '',
                     observaciones: r.observaciones || '',
@@ -534,6 +553,9 @@
             document.getElementById('inputClaseDerecho').value = registroActual.claseDerecho;
             document.getElementById('inputVolumenM3Anio').value = registroActual.volumenM3Anio;
             document.getElementById('inputCutExpediente').value = registroActual.cutExpediente;
+            document.getElementById('inputCanalDerivacion').value = registroActual.canalDerivacion;
+            document.getElementById('inputFuenteAgua').value = registroActual.fuenteAgua;
+            document.getElementById('inputTipoUso').value = registroActual.tipoUso;
             document.getElementById('selectEstadoPredio').value = registroActual.estadoPredio;
             document.getElementById('textareaObservaciones').value = registroActual.observaciones;
 
@@ -549,7 +571,8 @@
                 'inputApellidosNombres', 'selectTipoDocumento', 'inputNumeroDocumento', 'inputUnidadCatastral',
                 'inputAreaTotal', 'inputAreaBajoRiego', 'selectTipoRiego', 'inputCultivoActual',
                 'selectTieneDerecho', 'inputNumeroResolucion', 'inputClaseDerecho', 'inputVolumenM3Anio',
-                'inputCutExpediente', 'selectEstadoPredio', 'textareaObservaciones',
+                'inputCutExpediente', 'inputCanalDerivacion', 'inputFuenteAgua', 'inputTipoUso',
+                'selectEstadoPredio', 'textareaObservaciones',
             ].forEach(function (id) { document.getElementById(id).disabled = bloqueado; });
         }
 
@@ -611,6 +634,9 @@
         enlazarCampo('inputClaseDerecho', 'claseDerecho');
         enlazarCampo('inputVolumenM3Anio', 'volumenM3Anio');
         enlazarCampo('inputCutExpediente', 'cutExpediente');
+        enlazarCampo('inputCanalDerivacion', 'canalDerivacion');
+        enlazarCampo('inputFuenteAgua', 'fuenteAgua');
+        enlazarCampo('inputTipoUso', 'tipoUso');
         enlazarCampo('textareaObservaciones', 'observaciones');
 
         document.getElementById('inputAreaTotal').addEventListener('input', actualizarAvisoArea);
@@ -693,7 +719,10 @@
                 html += filaResumen('Volumen (m³/año)', r.volumenM3Anio);
             } else if (r.tieneDerecho === 'no' || r.tieneDerecho === 'no_sabe') {
                 html += filaResumen('CUT expediente', r.cutExpediente);
+                html += filaResumen('Canal de derivación', r.canalDerivacion);
+                html += filaResumen('Fuente de agua', r.fuenteAgua);
             }
+            html += filaResumen('Tipo de uso', r.tipoUso);
             html += filaResumen('Clasificación', r.clasificacion);
             html += filaResumen('Estado del predio', ETIQUETAS_ESTADO_PREDIO[r.estadoPredio] || '-');
             html += filaResumen('Observaciones', r.observaciones);
@@ -736,6 +765,9 @@
                     unidadCatastral: registroActual.unidadCatastral,
                     areaTotalHa: registroActual.areaTotalHa,
                     areaBajoRiegoHa: registroActual.areaBajoRiegoHa,
+                    tipoUso: registroActual.tipoUso,
+                    canalDerivacion: registroActual.canalDerivacion,
+                    fuenteAgua: registroActual.fuenteAgua,
                 });
                 if (incorporado.ok) {
                     registroActual._a1Incorporado = true;
