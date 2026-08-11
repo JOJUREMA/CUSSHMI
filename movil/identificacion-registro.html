@@ -263,7 +263,8 @@
             </div>
 
             <div class="estado-busqueda" id="estadoGuardadoFormulario"></div>
-            <button class="boton" id="btnContinuarConfirmacion" style="max-width:420px;">Continuar →</button>
+            <button class="boton-secundario" id="btnVolverABusquedaAbajo" style="max-width:420px; margin-top:6px;">← Volver a la búsqueda</button>
+            <button class="boton" id="btnContinuarConfirmacion" style="max-width:420px; margin-top:10px;">Continuar →</button>
         </div>
 
         <!-- ── Pantalla 5: confirmación ── -->
@@ -282,6 +283,7 @@
             <div class="estado-busqueda" id="estadoConfirmacion"></div>
             <button class="boton" id="btnConfirmarGuardar" style="max-width:420px; margin-top:10px;">✔ Confirmar y guardar</button>
             <button class="boton-secundario" id="btnDesbloquear" style="max-width:420px; display:none;">🔓 Desbloquear (admin)</button>
+            <button class="boton-secundario" id="btnVolverAFormularioAbajo" style="max-width:420px; margin-top:10px;">← Volver al formulario</button>
         </div>
     </div>
 
@@ -719,7 +721,11 @@
             autoguardar();
         });
 
-        document.getElementById('btnVolverABusqueda').addEventListener('click', async function () {
+        // Botón de "volver" duplicado arriba y abajo del formulario — es un
+        // formulario largo (Secciones A-F) y el de arriba queda fuera de
+        // vista al desplazarse, así que sin el de abajo no había forma
+        // visible de volver sin desplazarse hasta el principio.
+        async function volverABusqueda() {
             // Guarda de inmediato lo tecleado antes de salir — el autoguardado
             // tiene 1s de espera y podría no haber alcanzado a disparar todavía.
             if (registroActual && !registroActual.confirmado && registroActual.apellidosNombres && registroActual.apellidosNombres.trim()) {
@@ -727,7 +733,9 @@
             }
             document.getElementById('vistaFormulario').style.display = 'none';
             abrirToma(tomaSeleccionada); // refresca padrón/registros para que los badges queden al día
-        });
+        }
+        document.getElementById('btnVolverABusqueda').addEventListener('click', volverABusqueda);
+        document.getElementById('btnVolverABusquedaAbajo').addEventListener('click', volverABusqueda);
 
         document.getElementById('btnContinuarConfirmacion').addEventListener('click', async function () {
             if (!registroActual.confirmado) {
@@ -793,11 +801,17 @@
             document.getElementById('estadoConfirmacion').textContent = '';
         }
 
-        document.getElementById('btnVolverAFormulario').addEventListener('click', function () {
+        // Mismo criterio que arriba: botón duplicado arriba y abajo del
+        // resumen — repinta el formulario con lo que ya está en
+        // registroActual (nada se pierde), para que el sectorista pueda
+        // corregir un error que note al revisar el resumen.
+        function volverAFormulario() {
             document.getElementById('vistaConfirmacion').style.display = 'none';
             pintarFormularioDesdeRegistro();
             document.getElementById('vistaFormulario').style.display = 'flex';
-        });
+        }
+        document.getElementById('btnVolverAFormulario').addEventListener('click', volverAFormulario);
+        document.getElementById('btnVolverAFormularioAbajo').addEventListener('click', volverAFormulario);
 
         document.getElementById('btnConfirmarGuardar').addEventListener('click', async function () {
             var elEstado = document.getElementById('estadoConfirmacion');
