@@ -809,12 +809,44 @@
                 CusshmiAuditoria.registrarAuditoria('Confirmación', 'Identificación y registro', registroActual.apellidosNombres + ' — Toma ' + registroActual.tomaNombre);
             }
 
-            // Anexo A-2 (sin derecho formalizado): si este usuario no estaba
-            // ya en el padrón oficial A-1, se incorpora con la observación
-            // "Remitir a la Junta", tal como lo pidió el usuario — solo una
-            // vez por registro (_a1Incorporado evita duplicar en reconfirmaciones).
+            // El padrón A-1 (oficial u ya incorporado desde campo) se carga
+            // UNA sola vez; de ahí en más el flujo es en un solo sentido:
+            // lo que el sectorista verifica/corrige en campo alimenta de
+            // vuelta esa fila — el padrón nunca vuelve a sobrescribir lo ya
+            // confirmado en campo. Se busca de nuevo acá (no se confía en
+            // _a1Encontrado, que solo vive en memoria y se pierde si el
+            // registro se reabre más tarde) para decidir entre actualizar
+            // una fila existente o incorporar una nueva.
             var mensajeIncorporacion = '';
-            if (registroActual.clasificacion === 'A-2' && !registroActual._a1Incorporado) {
+            var padronA1Actual = await obtenerPadronA1();
+            var coincidenciaA1 = emparejarConPadronA1(padronA1Actual, registroActual.unidadCatastral, registroActual.apellidosNombres);
+
+            if (coincidenciaA1) {
+                var actualizado = await CusshmiDatos.actualizarPadronOficialA1DesdeRegistro({
+                    comisionKey: comisionKeyActual,
+                    unidadCatastral: coincidenciaA1.unidad_catastral || registroActual.unidadCatastral,
+                    apellidosNombres: registroActual.apellidosNombres,
+                    tipoDocumento: registroActual.tipoDocumento,
+                    numeroDocumento: registroActual.numeroDocumento,
+                    areaTotalHa: registroActual.areaTotalHa,
+                    areaBajoRiegoHa: registroActual.areaBajoRiegoHa,
+                    numeroResolucion: registroActual.numeroResolucion,
+                    claseDerecho: registroActual.claseDerecho,
+                    tipoUso: registroActual.tipoUso,
+                    volumenM3Anio: registroActual.volumenM3Anio,
+                    tomaNombre: registroActual.tomaNombre,
+                });
+                if (actualizado.ok) {
+                    mensajeIncorporacion = 'Datos verificados en campo actualizados en el padrón A-1.';
+                } else {
+                    mensajeIncorporacion = '⚠️ No se pudo actualizar el padrón A-1: ' + actualizado.error;
+                }
+            } else if (registroActual.clasificacion === 'A-2' && !registroActual._a1Incorporado) {
+                // Anexo A-2 (sin derecho formalizado): si este usuario no
+                // estaba ya en el padrón oficial A-1, se incorpora con la
+                // observación "Remitir a la Junta", tal como lo pidió el
+                // usuario — solo una vez por registro (_a1Incorporado evita
+                // duplicar en reconfirmaciones).
                 var incorporado = await CusshmiDatos.incorporarUsuarioNuevoAPadronOficialA1({
                     comisionKey: comisionKeyActual,
                     apellidosNombres: registroActual.apellidosNombres,
@@ -831,7 +863,6 @@
                 });
                 if (incorporado.ok) {
                     registroActual._a1Incorporado = true;
-                    padronA1Promesa = null; // forzar recarga del padrón A-1 en la próxima toma para que ya lo reconozca
                     mensajeIncorporacion = 'Incorporado al padrón A-1 con la observación "Remitir a la Junta".';
                 } else {
                     // No bloquea la confirmación (ya quedó guardada) — se
@@ -840,6 +871,7 @@
                     mensajeIncorporacion = '⚠️ No se pudo incorporar al padrón A-1: ' + incorporado.error;
                 }
             }
+            padronA1Promesa = null; // forzar recarga del padrón A-1 en la próxima toma para que refleje lo recién guardado
 
             mostrarConfirmacion();
             if (mensajeIncorporacion) document.getElementById('estadoConfirmacion').textContent = mensajeIncorporacion;

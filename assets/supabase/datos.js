@@ -1102,6 +1102,52 @@
         return { ok: true };
     }
 
+    // El padrón A-1 (oficial u ya incorporado) se carga UNA VEZ, pero un
+    // usuario que YA estaba ahí puede tener datos desactualizados o mal
+    // digitados en el Excel de origen — el sectorista los verifica/corrige
+    // en campo. Al confirmar (una sola vez, no en cada autoguardado) esos
+    // valores verificados alimentan de vuelta la fila del padrón que ya
+    // existía, SIN tocar `origen` ni `observacion` (no cambia si es un
+    // usuario del RADA o uno incorporado desde campo — eso no lo decide
+    // esta verificación). Requiere unidad_catastral (es la clave con la que
+    // se localiza la fila a actualizar); si no hay, no hace nada.
+    async function actualizarPadronOficialA1DesdeRegistro(datos) {
+        if (!datos || !datos.comisionKey || !datos.unidadCatastral) return { ok: true, actualizado: false };
+        const comisionId = await resolverComisionId(datos.comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + datos.comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const cambios = {
+            apellidos_nombres: datos.apellidosNombres,
+            tipo_documento: datos.tipoDocumento || null,
+            numero_documento: datos.numeroDocumento || null,
+            area_total_ha: Number.isFinite(parseFloat(datos.areaTotalHa)) ? parseFloat(datos.areaTotalHa) : null,
+            area_bajo_riego_ha: Number.isFinite(parseFloat(datos.areaBajoRiegoHa)) ? parseFloat(datos.areaBajoRiegoHa) : null,
+            numero_resolucion: datos.numeroResolucion || null,
+            clase_derecho: datos.claseDerecho || null,
+            tipo_uso: datos.tipoUso || null,
+            volumen_m3: Number.isFinite(parseFloat(datos.volumenM3Anio)) ? parseFloat(datos.volumenM3Anio) : null,
+            toma_nombre: datos.tomaNombre || null,
+            actualizado_por: usuarioId,
+        };
+
+        const { data, error } = await client.from('padron_oficial_a1')
+            .update(cambios)
+            .eq('comision_id', comisionId)
+            .eq('unidad_catastral', datos.unidadCatastral)
+            .select('id');
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, actualizado: (data || []).length > 0 };
+    }
+
     window.CusshmiDatos = {
         cargarNotaAnexoG2,
         guardarNotaAnexoG2,
@@ -1135,5 +1181,6 @@
         cargarPadronOficialA1,
         cargarPadronOficialA1CompletoParaExportar,
         incorporarUsuarioNuevoAPadronOficialA1,
+        actualizarPadronOficialA1DesdeRegistro,
     };
 })();
