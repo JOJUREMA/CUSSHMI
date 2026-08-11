@@ -11,6 +11,7 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="stylesheet" href="estilos.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script src="../assets/supabase/supabase-config.js"></script>
@@ -24,6 +25,8 @@
     <script src="../assets/core/clasificacion.js"></script>
     <script src="../assets/core/utilidades.js"></script>
     <script src="../assets/core/anexoG2.js"></script>
+    <script src="../assets/core/mapa.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
         .fila-linea-tiempo {
@@ -89,6 +92,32 @@
             margin-right: 5px;
             vertical-align: middle;
         }
+        #mapaSeguimiento {
+            width: 100%;
+            max-width: 420px;
+            height: 50vh;
+            border-radius: 10px;
+            margin-top: 18px;
+            display: none;
+        }
+        #panelPredioSeguimiento {
+            width: 100%;
+            max-width: 420px;
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(200, 168, 75, 0.4);
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-top: 12px;
+            display: none;
+        }
+        .leyenda-mapa-seguimiento {
+            width: 100%;
+            max-width: 420px;
+            font-size: 10.5px;
+            opacity: 0.7;
+            margin: 8px 0 4px;
+            line-height: 1.5;
+        }
     </style>
 </head>
 <body>
@@ -113,6 +142,16 @@
         <div class="estado-busqueda" id="estadoSeguimiento"></div>
         <div class="reloj-en-vivo" id="relojEnVivo"></div>
         <div id="lineaTiempoContainer" style="width:100%; display:flex; flex-direction:column; align-items:center; margin-top:8px;"></div>
+
+        <div class="estado-busqueda" id="estadoMapaSeguimiento"></div>
+        <div id="mapaSeguimiento"></div>
+        <div id="panelPredioSeguimiento"></div>
+        <div class="leyenda-mapa-seguimiento" id="leyendaMapaSeguimiento" style="display:none;">
+            Predios de los usuarios de la lista de arriba, coloreados según su
+            estado. El polígono viene del levantamiento GIS (mapas/*.kml); si
+            un usuario no tiene predio mapeado todavía, no aparece en el mapa
+            pero sí en la lista.
+        </div>
     </div>
 
     <script>
@@ -126,6 +165,20 @@
         var elEstado = document.getElementById('estadoSeguimiento');
         var elReloj = document.getElementById('relojEnVivo');
         var elLineaTiempo = document.getElementById('lineaTiempoContainer');
+
+        // ── Mapa de predios, embebido al final de la lista (antes era la
+        // pantalla aparte movil/mapa.html) — a pedido del usuario, muestra
+        // solo los predios de los usuarios QUE YA ESTÁN en la lista de
+        // seguimiento de arriba (no todos los predios de la toma), así que
+        // se actualiza solo con cambiar de toma/semana, igual que la lista.
+        var elEstadoMapa = document.getElementById('estadoMapaSeguimiento');
+        var elMapaContainer = document.getElementById('mapaSeguimiento');
+        var elPanelPredio = document.getElementById('panelPredioSeguimiento');
+        var elLeyendaMapa = document.getElementById('leyendaMapaSeguimiento');
+        var mapaLeaflet = null;
+        var capaSatelital = null;
+        var capaPredios = null;
+        var prediosPorTomaCache = {}; // { tomaNombre: predios[] } — el KML no cambia entre refrescos de 30s
 
         function obtenerLunesActual() {
             var hoy = new Date();
@@ -243,6 +296,7 @@
 
             if (usuarios.length === 0) {
                 elEstado.textContent = 'No hay usuarios con horario confirmado para esta toma todavía.';
+                renderizarMapaSeguimiento(null, []);
                 return;
             }
 
@@ -290,6 +344,154 @@
                     '<div style="font-size:11.5px; opacity:0.85; margin-top:4px;">' + detalle + '</div>';
                 elLineaTiempo.appendChild(fila);
             });
+
+            renderizarMapaSeguimiento(tomaSeleccionada, conEstado);
+        }
+
+        // Colores del mapa por ESTADO de riego (no por cultivo, a diferencia
+        // del antiguo Mapa de predios) — mismos colores que los badges de la
+        // lista de arriba, para que un vistazo al mapa y a la lista se lean
+        // igual.
+        var COLOR_POR_ESTADO_MAPA = {
+            'en-curso':    { bg: 'rgba(200, 168, 75, 0.35)', border: '#c8a84b' },
+            'proximo':     { bg: 'rgba(37, 99, 235, 0.30)',  border: '#2563eb' },
+            'finalizado':  { bg: 'rgba(71, 85, 105, 0.25)',  border: '#475569' },
+            'sin-horario': { bg: 'rgba(192, 57, 43, 0.30)',  border: '#c0392b' }
+        };
+
+        async function obtenerPrediosDeToma(tomaNombre) {
+            if (prediosPorTomaCache[tomaNombre]) return prediosPorTomaCache[tomaNombre];
+            var archivos = (typeof KML_POR_TOMA !== 'undefined' && KML_POR_TOMA[tomaNombre]) || [];
+            if (archivos.length === 0) {
+                prediosPorTomaCache[tomaNombre] = [];
+                return [];
+            }
+            var listas = await Promise.all(archivos.map(function (nombreArchivo) {
+                return fetch('../mapas/' + nombreArchivo).then(function (resp) {
+                    if (!resp.ok) throw new Error('No se pudo descargar ' + nombreArchivo);
+                    return resp.text();
+                }).then(function (texto) { return parsearKmlATomas(texto); });
+            }));
+            var todos = [].concat.apply([], listas);
+            var predios = filtrarPorToma(todos, tomaNombre);
+            prediosPorTomaCache[tomaNombre] = predios;
+            return predios;
+        }
+
+        // Empareja un predio del KML con un usuario de ESTA lista de
+        // seguimiento (no con el padrón completo) — primero por unidad
+        // catastral, si no por nombre normalizado. Mismo criterio de
+        // emparejamiento que cruzarPredioConPadron() en assets/core/mapa.js,
+        // adaptado a la forma de usuarios_g3_seleccionados en vez de
+        // padron_usuarios.
+        function emparejarPredioConUsuario(predio, usuariosConEstado) {
+            var usuario = null;
+            if (predio.catastralKey) {
+                usuario = usuariosConEstado.find(function (u) {
+                    return (u.unidadCatastral || '').toString().trim() === predio.catastralKey;
+                }) || null;
+            }
+            if (!usuario && predio.usuario) {
+                var nombreNorm = predio.usuario.toString().trim().toUpperCase();
+                usuario = usuariosConEstado.find(function (u) {
+                    return (u.nombre || '').toString().trim().toUpperCase() === nombreNorm;
+                }) || null;
+            }
+            return usuario;
+        }
+
+        function inicializarMapaSeguimientoSiHaceFalta() {
+            if (mapaLeaflet) return;
+            mapaLeaflet = L.map('mapaSeguimiento', { preferCanvas: true });
+            capaSatelital = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            });
+            capaSatelital.addTo(mapaLeaflet);
+        }
+
+        function mostrarPanelPredioSeguimiento(props) {
+            var detalle = (props.estado === 'sin-horario')
+                ? 'Horario aún no confirmado en escritorio.'
+                : escapeHtml(props.inicioTexto || '-') + ' → ' + escapeHtml(props.terminoTexto || '-') + ' · ' +
+                  (parseFloat(props.caudalLs) || 0).toFixed(2) + ' l/s';
+            elPanelPredio.innerHTML =
+                '<div class="nombre-usuario-g3">' + escapeHtml(props.nombre || '-') +
+                '<span class="badge-estado ' + props.estado + '">' + ETIQUETAS_ESTADO[props.estado] + '</span></div>' +
+                '<div style="font-size:11.5px; opacity:0.85; margin-top:4px;">Cultivo: ' + escapeHtml(props.cultivo || '-') + '</div>' +
+                '<div style="font-size:11.5px; opacity:0.85; margin-top:2px;">' + detalle + '</div>';
+            elPanelPredio.style.display = 'block';
+        }
+
+        // Se llama cada vez que la lista de arriba se refresca (cambio de
+        // toma/semana, reloj de 30s, o Realtime) — reusa el KML ya
+        // descargado (prediosPorTomaCache) y solo recalcula el cruce y el
+        // color, nunca vuelve a descargar el KML en cada refresco.
+        async function renderizarMapaSeguimiento(tomaNombre, usuariosConEstado) {
+            if (!tomaNombre || !usuariosConEstado || usuariosConEstado.length === 0) {
+                elMapaContainer.style.display = 'none';
+                elPanelPredio.style.display = 'none';
+                elLeyendaMapa.style.display = 'none';
+                elEstadoMapa.textContent = '';
+                return;
+            }
+
+            try {
+                var predios = await obtenerPrediosDeToma(tomaNombre);
+                if (predios.length === 0) {
+                    // Toma sin predios mapeados todavía (KML no disponible para
+                    // esa toma) — no es un error, simplemente no hay mapa que mostrar.
+                    elMapaContainer.style.display = 'none';
+                    elPanelPredio.style.display = 'none';
+                    elLeyendaMapa.style.display = 'none';
+                    elEstadoMapa.textContent = '';
+                    return;
+                }
+
+                var prediosCruzados = predios
+                    .map(function (p) {
+                        var usuario = emparejarPredioConUsuario(p, usuariosConEstado);
+                        return usuario ? Object.assign({}, p, usuario) : null;
+                    })
+                    .filter(Boolean);
+
+                if (prediosCruzados.length === 0) {
+                    elMapaContainer.style.display = 'none';
+                    elPanelPredio.style.display = 'none';
+                    elLeyendaMapa.style.display = 'none';
+                    elEstadoMapa.textContent = '';
+                    return;
+                }
+
+                inicializarMapaSeguimientoSiHaceFalta();
+                elMapaContainer.style.display = 'block';
+                elLeyendaMapa.style.display = 'block';
+                elEstadoMapa.textContent = '';
+                setTimeout(function () { mapaLeaflet.invalidateSize(); }, 50);
+
+                if (capaPredios) mapaLeaflet.removeLayer(capaPredios);
+
+                var featureCollection = {
+                    type: 'FeatureCollection',
+                    features: prediosCruzados.map(function (p) {
+                        return { type: 'Feature', properties: p, geometry: { type: 'Polygon', coordinates: [p.coordenadas] } };
+                    })
+                };
+
+                capaPredios = L.geoJSON(featureCollection, {
+                    style: function (feature) {
+                        var color = COLOR_POR_ESTADO_MAPA[feature.properties.estado] || COLOR_POR_ESTADO_MAPA['sin-horario'];
+                        return { fillColor: color.bg, color: color.border, weight: 1.5, fillOpacity: 0.55 };
+                    },
+                    onEachFeature: function (feature, layer) {
+                        layer.on('click', function () { mostrarPanelPredioSeguimiento(feature.properties); });
+                    }
+                }).addTo(mapaLeaflet);
+
+                mapaLeaflet.fitBounds(capaPredios.getBounds(), { padding: [20, 20] });
+            } catch (e) {
+                elEstadoMapa.textContent = 'No se pudo cargar el mapa de predios: ' + (e.message || e);
+            }
         }
 
         async function seleccionarToma(nombreToma, programacionId, cultivos) {
