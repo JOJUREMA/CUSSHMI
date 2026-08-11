@@ -1094,6 +1094,8 @@
 <script src="assets/core/utilidades.js"></script>
 <script src="assets/core/anexoG2.js"></script>
 <script src="assets/core/ordenRiego.js"></script>
+<script src="assets/core/mapa.js"></script>
+<script src="assets/core/modulosRiego.js"></script>
 </head>
 <body>
     
@@ -1242,6 +1244,9 @@
                 <button class="btn btn-primary" id="btnAbrirPadronA1" onclick="abrirModalPadronA1()" title="Sincronizar y exportar el Padrón A-1/A-2 oficial de ANA — el módulo móvil 'Identificación y registro'">
                     🧾 Identificación y Registro (Padrón A-1)
                 </button>
+                <button class="btn btn-primary" id="btnAbrirSiembraDIS" onclick="abrirModalSiembraDIS()" title="Exportar el Formato E-4.1 (Declaración de Intención de Siembra) — el módulo móvil 'Declaración de Intención de Siembra'">
+                    🌱 Declaración de Intención de Siembra
+                </button>
 
                 <button class="btn btn-secondary" id="btnLimpiar">
                     🔄 Limpiar Datos
@@ -1370,6 +1375,28 @@
             </button>
 
             <button class="btn btn-secondary" onclick="cerrarModalPadronA1()" style="width: 100%; margin-top: 12px;">
+                ❌ Cerrar
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL DECLARACIÓN DE INTENCIÓN DE SIEMBRA (FORMATO E-4.1) -->
+    <div id="modalSiembraDIS" class="modal-overlay">
+        <div class="modal-container" style="text-align: center; padding: 30px; max-width: 480px;">
+            <h3>🌱 Declaración de Intención de Siembra</h3>
+            <p class="info-text" style="text-align:left;">
+                Genera el Formato E-4.1 "Demanda de Agua del Usuario" (una hoja por toma)
+                a partir de lo que cada usuario declaró en el módulo móvil "Declaración de
+                Intención de Siembra". Cubre hasta la tabla de demanda de agua por cultivo
+                (área × módulo de riego) — la sección de usuario no agrario y el volumen
+                mensual autorizado quedan en blanco para completar manualmente, como hoy.
+            </p>
+
+            <button class="btn btn-success" id="btnExportarE41" onclick="exportarFormatoE41()" style="width: 100%;" title="Genera un Excel con el Formato E-4.1 por toma, a partir de las declaraciones de siembra confirmadas">
+                📊 Exportar Formato E-4.1 (todas las tomas)
+            </button>
+
+            <button class="btn btn-secondary" onclick="cerrarModalSiembraDIS()" style="width: 100%; margin-top: 12px;">
                 ❌ Cerrar
             </button>
         </div>
@@ -3295,6 +3322,238 @@ const COMISIONES = {
             }
         }
 
+        // ── Formato E-4.1 "Demanda de Agua del Usuario" (Declaración de Intención de Siembra) ──
+        // A diferencia de A-1/A-2 (una hoja combinada con todas las tomas),
+        // el E-4.1 real trae UNA HOJA POR TOMA — se reproduce ese mismo
+        // criterio. Cubre hasta la tabla "CULTIVO APROBADO / MÓDULO RIEGO /
+        // DEMANDA DE AGUA" (verificado célula a célula contra el Excel real
+        // de la comisión, ver assets/core/modulosRiego.js). La sección de
+        // usuario no agrario y el volumen mensual autorizado NO se calculan
+        // acá — no se pudo reconstruir esa tabla a partir de la declaración
+        // de cultivos sin que el usuario confirme la fórmula real (los
+        // totales del Excel real no cuadran entre sí sin un factor
+        // adicional, ej. eficiencia de conducción). Quedan en blanco para
+        // completar manualmente, como ya se hace hoy.
+        function _escribirTituloSeccionE41(ws, r, numCols, texto) {
+            const c = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, numCols);
+            c.value = texto;
+            c.font = { bold: true, size: 10 };
+            c.alignment = { horizontal: 'center' };
+        }
+
+        function construirHojaE41(wb, tomaNombre, filasSiembraToma, filasPadronA1Toma, tipoRiegoDominante, comisionNombre, numeroCorrelativo) {
+            const NUM_COLS = 14;
+            const nombreHoja = tomaNombre.length > 31 ? tomaNombre.slice(0, 31) : tomaNombre;
+            const ws = wb.addWorksheet(nombreHoja, { views: [{ showGridLines: false }] });
+            for (let c = 1; c <= NUM_COLS; c++) ws.getColumn(c).width = 9;
+
+            let r = 1;
+            _escribirTituloSeccionE41(ws, r, NUM_COLS, 'AUTORIDAD NACIONAL DEL AGUA'); r++;
+            const cFormato = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, NUM_COLS);
+            cFormato.value = 'Formato E-4.1. Demanda de Agua del Usuario';
+            cFormato.font = { bold: true, size: 12 };
+            cFormato.alignment = { horizontal: 'center' };
+            r++;
+            _escribirTituloSeccionE41(ws, r, NUM_COLS, 'PERIODO AÑO  2026  - 2027'); r++;
+            r++; // fila en blanco (como en el original)
+
+            const filaTexto = (colDesde, colHasta, texto) => {
+                const c = ws.getCell(r, colDesde);
+                if (colHasta > colDesde) ws.mergeCells(r, colDesde, r, colHasta);
+                c.value = texto;
+                c.font = { size: 9 };
+            };
+            filaTexto(1, 5, 'Autoridad Administrativa del Agua: ' + AAA_NOMBRE);
+            filaTexto(7, 13, 'Operador de Infraestructura Hidráulica: Junta de Usuarios Chira');
+            r++;
+            filaTexto(1, 5, 'Administración Local de Agua: ' + ALA_NOMBRE);
+            filaTexto(7, 13, 'Sector Hidráulico: Menor - Chira');
+            r++;
+            filaTexto(1, 5, 'Unidad Hidrográfica: 138');
+            filaTexto(7, 13, 'Subsector Hidráulico: ' + comisionNombre);
+            r += 2;
+
+            filaTexto(1, 4, 'Usuario que recibe el servicio de suministro de agua del Operador:');
+            ws.getCell(r, 5).value = 'X';
+            filaTexto(7, 11, 'Usuario con sistema de abastecimiento de agua propio:');
+            r++;
+            filaTexto(1, 2, '() Marcar con una X según corresponda.');
+            r += 2;
+
+            ws.getCell(r, 1).value = 'FECHA DE RECEPCIÓN';
+            ws.mergeCells(r, 1, r, 3);
+            const cFecha = ws.getCell(r, 4);
+            ws.mergeCells(r, 4, r, 5);
+            cFecha.value = new Date().toLocaleDateString('es-PE');
+            ws.getCell(r, 11).value = 'N°';
+            ws.getCell(r, 12).value = String(numeroCorrelativo).padStart(3, '0');
+            r += 2;
+
+            const cNombre = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, NUM_COLS);
+            cNombre.value = 'NOMBRE - RAZÓN SOCIAL DEL USUARIO DE AGUA: ' + comisionNombre;
+            cNombre.font = { size: 9, bold: true };
+            r += 2;
+
+            filaTexto(1, 6, '1) USUARIO:  AGRARIO');
+            filaTexto(7, 14, 'TOMA - SECTOR: ' + tomaNombre);
+            ws.getRow(r).font = { bold: true, size: 10 };
+            r += 2;
+
+            const areaBajoRiego = filasSiembraToma.reduce((suma, reg) => {
+                const cultivos = Array.isArray(reg.cultivos) ? reg.cultivos : [];
+                return suma + cultivos.reduce((s, c) => s + (parseFloat(c.area) || 0), 0);
+            }, 0);
+            filaTexto(1, 2, 'Unidad catastral:');
+            filaTexto(3, 5, 'Área bajo riego (ha): ' + areaBajoRiego.toFixed(2));
+            filaTexto(7, 9, 'Canal Secundario:');
+            filaTexto(11, 14, 'Nombre del bloque de riego: ' + (obtenerBloqueDeToma(tomaNombre) || '—'));
+            r += 2;
+
+            // Fuente de agua / derecho — agregado desde el Padrón A-1
+            // (volumen_m3, clase_derecho) y el padrón operativo (tipo de
+            // riego mayoritario). Simplificado a una sola fila de datos
+            // (columnas 1-6) en vez de replicar la grilla de checkboxes del
+            // original — el dato importa más que el formato exacto de la
+            // casilla.
+            const volumenHm3 = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.volumen_m3) || 0), 0) / 1e6;
+            const claseDerecho = (filasPadronA1Toma.find((f) => f.clase_derecho) || {}).clase_derecho || '-';
+            ['TIPO', 'NOMBRE FUENTE', 'CLASE DE DERECHO', 'RESOLUCIÓN', 'VOLUMEN (Hm3)', 'TIPO DE RIEGO'].forEach((texto, idx) => {
+                const c = ws.getCell(r, idx + 1);
+                c.value = texto;
+                _estiloEncabezadoTablaOficial(c);
+            });
+            r++;
+            _escribirFilaDatos(ws, r, 6, ['SUPERFICIAL', 'Rio Chira', claseDerecho, '', volumenHm3.toFixed(3), tipoRiegoDominante || '-']);
+            r += 2;
+
+            _escribirTituloSeccionE41(ws, r, NUM_COLS, 'DECLARACIÓN DE INTENCIÓN DE SIEMBRA'); r += 2;
+
+            // Un cultivo real por fila (no agrupado por categoría), área
+            // sumada entre todos los usuarios confirmados de la toma —
+            // fecha de siembra/cosecha/período/módulo desde la tabla de
+            // referencia (assets/core/modulosRiego.js), NO declarados por
+            // usuario (ver justificación en el plan).
+            const areaPorCultivo = new Map();
+            filasSiembraToma.forEach((reg) => {
+                (Array.isArray(reg.cultivos) ? reg.cultivos : []).forEach((c) => {
+                    const nombre = (c.cultivo || '').toString().trim();
+                    const area = parseFloat(c.area) || 0;
+                    if (!nombre || area <= 0) return;
+                    areaPorCultivo.set(nombre, (areaPorCultivo.get(nombre) || 0) + area);
+                });
+            });
+
+            ['CULTIVO / VARIEDAD', 'ÁREA [ha]', 'FECHA SIEMBRA', 'PERÍODO VEGETATIVO (MES)', 'FECHA COSECHA', 'MÓDULO RIEGO [m³/ha]', 'DEMANDA DE AGUA [hm³]'].forEach((texto, idx) => {
+                const c = ws.getCell(r, idx + 1);
+                c.value = texto;
+                _estiloEncabezadoTablaOficial(c);
+            });
+            r++;
+
+            let areaTotalCultivos = 0;
+            let demandaTotalHm3 = 0;
+            let hayCultivosSinReferencia = false;
+            const anioSiembra = 2026;
+            Array.from(areaPorCultivo.entries()).forEach(([cultivo, area]) => {
+                const ref = obtenerReferenciaCultivo(cultivo);
+                areaTotalCultivos += area;
+                if (ref) {
+                    const cosecha = calcularFechaCosecha(ref.siembraDia, ref.siembraMes, anioSiembra, ref.periodoMeses);
+                    const demanda = calcularDemandaHm3(ref, area);
+                    demandaTotalHm3 += demanda;
+                    _escribirFilaDatos(ws, r, 7, [
+                        cultivo, area.toFixed(2),
+                        ref.siembraDia + '/' + ref.siembraMes + '/' + anioSiembra,
+                        ref.periodoMeses,
+                        cosecha.dia + '/' + cosecha.mes + '/' + cosecha.anio,
+                        ref.moduloM3Ha, demanda.toFixed(5),
+                    ]);
+                } else {
+                    hayCultivosSinReferencia = true;
+                    _escribirFilaDatos(ws, r, 7, [cultivo, area.toFixed(2), '—', '—', '—', 'SIN REFERENCIA', '—']);
+                }
+                r++;
+            });
+            _escribirFilaDatos(ws, r, 7, ['TOTAL', areaTotalCultivos.toFixed(2), '', '', '', '', demandaTotalHm3.toFixed(5)]);
+            ws.getRow(r).font = { bold: true, size: 9 };
+            r += 2;
+
+            if (hayCultivosSinReferencia) {
+                const cAviso = ws.getCell(r, 1);
+                ws.mergeCells(r, 1, r, NUM_COLS);
+                cAviso.value = '⚠️ Hay cultivos declarados sin módulo de riego de referencia — revisar y completar manualmente.';
+                cAviso.font = { italic: true, size: 9, color: { argb: 'FFC0392B' } };
+                r += 2;
+            }
+
+            const cNota = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, NUM_COLS);
+            cNota.value = '2) Usuario no agrario y 3) Volumen de agua total autorizado (mensual): completar manualmente.';
+            cNota.font = { italic: true, size: 8, color: { argb: 'FF666666' } };
+            r += 3;
+
+            filaTexto(1, 5, '_____________________');
+            r++;
+            filaTexto(1, 5, 'Aprobado por Jefe de Sub Sector de la CUSSHMI');
+            r += 3;
+
+            return ws;
+        }
+
+        async function exportarFormatoE41() {
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+
+            const btn = document.getElementById('btnExportarE41');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📊 Generando…'; }
+
+            try {
+                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                const [resultadoSiembra, resultadoPadronA1] = await Promise.all([
+                    CusshmiDatos.cargarRegistrosSiembraParaExportar(comisionKey),
+                    CusshmiDatos.cargarPadronOficialA1CompletoParaExportar(comisionKey),
+                ]);
+                if (!resultadoSiembra.ok) { alert('No se pudo cargar las declaraciones de siembra: ' + resultadoSiembra.error); return; }
+                if (resultadoSiembra.registros.length === 0) {
+                    alert('No hay declaraciones de siembra confirmadas todavía para esta comisión.');
+                    return;
+                }
+
+                const comisionNombre = (COMISIONES[comisionKey] && COMISIONES[comisionKey].nombre) || comisionKey;
+                const fecha = new Date().toISOString().split('T')[0];
+                const padronA1 = resultadoPadronA1.ok ? resultadoPadronA1.resultados : [];
+
+                const porToma = _agruparPorToma(resultadoSiembra.registros);
+                const wb = new ExcelJS.Workbook();
+                let correlativo = 1;
+                for (const { toma, filas } of porToma) {
+                    if (toma === 'SIN TOMA IDENTIFICADA') continue; // no se puede armar un E-4.1 sin toma
+                    const resultadoPadronToma = await CusshmiDatos.cargarPadronToma(comisionKey, toma);
+                    const usuariosToma = (resultadoPadronToma.ok && resultadoPadronToma.resultados) ? resultadoPadronToma.resultados : [];
+                    const conteoTipoRiego = {};
+                    usuariosToma.forEach((u) => { if (u.tipo_riego) conteoTipoRiego[u.tipo_riego] = (conteoTipoRiego[u.tipo_riego] || 0) + 1; });
+                    const tipoRiegoDominante = Object.keys(conteoTipoRiego).sort((a, b) => conteoTipoRiego[b] - conteoTipoRiego[a])[0] || '';
+
+                    const filasPadronA1Toma = padronA1.filter((f) => f.toma_nombre === toma);
+                    construirHojaE41(wb, toma, filas, filasPadronA1Toma, tipoRiegoDominante, comisionNombre, correlativo);
+                    correlativo++;
+                }
+                await _descargarWorkbook(wb, `Formato_E41_${comisionKey}_${fecha}.xlsx`);
+
+                alert('✅ Exportado el Formato E-4.1 con ' + (correlativo - 1) + ' toma(s).\n\n' +
+                    'La sección de usuario no agrario y el volumen mensual autorizado quedaron en blanco — se completan manualmente, como hoy.');
+            } catch (e) {
+                console.error('Error al exportar Formato E-4.1:', e);
+                alert('No se pudo generar el archivo: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+            }
+        }
+
         // escapeHtml: ver assets/core/utilidades.js (Fase 0 PWA).
 
         function normalizarTextoHeader(value) {
@@ -4329,6 +4588,16 @@ function abrirModalPadronA1() {
 
 function cerrarModalPadronA1() {
     const modal = document.getElementById('modalPadronA1');
+    if (modal) modal.classList.remove('active');
+}
+
+function abrirModalSiembraDIS() {
+    const modal = document.getElementById('modalSiembraDIS');
+    if (modal) modal.classList.add('active');
+}
+
+function cerrarModalSiembraDIS() {
+    const modal = document.getElementById('modalSiembraDIS');
     if (modal) modal.classList.remove('active');
 }
 

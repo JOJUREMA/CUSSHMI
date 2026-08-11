@@ -982,6 +982,230 @@
         return { ok: true };
     }
 
+    // ── Declaración de Intención de Siembra (Formato E-4.1) ─────────────────
+    // Mismo patrón exacto que Identificación y registro (arriba), aplicado a
+    // `siembra_intenciones`: candado tras confirmar + solicitud de edición
+    // vía RPC para cuando está bloqueado. `cultivos` es un array
+    // [{cultivo, area}], precargado en el móvil desde padron_usuarios.cultivos
+    // y editable — no se lee en vivo del padrón, es su propio snapshot
+    // estable por campaña (ver justificación en el plan).
+
+    async function obtenerAvanceSiembraPorToma(comisionKey) {
+        if (!comisionKey) return { ok: true, avance: {} };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, avance: {}, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const [registrosPorToma, padronPorToma] = await Promise.all([
+            _contarPorToma('siembra_intenciones', comisionId),
+            _contarPorToma('padron_usuarios', comisionId),
+        ]);
+        if (!registrosPorToma || !padronPorToma) {
+            return { ok: false, avance: {}, error: 'No se pudo calcular el avance de siembra.' };
+        }
+
+        const tomas = new Set([...Object.keys(registrosPorToma), ...Object.keys(padronPorToma)]);
+        const avance = {};
+        tomas.forEach((toma) => {
+            const registrados = registrosPorToma[toma] || 0;
+            const totalPadron = padronPorToma[toma] || 0;
+            avance[toma] = {
+                registrados,
+                totalPadron,
+                porcentaje: totalPadron > 0 ? Math.round((registrados / totalPadron) * 100) : null,
+            };
+        });
+        return { ok: true, avance };
+    }
+
+    async function listarRegistrosSiembraDeToma(comisionKey, tomaNombre) {
+        if (!comisionKey || !tomaNombre) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('siembra_intenciones')
+                .select('id, padron_usuario_id, apellidos_nombres, unidad_catastral, confirmado')
+                .eq('comision_id', comisionId)
+                .eq('toma_nombre', tomaNombre),
+            'listar registros de siembra de la toma'
+        );
+        if (error) return { ok: false, registros: [], error: error.mensaje || 'No se pudo listar los registros.' };
+        return { ok: true, registros: data || [] };
+    }
+
+    async function cargarRegistroSiembra(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('siembra_intenciones').select('*').eq('id', id).maybeSingle(),
+            'cargar registro de siembra'
+        );
+        if (error) return { ok: false, error: error.mensaje };
+        if (!data) return { ok: false, error: 'Registro no encontrado.' };
+        return { ok: true, registro: data };
+    }
+
+    // `datos`: {id?, comisionKey, tomaNombre, padronUsuarioId?,
+    //   apellidosNombres, unidadCatastral, cultivos: [{cultivo, area}]}.
+    async function guardarRegistroSiembra(datos) {
+        if (!datos || !datos.comisionKey || !datos.tomaNombre || !datos.apellidosNombres) {
+            return { ok: false, error: 'Faltan datos obligatorios (comisión, toma o apellidos y nombres).' };
+        }
+        const comisionId = await resolverComisionId(datos.comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + datos.comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const fila = {
+            comision_id: comisionId,
+            toma_nombre: datos.tomaNombre,
+            padron_usuario_id: datos.padronUsuarioId || null,
+            apellidos_nombres: datos.apellidosNombres,
+            unidad_catastral: datos.unidadCatastral || null,
+            cultivos: Array.isArray(datos.cultivos) ? datos.cultivos : [],
+            creado_por: usuarioId,
+            actualizado_en: new Date().toISOString(),
+        };
+
+        if (datos.id) {
+            const { error } = await client.from('siembra_intenciones').update(fila).eq('id', datos.id);
+            if (error) return { ok: false, error: error.message };
+            return { ok: true, id: datos.id };
+        }
+
+        const { data: creado, error } = await client.from('siembra_intenciones').insert(fila).select('id').single();
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, id: creado.id };
+    }
+
+    let debounceTimerSiembra = null;
+
+    /**
+     * Autoguardado de borrador (espera de 1s desde el último cambio, mismo
+     * criterio que guardarRegistroIdentificacionDebounced). Muta `datos.id`
+     * en sitio tras el primer guardado exitoso — el llamador debe reusar el
+     * MISMO objeto `datos` en llamadas sucesivas.
+     */
+    function guardarRegistroSiembraDebounced(datos, onEstado) {
+        if (debounceTimerSiembra) clearTimeout(debounceTimerSiembra);
+        if (onEstado) onEstado('escribiendo');
+        debounceTimerSiembra = setTimeout(async () => {
+            if (onEstado) onEstado('guardando');
+            const resultado = await guardarRegistroSiembra(datos);
+            if (resultado.ok && !datos.id) datos.id = resultado.id;
+            if (onEstado) onEstado(resultado.ok ? 'guardado' : 'error');
+        }, 1000);
+    }
+
+    async function confirmarRegistroSiembra(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('siembra_intenciones')
+            .update({ confirmado: true, confirmado_en: new Date().toISOString() })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo confirmar: el registro no existe o ya no se puede editar.' };
+        return { ok: true };
+    }
+
+    async function desbloquearRegistroSiembra(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('siembra_intenciones')
+            .update({ confirmado: false, solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo desbloquear: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+
+    async function solicitarEdicionSiembra(id, nombreSolicitante) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.rpc('solicitar_edicion_siembra', { registro_id: id, nombre_solicitante: nombreSolicitante || null }),
+            'solicitar edición de registro de siembra'
+        );
+        if (error) return { ok: false, error: error.mensaje || 'No se pudo enviar la solicitud.' };
+        return { ok: true };
+    }
+
+    async function listarSolicitudesEdicionSiembra(comisionKey) {
+        if (!comisionKey) return { ok: true, solicitudes: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, solicitudes: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('siembra_intenciones')
+                .select('id, toma_nombre, apellidos_nombres, unidad_catastral, solicitud_edicion_por_nombre, solicitud_edicion_en')
+                .eq('comision_id', comisionId)
+                .eq('solicitud_edicion', true)
+                .order('solicitud_edicion_en', { ascending: true }),
+            'listar solicitudes de edición de siembra'
+        );
+        if (error) return { ok: false, solicitudes: [], error: error.mensaje || 'No se pudo listar las solicitudes.' };
+        return { ok: true, solicitudes: data || [] };
+    }
+
+    async function rechazarSolicitudEdicionSiembra(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('siembra_intenciones')
+            .update({ solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo rechazar: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+
+    // Todos los registros confirmados de la comisión (todas las tomas), para
+    // el exportador del Formato E-4.1 en escritorio.
+    async function cargarRegistrosSiembraParaExportar(comisionKey) {
+        if (!comisionKey) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const TAMANO_PAGINA = 1000;
+        const registros = [];
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from('siembra_intenciones')
+                    .select('toma_nombre, apellidos_nombres, unidad_catastral, cultivos, confirmado')
+                    .eq('comision_id', comisionId)
+                    .eq('confirmado', true)
+                    .order('toma_nombre', { ascending: true })
+                    .range(desde, desde + TAMANO_PAGINA - 1),
+                'cargar registros de siembra (exportación)'
+            );
+            if (error || !data) return { ok: false, registros: [], error: error ? error.mensaje : 'No se pudo cargar los registros de siembra.' };
+            registros.push(...data);
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return { ok: true, registros };
+    }
+
     // ── Padrón oficial A-1 (R.J. N° 0155-2022-ANA) ──────────────────────────
     // Carga masiva desde escritorio (parser del Excel oficial de ANA, formato
     // de encabezados fusionados). `filasEntrada`: [{numeroOrden,
@@ -1237,6 +1461,17 @@
         solicitarEdicionIdentificacion,
         listarSolicitudesEdicionIdentificacion,
         rechazarSolicitudEdicionIdentificacion,
+        obtenerAvanceSiembraPorToma,
+        listarRegistrosSiembraDeToma,
+        cargarRegistroSiembra,
+        guardarRegistroSiembra,
+        guardarRegistroSiembraDebounced,
+        confirmarRegistroSiembra,
+        desbloquearRegistroSiembra,
+        solicitarEdicionSiembra,
+        listarSolicitudesEdicionSiembra,
+        rechazarSolicitudEdicionSiembra,
+        cargarRegistrosSiembraParaExportar,
         cargarRegistrosIdentificacionParaExportar,
         guardarPadronOficialA1,
         cargarPadronOficialA1,
