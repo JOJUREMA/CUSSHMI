@@ -2839,13 +2839,41 @@ const COMISIONES = {
                 }
 
                 const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+
+                // El Excel oficial de ANA no trae toma (solo Sub Sector
+                // Hidráulico, a nivel de toda la comisión) — para poder
+                // agrupar la exportación por toma sin recalcularlo cada vez,
+                // se resuelve UNA VEZ acá cruzando contra TODO el padrón
+                // operativo de la comisión (por unidad catastral, o por
+                // nombre si no hay UC), y se guarda junto con cada fila.
+                const normUC = (v) => (v || '').toString().trim().toUpperCase().replace(/\s+/g, '');
+                const resultadoPadronOperativo = await CusshmiDatos.cargarTodoPadronUsuariosParaCruce(comisionKey);
+                const porUC = new Map();
+                const porNombre = new Map();
+                if (resultadoPadronOperativo.ok) {
+                    resultadoPadronOperativo.resultados.forEach((p) => {
+                        if (p.unidad_catastral) porUC.set(normUC(p.unidad_catastral), p.toma_nombre);
+                        const nombreNorm = (p.nombre || '').toString().trim().toUpperCase();
+                        if (nombreNorm && !porNombre.has(nombreNorm)) porNombre.set(nombreNorm, p.toma_nombre);
+                    });
+                }
+                let conTomaResuelta = 0;
+                filas.forEach((f) => {
+                    const uc = normUC(f.unidadCatastral);
+                    const nombreNorm = (f.apellidosNombres || '').toString().trim().toUpperCase();
+                    f.tomaNombre = (uc && porUC.get(uc)) || porNombre.get(nombreNorm) || null;
+                    if (f.tomaNombre) conTomaResuelta++;
+                });
+
                 const resultado = await CusshmiDatos.guardarPadronOficialA1(comisionKey, filas);
                 if (!resultado.ok) {
                     alert('⚠️ No se pudo sincronizar el padrón A-1: ' + (resultado.error || 'error desconocido') +
                         (resultado.guardados ? ('\n\n(' + resultado.guardados + ' registros sí se guardaron antes del error.)') : ''));
                     return;
                 }
-                alert('✅ Padrón oficial A-1 sincronizado: ' + resultado.guardados + ' registros de ' + filas.length + ' leídos.');
+                alert('✅ Padrón oficial A-1 sincronizado: ' + resultado.guardados + ' registros de ' + filas.length + ' leídos.\n' +
+                    conTomaResuelta + ' de ' + filas.length + ' quedaron con toma identificada (cruce contra el padrón operativo). ' +
+                    'Los demás no coincidieron por unidad catastral ni nombre — probablemente aún no están en ese padrón.');
             } catch (e) {
                 console.error('Error al importar padrón oficial A-1:', e);
                 alert('No se pudo leer el archivo: ' + (e.message || e));
@@ -2971,6 +2999,56 @@ const COMISIONES = {
             });
         }
 
+        // Agrupa filas (de padron_oficial_a1 o identificacion_registros,
+        // ambas ya traen `toma_nombre` propio) por toma, en el mismo orden
+        // "como están en el sistema" que ya usa el Anexo G2/Seguimiento PDA
+        // (compararOrdenTomas, assets/core/anexoG2.js) — las que no tienen
+        // toma identificada quedan en un grupo aparte, al final.
+        function _agruparPorToma(filas) {
+            const grupos = new Map();
+            filas.forEach((f) => {
+                const clave = f.toma_nombre || null;
+                if (!grupos.has(clave)) grupos.set(clave, []);
+                grupos.get(clave).push(f);
+            });
+            const claves = Array.from(grupos.keys());
+            claves.sort((a, b) => {
+                if (a === null && b === null) return 0;
+                if (a === null) return 1;
+                if (b === null) return -1;
+                return compararOrdenTomas(a, b);
+            });
+            return claves.map((clave) => ({ toma: clave || 'SIN TOMA IDENTIFICADA', filas: grupos.get(clave) }));
+        }
+
+        // Fila de corte de sección con el nombre de la toma — separa
+        // visualmente los bloques por toma dentro de la misma hoja, sin
+        // agregar una columna "Toma" a los datos (los Formatos A-1/A-2 deben
+        // mostrar únicamente las columnas oficiales).
+        function _escribirCorteToma(ws, r, numCols, toma) {
+            const cToma = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, numCols);
+            cToma.value = 'TOMA: ' + toma;
+            cToma.font = { bold: true, size: 10, color: { argb: 'FF1F4E79' } };
+            cToma.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6F1' } };
+            cToma.alignment = { vertical: 'middle' };
+            ws.getRow(r).height = 16;
+        }
+
+        function _descargarWorkbook(wb, nombreArchivo) {
+            return wb.xlsx.writeBuffer().then((buffer) => {
+                const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                const url = URL.createObjectURL(blob);
+                const enlace = document.createElement('a');
+                enlace.href = url;
+                enlace.download = nombreArchivo;
+                document.body.appendChild(enlace);
+                enlace.click();
+                document.body.removeChild(enlace);
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+            });
+        }
+
         function construirHojaFormatoA1(wb, filas, comisionNombre) {
             const NUM_COLS = 16;
             const ws = wb.addWorksheet('Formato A-1', {
@@ -3000,15 +3078,21 @@ const COMISIONES = {
             ]);
 
             let r = r0;
-            filas.forEach((f, idx) => {
-                _escribirFilaDatos(ws, r, NUM_COLS, [
-                    idx + 1, f.apellidos_nombres, f.tipo_documento, f.numero_documento,
-                    f.departamento, f.provincia, f.distrito, f.localidad,
-                    f.unidad_catastral, f.area_total_ha, f.area_bajo_riego_ha,
-                    f.sub_sector_hidraulico || comisionNombre, f.numero_resolucion, f.clase_derecho,
-                    f.tipo_uso, f.volumen_m3,
-                ]);
+            let numeroOrden = 1;
+            _agruparPorToma(filas).forEach(({ toma, filas: filasToma }) => {
+                _escribirCorteToma(ws, r, NUM_COLS, toma);
                 r++;
+                filasToma.forEach((f) => {
+                    _escribirFilaDatos(ws, r, NUM_COLS, [
+                        numeroOrden, f.apellidos_nombres, f.tipo_documento, f.numero_documento,
+                        f.departamento, f.provincia, f.distrito, f.localidad,
+                        f.unidad_catastral, f.area_total_ha, f.area_bajo_riego_ha,
+                        f.sub_sector_hidraulico || comisionNombre, f.numero_resolucion, f.clase_derecho,
+                        f.tipo_uso, f.volumen_m3,
+                    ]);
+                    numeroOrden++;
+                    r++;
+                });
             });
 
             r++;
@@ -3058,15 +3142,21 @@ const COMISIONES = {
             ]);
 
             let r = r0;
-            filas.forEach((f, idx) => {
-                _escribirFilaDatos(ws, r, NUM_COLS, [
-                    idx + 1, f.apellidos_nombres, f.tipo_documento, f.numero_documento,
-                    f.departamento, f.provincia, f.distrito, f.localidad,
-                    f.unidad_catastral, f.area_total_ha, f.area_bajo_riego_ha,
-                    f.sub_sector_hidraulico || comisionNombre, f.canal_derivacion, f.fuente_agua,
-                    f.cut_expediente, f.tipo_uso, f.volumen_m3,
-                ]);
+            let numeroOrden = 1;
+            _agruparPorToma(filas).forEach(({ toma, filas: filasToma }) => {
+                _escribirCorteToma(ws, r, NUM_COLS, toma);
                 r++;
+                filasToma.forEach((f) => {
+                    _escribirFilaDatos(ws, r, NUM_COLS, [
+                        numeroOrden, f.apellidos_nombres, f.tipo_documento, f.numero_documento,
+                        f.departamento, f.provincia, f.distrito, f.localidad,
+                        f.unidad_catastral, f.area_total_ha, f.area_bajo_riego_ha,
+                        f.sub_sector_hidraulico || comisionNombre, f.canal_derivacion, f.fuente_agua,
+                        f.cut_expediente, f.tipo_uso, f.volumen_m3,
+                    ]);
+                    numeroOrden++;
+                    r++;
+                });
             });
 
             r++;
@@ -3075,6 +3165,59 @@ const COMISIONES = {
             cNota.value = 'Nota: para el punto "Unidad Catastral" se registra únicamente cuando se cuenta con el dato. Tipo de uso según artículo 43° de la Ley de Recursos Hídricos. CUT = Código Único de Trámite del expediente presentado ante la ALA.';
             cNota.font = { italic: true, size: 8 };
             cNota.alignment = { wrapText: true };
+
+            return ws;
+        }
+
+        // Tercer archivo: todo lo que "Identificación y registro" capturó y
+        // que los Formatos A-1/A-2 oficiales NO contemplan (tipo de riego,
+        // cultivo instalado, estado del predio, observaciones, si está
+        // confirmado) — así los dos primeros archivos quedan mostrando
+        // únicamente lo que exige el formato oficial, sin mezclar datos
+        // internos de la Junta.
+        const ETIQUETAS_ESTADO_PREDIO_EXPORT = { en_produccion: 'En producción', en_preparacion: 'En preparación', abandonado: 'Abandonado', sin_agua: 'Sin agua' };
+        function construirHojaDatosAdicionales(wb, registros, comisionNombre) {
+            const NUM_COLS = 8;
+            const ws = wb.addWorksheet('Datos adicionales', { views: [{ showGridLines: false }] });
+            ws.columns = [
+                { width: 30 }, { width: 14 }, { width: 14 }, { width: 30 },
+                { width: 16 }, { width: 34 }, { width: 12 }, { width: 12 },
+            ];
+
+            let r = 1;
+            const cTitulo = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, NUM_COLS);
+            cTitulo.value = 'Datos adicionales de "Identificación y registro" — no forman parte de los Formatos A-1/A-2 oficiales';
+            cTitulo.font = { bold: true, size: 12 };
+            r++;
+            const cSub = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, NUM_COLS);
+            cSub.value = 'Sub Sector Hidráulico: ' + (comisionNombre || '');
+            cSub.font = { size: 10 };
+            r += 2;
+
+            const filaEncabezado = r;
+            const etiquetas = ['Apellidos y Nombres', 'Unidad Catastral', 'Tipo de Riego', 'Cultivo Instalado', 'Estado del Predio', 'Observaciones', 'Clasificación', 'Confirmado'];
+            etiquetas.forEach((texto, idx) => {
+                const c = ws.getCell(filaEncabezado, idx + 1);
+                c.value = texto;
+                _estiloEncabezadoTablaOficial(c);
+            });
+            ws.getRow(filaEncabezado).height = 20;
+            r++;
+
+            _agruparPorToma(registros).forEach(({ toma, filas: filasToma }) => {
+                _escribirCorteToma(ws, r, NUM_COLS, toma);
+                r++;
+                filasToma.forEach((reg) => {
+                    _escribirFilaDatos(ws, r, NUM_COLS, [
+                        reg.apellidos_nombres, reg.unidad_catastral, reg.tipo_riego, reg.cultivo_actual,
+                        ETIQUETAS_ESTADO_PREDIO_EXPORT[reg.estado_predio] || reg.estado_predio,
+                        reg.observaciones, reg.clasificacion, reg.confirmado ? 'Sí' : 'No',
+                    ]);
+                    r++;
+                });
+            });
 
             return ws;
         }
@@ -3089,34 +3232,39 @@ const COMISIONES = {
 
             try {
                 const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
-                const resultado = await CusshmiDatos.cargarPadronOficialA1CompletoParaExportar(comisionKey);
-                if (!resultado.ok) { alert('No se pudo cargar el padrón oficial: ' + resultado.error); return; }
+                const [resultadoPadronA1, resultadoRegistros] = await Promise.all([
+                    CusshmiDatos.cargarPadronOficialA1CompletoParaExportar(comisionKey),
+                    CusshmiDatos.cargarRegistrosIdentificacionParaExportar(comisionKey),
+                ]);
+                if (!resultadoPadronA1.ok) { alert('No se pudo cargar el padrón oficial: ' + resultadoPadronA1.error); return; }
+                if (!resultadoRegistros.ok) { alert('No se pudo cargar los registros de identificación: ' + resultadoRegistros.error); return; }
 
-                const filasA1 = resultado.resultados.filter((f) => f.origen === 'ana_a1');
-                const filasA2 = resultado.resultados.filter((f) => f.origen === 'campo');
+                const filasA1 = resultadoPadronA1.resultados.filter((f) => f.origen === 'ana_a1');
+                const filasA2 = resultadoPadronA1.resultados.filter((f) => f.origen === 'campo');
+                const registrosAdicionales = resultadoRegistros.registros;
                 if (filasA1.length === 0 && filasA2.length === 0) {
                     alert('No hay datos en el padrón oficial A-1 para esta comisión todavía. Primero sincroniza el padrón A-1 (o registra usuarios en "Identificación y registro").');
                     return;
                 }
 
                 const comisionNombre = (COMISIONES[comisionKey] && COMISIONES[comisionKey].nombre) || comisionKey;
-                const wb = new ExcelJS.Workbook();
-                construirHojaFormatoA1(wb, filasA1, comisionNombre);
-                construirHojaFormatoA2(wb, filasA2, comisionNombre);
-
-                const buffer = await wb.xlsx.writeBuffer();
-                const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-                const url = URL.createObjectURL(blob);
-                const enlace = document.createElement('a');
-                enlace.href = url;
                 const fecha = new Date().toISOString().split('T')[0];
-                enlace.download = `Formatos_A1_A2_${comisionKey}_${fecha}.xlsx`;
-                document.body.appendChild(enlace);
-                enlace.click();
-                document.body.removeChild(enlace);
-                setTimeout(() => URL.revokeObjectURL(url), 5000);
 
-                alert('✅ Exportado: ' + filasA1.length + ' usuarios en Formato A-1, ' + filasA2.length + ' en Formato A-2.');
+                const wbA1 = new ExcelJS.Workbook();
+                construirHojaFormatoA1(wbA1, filasA1, comisionNombre);
+                await _descargarWorkbook(wbA1, `Formato_A1_${comisionKey}_${fecha}.xlsx`);
+
+                const wbA2 = new ExcelJS.Workbook();
+                construirHojaFormatoA2(wbA2, filasA2, comisionNombre);
+                await _descargarWorkbook(wbA2, `Formato_A2_${comisionKey}_${fecha}.xlsx`);
+
+                const wbAdicional = new ExcelJS.Workbook();
+                construirHojaDatosAdicionales(wbAdicional, registrosAdicionales, comisionNombre);
+                await _descargarWorkbook(wbAdicional, `Datos_Adicionales_${comisionKey}_${fecha}.xlsx`);
+
+                alert('✅ Exportados 3 archivos: ' + filasA1.length + ' usuarios en Formato A-1, ' + filasA2.length +
+                    ' en Formato A-2, ' + registrosAdicionales.length + ' registros en Datos Adicionales.\n\n' +
+                    'Si el navegador bloqueó alguna descarga, permite "descargas múltiples" para este sitio y vuelve a intentar.');
             } catch (e) {
                 console.error('Error al exportar Formatos A-1/A-2:', e);
                 alert('No se pudo generar el archivo: ' + (e.message || e));

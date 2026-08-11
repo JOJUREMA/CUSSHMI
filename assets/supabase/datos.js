@@ -504,6 +504,35 @@
         return { ok: true, tomas: tomas };
     }
 
+    // Todo el padrón operativo de la comisión (todas las tomas, no una sola)
+    // — solo lo necesario para cruzar por unidad catastral/nombre y resolver
+    // a qué toma pertenece un usuario. Se usa al sincronizar el padrón
+    // oficial A-1 desde escritorio (ese Excel no trae toma) para fijarla una
+    // sola vez por fila, en vez de recalcularla cada vez que se exporta.
+    async function cargarTodoPadronUsuariosParaCruce(comisionKey) {
+        if (!comisionKey) return { ok: true, resultados: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, resultados: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const TAMANO_PAGINA = 1000;
+        const resultados = [];
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from('padron_usuarios')
+                    .select('toma_nombre, nombre, unidad_catastral')
+                    .eq('comision_id', comisionId)
+                    .range(desde, desde + TAMANO_PAGINA - 1),
+                'cargar padrón operativo completo (cruce de toma)'
+            );
+            if (error || !data) return { ok: false, resultados: [], error: error ? error.mensaje : 'No se pudo cargar el padrón operativo.' };
+            resultados.push(...data);
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return { ok: true, resultados };
+    }
+
     // ── Fase 5 PWA (móvil) — Seguimiento PDA en vivo ────────────────────────
     // Suscribe un canal Realtime a los cambios de usuarios_g3_seleccionados
     // de UNA programación (una toma+semana) — requiere que la tabla esté
@@ -727,6 +756,37 @@
         return { ok: true, registros: data || [] };
     }
 
+    // Todos los registros de identificación de la comisión (todas las
+    // tomas), con los campos que NO forman parte de los Formatos A-1/A-2
+    // oficiales (tipo de riego, cultivo instalado, estado del predio,
+    // observaciones) — para el tercer excel de exportación ("datos
+    // adicionales"). identificacion_registros ya trae toma_nombre directo,
+    // sin necesidad de cruzar contra nada.
+    async function cargarRegistrosIdentificacionParaExportar(comisionKey) {
+        if (!comisionKey) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const TAMANO_PAGINA = 1000;
+        const registros = [];
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from('identificacion_registros')
+                    .select('toma_nombre, apellidos_nombres, unidad_catastral, tipo_riego, cultivo_actual, estado_predio, observaciones, clasificacion, confirmado, confirmado_en')
+                    .eq('comision_id', comisionId)
+                    .order('toma_nombre', { ascending: true })
+                    .range(desde, desde + TAMANO_PAGINA - 1),
+                'cargar registros de identificación (exportación)'
+            );
+            if (error || !data) return { ok: false, registros: [], error: error ? error.mensaje : 'No se pudo cargar los registros de identificación.' };
+            registros.push(...data);
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return { ok: true, registros };
+    }
+
     // Un registro completo por id — para reabrir un borrador (Pantalla 3→4)
     // o para revisar/desbloquear uno ya confirmado (Pantalla 5).
     async function cargarRegistroIdentificacion(id) {
@@ -904,6 +964,7 @@
             clase_derecho: f.claseDerecho || null,
             tipo_uso: f.tipoUso || null,
             volumen_m3: Number.isFinite(parseFloat(f.volumenM3)) ? parseFloat(f.volumenM3) : null,
+            toma_nombre: f.tomaNombre || null,
             origen: 'ana_a1',
             actualizado_por: usuarioId,
         }));
@@ -979,9 +1040,10 @@
         while (true) {
             const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
                 (client) => client.from('padron_oficial_a1')
-                    .select('numero_orden, apellidos_nombres, tipo_documento, numero_documento, departamento, provincia, distrito, localidad, unidad_catastral, area_total_ha, area_bajo_riego_ha, sub_sector_hidraulico, numero_resolucion, clase_derecho, tipo_uso, volumen_m3, canal_derivacion, fuente_agua, cut_expediente, origen, observacion')
+                    .select('numero_orden, apellidos_nombres, tipo_documento, numero_documento, departamento, provincia, distrito, localidad, unidad_catastral, area_total_ha, area_bajo_riego_ha, sub_sector_hidraulico, numero_resolucion, clase_derecho, tipo_uso, volumen_m3, canal_derivacion, fuente_agua, cut_expediente, toma_nombre, origen, observacion')
                     .eq('comision_id', comisionId)
                     .order('origen', { ascending: true })
+                    .order('toma_nombre', { ascending: true, nullsFirst: false })
                     .order('numero_orden', { ascending: true, nullsFirst: false })
                     .range(desde, desde + TAMANO_PAGINA - 1),
                 'cargar padrón oficial A-1 completo (exportación)'
@@ -1027,6 +1089,7 @@
             canal_derivacion: datos.canalDerivacion || null,
             fuente_agua: datos.fuenteAgua || null,
             cut_expediente: datos.cutExpediente || null,
+            toma_nombre: datos.tomaNombre || null,
             origen: 'campo',
             observacion: 'Remitir a la Junta',
             actualizado_por: usuarioId,
@@ -1054,6 +1117,7 @@
         buscarEnPadron,
         cargarPadronToma,
         listarTomasConPadron,
+        cargarTodoPadronUsuariosParaCruce,
         suscribirseATomaEnVivo,
         cancelarSuscripcion,
         generarEnlaceConfirmacionG4,
@@ -1066,6 +1130,7 @@
         guardarRegistroIdentificacionDebounced,
         confirmarRegistroIdentificacion,
         desbloquearRegistroIdentificacion,
+        cargarRegistrosIdentificacionParaExportar,
         guardarPadronOficialA1,
         cargarPadronOficialA1,
         cargarPadronOficialA1CompletoParaExportar,
