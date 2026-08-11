@@ -125,6 +125,7 @@
 
         <!-- ── Pantalla 2: selección de toma ── -->
         <div id="vistaTomas" style="width:100%; display:flex; flex-direction:column; align-items:center;">
+            <button class="boton" id="btnVerSolicitudes" style="max-width:420px; display:none; margin-bottom:14px; background:#c0392b;">🔔 Solicitudes de edición pendientes</button>
             <div class="estado-busqueda" id="estadoTomas">Cargando tomas…</div>
             <div class="resultados" id="listaTomas"></div>
         </div>
@@ -279,11 +280,26 @@
             <div class="aviso-bloqueado" id="avisoBloqueadoConfirmacion" style="display:none; margin-top:16px;">
                 🔒 Registro confirmado. Para editar solicite habilitación al administrador.
             </div>
+            <div class="aviso-bloqueado" id="avisoSolicitudEnviada" style="display:none; margin-top:10px; background: rgba(200,168,75,0.2);">
+                🕓 Solicitud de edición enviada — esperando aprobación del administrador.
+            </div>
+            <div class="aviso-bloqueado" id="avisoSolicitudPendienteAdmin" style="display:none; margin-top:10px; background: rgba(200,168,75,0.2);"></div>
 
             <div class="estado-busqueda" id="estadoConfirmacion"></div>
             <button class="boton" id="btnConfirmarGuardar" style="max-width:420px; margin-top:10px;">✔ Confirmar y guardar</button>
-            <button class="boton-secundario" id="btnDesbloquear" style="max-width:420px; display:none;">🔓 Desbloquear (admin)</button>
+            <button class="boton-secundario" id="btnSolicitarEdicion" style="max-width:420px; display:none;">🔓 Solicitar habilitación de edición</button>
+            <button class="boton-secundario" id="btnDesbloquear" style="max-width:420px; display:none;">✅ Habilitar edición (admin)</button>
+            <button class="boton-secundario" id="btnRechazarSolicitud" style="max-width:420px; display:none; margin-top:10px;">❌ Rechazar solicitud (admin)</button>
             <button class="boton-secundario" id="btnVolverAFormularioAbajo" style="max-width:420px; margin-top:10px;">← Volver al formulario</button>
+        </div>
+
+        <!-- ── Pantalla admin: solicitudes de edición pendientes ── -->
+        <div id="vistaSolicitudes" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverATomasDesdeSolicitudes" style="max-width:420px;">← Volver a las tomas</button>
+            <h1 style="margin-top:14px; font-size:16px;">Solicitudes de edición pendientes</h1>
+
+            <div class="estado-busqueda" id="estadoSolicitudes"></div>
+            <div class="resultados" id="listaSolicitudes"></div>
         </div>
     </div>
 
@@ -374,6 +390,9 @@
             document.getElementById('vistaBusqueda').style.display = 'none';
             document.getElementById('vistaFormulario').style.display = 'none';
             document.getElementById('vistaConfirmacion').style.display = 'none';
+            document.getElementById('vistaSolicitudes').style.display = 'none';
+
+            if (esAdmin) actualizarBotonSolicitudes();
 
             elEstadoTomas.textContent = 'Cargando tomas…';
             elListaTomas.innerHTML = '';
@@ -410,6 +429,95 @@
                 elListaTomas.appendChild(fila);
             });
         }
+
+        // ═══ Pantalla admin — solicitudes de edición pendientes ═══
+        // Un programador puede pedir habilitación (ver btnSolicitarEdicion
+        // más abajo), pero el administrador no necesariamente está mirando
+        // ese registro puntual cuando eso pasa — este botón/pantalla junta
+        // todas las solicitudes pendientes de la comisión (todas las tomas)
+        // en un solo lugar, tal como se pidió.
+        async function actualizarBotonSolicitudes() {
+            var btn = document.getElementById('btnVerSolicitudes');
+            var resultado = await CusshmiDatos.listarSolicitudesEdicionIdentificacion(comisionKeyActual);
+            var n = (resultado.ok && resultado.solicitudes) ? resultado.solicitudes.length : 0;
+            if (n > 0) {
+                btn.textContent = '🔔 Solicitudes de edición pendientes (' + n + ')';
+                btn.style.display = 'block';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        async function mostrarVistaSolicitudes() {
+            document.getElementById('vistaTomas').style.display = 'none';
+            document.getElementById('vistaSolicitudes').style.display = 'flex';
+            await renderizarListaSolicitudes();
+        }
+
+        async function renderizarListaSolicitudes() {
+            var elEstado = document.getElementById('estadoSolicitudes');
+            var elLista = document.getElementById('listaSolicitudes');
+            elEstado.textContent = 'Cargando solicitudes…';
+            elLista.innerHTML = '';
+
+            var resultado = await CusshmiDatos.listarSolicitudesEdicionIdentificacion(comisionKeyActual);
+            if (!resultado.ok) { elEstado.textContent = resultado.error || 'No se pudo cargar las solicitudes.'; return; }
+            var solicitudes = resultado.solicitudes || [];
+            if (solicitudes.length === 0) {
+                elEstado.textContent = 'No hay solicitudes de edición pendientes.';
+                return;
+            }
+            elEstado.textContent = '';
+
+            solicitudes.forEach(function (s) {
+                var fila = document.createElement('div');
+                fila.className = 'fila-resultado';
+                var fecha = s.solicitud_edicion_en ? new Date(s.solicitud_edicion_en).toLocaleString('es-PE') : '-';
+                fila.innerHTML =
+                    '<div class="nombre-resultado">' + escapeHtml(s.apellidos_nombres || '-') + '</div>' +
+                    '<div class="detalle-resultado">Toma ' + escapeHtml(s.toma_nombre || '-') + ' · UC: ' + escapeHtml(s.unidad_catastral || '-') + '</div>' +
+                    '<div class="detalle-resultado">Solicitado por ' + escapeHtml(s.solicitud_edicion_por_nombre || 'un programador') + ' — ' + escapeHtml(fecha) + '</div>';
+
+                var acciones = document.createElement('div');
+                acciones.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
+
+                var btnHabilitar = document.createElement('button');
+                btnHabilitar.className = 'boton';
+                btnHabilitar.type = 'button';
+                btnHabilitar.style.cssText = 'max-width:none; flex:1; padding:8px; font-size:12px;';
+                btnHabilitar.textContent = '✅ Habilitar';
+                btnHabilitar.addEventListener('click', async function (ev) {
+                    ev.stopPropagation();
+                    btnHabilitar.disabled = true;
+                    var r = await CusshmiDatos.desbloquearRegistroIdentificacion(s.id);
+                    if (!r.ok) { alert(r.error); btnHabilitar.disabled = false; return; }
+                    renderizarListaSolicitudes();
+                    actualizarBotonSolicitudes();
+                });
+
+                var btnRechazar = document.createElement('button');
+                btnRechazar.className = 'boton-secundario';
+                btnRechazar.type = 'button';
+                btnRechazar.style.cssText = 'max-width:none; flex:1; padding:8px; font-size:12px;';
+                btnRechazar.textContent = '❌ Rechazar';
+                btnRechazar.addEventListener('click', async function (ev) {
+                    ev.stopPropagation();
+                    btnRechazar.disabled = true;
+                    var r = await CusshmiDatos.rechazarSolicitudEdicionIdentificacion(s.id);
+                    if (!r.ok) { alert(r.error); btnRechazar.disabled = false; return; }
+                    renderizarListaSolicitudes();
+                    actualizarBotonSolicitudes();
+                });
+
+                acciones.appendChild(btnHabilitar);
+                acciones.appendChild(btnRechazar);
+                fila.appendChild(acciones);
+                elLista.appendChild(fila);
+            });
+        }
+
+        document.getElementById('btnVerSolicitudes').addEventListener('click', mostrarVistaSolicitudes);
+        document.getElementById('btnVolverATomasDesdeSolicitudes').addEventListener('click', mostrarVistaTomas);
 
         // ═══ Pantalla 3 — búsqueda de usuario ═══
         async function abrirToma(tomaNombre) {
@@ -509,6 +617,9 @@
                 estadoPredio: '',
                 observaciones: '',
                 confirmado: false,
+                solicitudEdicion: false,
+                solicitudEdicionPorNombre: '',
+                solicitudEdicionEn: null,
                 _a1Encontrado: false,
                 _a1Incorporado: false,
             };
@@ -581,6 +692,9 @@
                     estadoPredio: r.estado_predio || '',
                     observaciones: r.observaciones || '',
                     confirmado: !!r.confirmado,
+                    solicitudEdicion: !!r.solicitud_edicion,
+                    solicitudEdicionPorNombre: r.solicitud_edicion_por_nombre || '',
+                    solicitudEdicionEn: r.solicitud_edicion_en || null,
                     // Un registro que se reabre ya pasó (o no) por la
                     // incorporación al padrón A-1 en su primera confirmación
                     // — no se vuelve a intentar al reconfirmar, para no
@@ -795,9 +909,32 @@
             document.getElementById('resumenRegistro').innerHTML = html;
 
             var bloqueado = r.confirmado;
+            var solicitado = !!r.solicitudEdicion;
             document.getElementById('avisoBloqueadoConfirmacion').style.display = bloqueado ? 'block' : 'none';
             document.getElementById('btnConfirmarGuardar').style.display = bloqueado ? 'none' : 'block';
+
+            // Programador (no admin): mientras el registro esté bloqueado
+            // puede pedir habilitación, una sola vez — mientras la
+            // solicitud siga pendiente se le muestra el aviso en vez del
+            // botón, para que no mande la misma solicitud varias veces.
+            document.getElementById('btnSolicitarEdicion').style.display = (bloqueado && !esAdmin && !solicitado) ? 'block' : 'none';
+            document.getElementById('avisoSolicitudEnviada').style.display = (bloqueado && !esAdmin && solicitado) ? 'block' : 'none';
+
+            // Admin: ve quién pidió la habilitación y decide — habilitar
+            // (desbloquea Y resuelve la solicitud) o rechazar (queda
+            // bloqueado, solo se limpia la solicitud).
             document.getElementById('btnDesbloquear').style.display = (bloqueado && esAdmin) ? 'block' : 'none';
+            document.getElementById('btnDesbloquear').textContent = solicitado ? '✅ Habilitar edición (admin)' : '🔓 Desbloquear (admin)';
+            document.getElementById('btnRechazarSolicitud').style.display = (bloqueado && esAdmin && solicitado) ? 'block' : 'none';
+            var elAvisoAdmin = document.getElementById('avisoSolicitudPendienteAdmin');
+            if (bloqueado && esAdmin && solicitado) {
+                var fecha = r.solicitudEdicionEn ? new Date(r.solicitudEdicionEn).toLocaleString('es-PE') : '';
+                elAvisoAdmin.textContent = '📩 ' + (r.solicitudEdicionPorNombre || 'Un programador') + ' solicitó habilitar la edición' + (fecha ? ' — ' + fecha : '') + '.';
+                elAvisoAdmin.style.display = 'block';
+            } else {
+                elAvisoAdmin.style.display = 'none';
+            }
+
             document.getElementById('estadoConfirmacion').textContent = '';
         }
 
@@ -897,12 +1034,44 @@
             var resultado = await CusshmiDatos.desbloquearRegistroIdentificacion(registroActual.id);
             if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
             registroActual.confirmado = false;
+            registroActual.solicitudEdicion = false;
+            registroActual.solicitudEdicionPorNombre = '';
+            registroActual.solicitudEdicionEn = null;
             if (window.CusshmiAuditoria) {
                 CusshmiAuditoria.registrarAuditoria('Desbloqueo', 'Identificación y registro', registroActual.apellidosNombres + ' — Toma ' + registroActual.tomaNombre);
             }
             document.getElementById('vistaConfirmacion').style.display = 'none';
             pintarFormularioDesdeRegistro();
             document.getElementById('vistaFormulario').style.display = 'flex';
+        });
+
+        document.getElementById('btnRechazarSolicitud').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacion');
+            elEstado.textContent = 'Rechazando solicitud…';
+            var resultado = await CusshmiDatos.rechazarSolicitudEdicionIdentificacion(registroActual.id);
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroActual.solicitudEdicion = false;
+            registroActual.solicitudEdicionPorNombre = '';
+            registroActual.solicitudEdicionEn = null;
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Rechazo de solicitud de edición', 'Identificación y registro', registroActual.apellidosNombres + ' — Toma ' + registroActual.tomaNombre);
+            }
+            mostrarConfirmacion();
+            document.getElementById('estadoConfirmacion').textContent = 'Solicitud rechazada. El registro sigue bloqueado.';
+        });
+
+        document.getElementById('btnSolicitarEdicion').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacion');
+            elEstado.textContent = 'Enviando solicitud…';
+            var resultado = await CusshmiDatos.solicitarEdicionIdentificacion(registroActual.id, perfilActual ? perfilActual.nombre : '');
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroActual.solicitudEdicion = true;
+            registroActual.solicitudEdicionPorNombre = perfilActual ? perfilActual.nombre : '';
+            registroActual.solicitudEdicionEn = new Date().toISOString();
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Solicitud de edición', 'Identificación y registro', registroActual.apellidosNombres + ' — Toma ' + registroActual.tomaNombre);
+            }
+            mostrarConfirmacion();
         });
 
         // ═══ Arranque ═══

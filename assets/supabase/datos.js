@@ -907,7 +907,9 @@
     // Desbloquear (solo admin — la interfaz solo debe ofrecer este botón si
     // perfil.rol === 'admin', reforzado igual por identreg_update en
     // 012_identificacion_registro.sql, mismo criterio de doble candado que
-    // eliminarProgramacionTomaUI en el escritorio).
+    // eliminarProgramacionTomaUI en el escritorio). Al desbloquear se
+    // considera resuelta cualquier solicitud de edición pendiente sobre este
+    // registro, así que también se limpia — es la "aprobación".
     async function desbloquearRegistroIdentificacion(id) {
         if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
         let client;
@@ -917,10 +919,66 @@
             return { ok: false, error: e.message };
         }
         const { data, error } = await client.from('identificacion_registros')
-            .update({ confirmado: false })
+            .update({ confirmado: false, solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
             .eq('id', id).select('id').maybeSingle();
         if (error) return { ok: false, error: error.message };
         if (!data) return { ok: false, error: 'No se pudo desbloquear: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+
+    // Un programador (o admin) pide que se habilite la edición de un
+    // registro YA confirmado. No lo desbloquea — solo deja la solicitud
+    // guardada para que el administrador la vea y decida (habilitar o
+    // rechazar). La política identreg_update bloquea a un programador de
+    // tocar un registro confirmado, así que esto pasa por una función RPC
+    // con sus propias validaciones (ver 017_solicitud_edicion_identificacion.sql),
+    // no por un update() directo del cliente.
+    async function solicitarEdicionIdentificacion(id, nombreSolicitante) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.rpc('solicitar_edicion_identificacion', { registro_id: id, nombre_solicitante: nombreSolicitante || null }),
+            'solicitar edición de registro de identificación'
+        );
+        if (error) return { ok: false, error: error.mensaje || 'No se pudo enviar la solicitud.' };
+        return { ok: true };
+    }
+
+    // Todas las solicitudes de edición pendientes de la comisión (todas las
+    // tomas) — para que el administrador las vea juntas en vez de tener que
+    // encontrarlas registro por registro.
+    async function listarSolicitudesEdicionIdentificacion(comisionKey) {
+        if (!comisionKey) return { ok: true, solicitudes: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, solicitudes: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('identificacion_registros')
+                .select('id, toma_nombre, apellidos_nombres, unidad_catastral, solicitud_edicion_por_nombre, solicitud_edicion_en')
+                .eq('comision_id', comisionId)
+                .eq('solicitud_edicion', true)
+                .order('solicitud_edicion_en', { ascending: true }),
+            'listar solicitudes de edición de identificación'
+        );
+        if (error) return { ok: false, solicitudes: [], error: error.mensaje || 'No se pudo listar las solicitudes.' };
+        return { ok: true, solicitudes: data || [] };
+    }
+
+    // Admin rechaza una solicitud sin habilitar la edición — el registro
+    // sigue confirmado y bloqueado, solo se limpia la solicitud para que
+    // deje de aparecer en la lista de pendientes.
+    async function rechazarSolicitudEdicionIdentificacion(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('identificacion_registros')
+            .update({ solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo rechazar: revisa que tengas permiso de administrador.' };
         return { ok: true };
     }
 
@@ -1176,6 +1234,9 @@
         guardarRegistroIdentificacionDebounced,
         confirmarRegistroIdentificacion,
         desbloquearRegistroIdentificacion,
+        solicitarEdicionIdentificacion,
+        listarSolicitudesEdicionIdentificacion,
+        rechazarSolicitudEdicionIdentificacion,
         cargarRegistrosIdentificacionParaExportar,
         guardarPadronOficialA1,
         cargarPadronOficialA1,
