@@ -148,9 +148,10 @@
         <div id="panelPredioSeguimiento"></div>
         <div class="leyenda-mapa-seguimiento" id="leyendaMapaSeguimiento" style="display:none;">
             Se muestran todos los predios de la toma (levantamiento GIS,
-            mapas/*.kml). Los sombreados por color son los programados en la
-            semana consultada (color según su estado, igual que la lista de
-            arriba); el resto aparece solo con el contorno, sin sombrear.
+            mapas/*.kml). 🟨 Mostaza = en turno de riego ahora mismo. 🟦 Azul
+            = programado en la semana consultada, fuera de su turno todavía.
+            Sin sombrear = no programado esta semana. Toca un predio para ver
+            su detalle.
         </div>
     </div>
 
@@ -259,7 +260,17 @@
             }
             elEstado.textContent = '';
 
-            resultado.programaciones.forEach(function (p) {
+            // Mismo orden "como están en el sistema" que ya usa el Anexo G2
+            // (compararOrdenTomas, assets/core/anexoG2.js): empieza en SD3 y
+            // termina en SD14.1, sin agrupar por programador, con
+            // AGROAURORA/EL LOBO siempre al final. Ya vienen filtradas a solo
+            // las tomas con programación (resultado.programaciones = las de
+            // esta comisión+semana), no hace falta filtrar de nuevo.
+            var programaciones = resultado.programaciones.slice().sort(function (a, b) {
+                return compararOrdenTomas(a.toma, b.toma);
+            });
+
+            programaciones.forEach(function (p) {
                 var opt = document.createElement('option');
                 opt.value = p.toma;
                 opt.textContent = p.toma;
@@ -348,16 +359,16 @@
             renderizarMapaSeguimiento(tomaSeleccionada, conEstado);
         }
 
-        // Colores del mapa por ESTADO de riego (no por cultivo, a diferencia
-        // del antiguo Mapa de predios) — mismos colores que los badges de la
-        // lista de arriba, para que un vistazo al mapa y a la lista se lean
-        // igual.
-        var COLOR_POR_ESTADO_MAPA = {
-            'en-curso':    { bg: 'rgba(200, 168, 75, 0.35)', border: '#c8a84b' },
-            'proximo':     { bg: 'rgba(37, 99, 235, 0.30)',  border: '#2563eb' },
-            'finalizado':  { bg: 'rgba(71, 85, 105, 0.25)',  border: '#475569' },
-            'sin-horario': { bg: 'rgba(192, 57, 43, 0.30)',  border: '#c0392b' }
-        };
+        // Colores del mapa: solo 3 categorías (a pedido del usuario, más
+        // simple que un color por cada uno de los 4 estados de la lista).
+        // - EN CURSO ("en turno de riego" ahora mismo): mostaza, como antes.
+        // - Programado pero NO en curso (próximo/finalizado/sin horario):
+        //   azul, bien saturado — debe resaltar claramente sobre el resto.
+        // - No programado en esta toma/semana: gris tenue, solo contorno
+        //   (COLOR_PREDIO_NO_PROGRAMADO, abajo) — para verse claramente por
+        //   debajo de los dos anteriores.
+        var COLOR_EN_CURSO_MAPA = { bg: 'rgba(200, 168, 75, 0.55)', border: '#c8a84b' };
+        var COLOR_PROGRAMADO_MAPA = { bg: 'rgba(37, 99, 235, 0.55)', border: '#1d4ed8' };
         // Predios de la toma que NO están en la lista de seguimiento de esta
         // semana (no programados, o programados pero sin horario confirmado
         // todavía) — se muestran igual (para ver la toma completa) pero SIN
@@ -494,8 +505,8 @@
                         if (!feature.properties._programado) {
                             return { fillColor: COLOR_PREDIO_NO_PROGRAMADO.bg, color: COLOR_PREDIO_NO_PROGRAMADO.border, weight: 1, fillOpacity: 0.12 };
                         }
-                        var color = COLOR_POR_ESTADO_MAPA[feature.properties.estado] || COLOR_POR_ESTADO_MAPA['sin-horario'];
-                        return { fillColor: color.bg, color: color.border, weight: 1.5, fillOpacity: 0.55 };
+                        var color = (feature.properties.estado === 'en-curso') ? COLOR_EN_CURSO_MAPA : COLOR_PROGRAMADO_MAPA;
+                        return { fillColor: color.bg, color: color.border, weight: 2, fillOpacity: 0.65 };
                     },
                     onEachFeature: function (feature, layer) {
                         layer.on('click', function () { mostrarPanelPredioSeguimiento(feature.properties); });

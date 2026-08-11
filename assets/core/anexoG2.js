@@ -13,6 +13,50 @@
 // (p. ej. desde el móvil, que no tiene ese desplegable), el respaldo de
 // orden simplemente no aplica — mismo comportamiento que antes cuando el
 // elemento no existía en el DOM.
+
+// Orden fijo de las tomas del Canal Sur, confirmado por el usuario (coincide
+// con el orden físico de las tomas a lo largo del canal, sifones incluidos
+// en su posición real), sin importar en qué orden se fueron confirmando las
+// programaciones. Se usa tanto para el Anexo G2 (abajo) como para cualquier
+// otra lista de tomas que deba respetar el mismo orden "como están en el
+// sistema" (ej. el selector de toma de Seguimiento PDA en móvil).
+const ORDEN_FIJO_CANAL_SUR = [
+    'SD3', 'SI3', 'SD4', 'SI4', 'SD5', 'SI5', 'SD6', 'SD7',
+    'SIFON TAPIA 13+652', 'SD8', 'SD8.1', 'SI6', 'SD9', 'SD10',
+    'SIFON PALOMINO SD10', 'SD11', 'SI7', 'SD12', 'SIFON HERRERA SI7',
+    'SD12.1', 'SD13', 'SD14', 'SD14.1'
+];
+const ORDEN_FIJO_CANAL_SUR_INDICE = {};
+ORDEN_FIJO_CANAL_SUR.forEach((n, idx) => { ORDEN_FIJO_CANAL_SUR_INDICE[n.toUpperCase()] = idx; });
+
+// AGROAURORA y EL LOBO siempre van al final de la relación, sin importar el
+// orden fijo de arriba.
+const TOMAS_ORDEN_AL_FINAL = ['AGROAURORA', 'EL LOBO'];
+
+// Comparador reutilizable de orden de tomas: primero las del orden fijo del
+// Canal Sur (SD3 → SD14.1), luego AGROAURORA/EL LOBO al final, y cualquier
+// toma que no aparezca en ninguna lista conserva su orden relativo original
+// (o el respaldo `ordenTomaSelect`, si se pasa uno — ver comentario de
+// generarDatosAnexoG2 más arriba).
+function compararOrdenTomas(nombreA, nombreB, ordenTomaSelect) {
+    ordenTomaSelect = ordenTomaSelect || {};
+    const nA = (nombreA || '').toString().trim().toUpperCase();
+    const nB = (nombreB || '').toString().trim().toUpperCase();
+
+    const aAlFinal = TOMAS_ORDEN_AL_FINAL.some(n => nA.includes(n));
+    const bAlFinal = TOMAS_ORDEN_AL_FINAL.some(n => nB.includes(n));
+    if (aAlFinal && !bAlFinal) return 1;
+    if (!aAlFinal && bAlFinal) return -1;
+    if (aAlFinal && bAlFinal) return 0;
+
+    const idxA = ORDEN_FIJO_CANAL_SUR_INDICE[nA] !== undefined ? ORDEN_FIJO_CANAL_SUR_INDICE[nA] : ordenTomaSelect[nA];
+    const idxB = ORDEN_FIJO_CANAL_SUR_INDICE[nB] !== undefined ? ORDEN_FIJO_CANAL_SUR_INDICE[nB] : ordenTomaSelect[nB];
+    if (idxA !== undefined && idxB !== undefined) return idxA - idxB;
+    if (idxA !== undefined) return -1; // tomas conocidas antes que las que no aparecen en ninguna lista
+    if (idxB !== undefined) return 1;
+    return 0; // conserva el orden relativo original si ninguna está identificada
+}
+
 function generarDatosAnexoG2(ordenTomasDesktop) {
     if (consolidadoDemandas.length === 0) {
         alert('No hay datos en el consolidado para generar el Anexo G2');
@@ -223,21 +267,8 @@ function generarDatosAnexoG2(ordenTomasDesktop) {
         item++;
     });
 
-    // Orden fijo de las tomas del Canal Sur, confirmado por el usuario
-    // (coincide con el orden físico de las tomas a lo largo del canal,
-    // sifones incluidos en su posición real), sin importar en qué orden
-    // se fueron confirmando las programaciones.
-    const ORDEN_FIJO_CANAL_SUR = [
-        'SD3', 'SI3', 'SD4', 'SI4', 'SD5', 'SI5', 'SD6', 'SD7',
-        'SIFON TAPIA 13+652', 'SD8', 'SD8.1', 'SI6', 'SD9', 'SD10',
-        'SIFON PALOMINO SD10', 'SD11', 'SI7', 'SD12', 'SIFON HERRERA SI7',
-        'SD12.1', 'SD13', 'SD14', 'SD14.1'
-    ];
-    const ordenFijo = {};
-    ORDEN_FIJO_CANAL_SUR.forEach((n, idx) => { ordenFijo[n.toUpperCase()] = idx; });
-
     // Respaldo: orden del desplegable "Seleccionar Toma" (pasado por el llamador),
-    // solo para tomas que no estén en la lista fija de arriba (p. ej. tomas nuevas).
+    // solo para tomas que no estén en la lista fija ORDEN_FIJO_CANAL_SUR (p. ej. tomas nuevas).
     const ordenTomaSelect = {};
     (ordenTomasDesktop || []).forEach((nombre, idx) => {
         if (nombre && nombre !== 'CONSOLIDADO') {
@@ -245,23 +276,7 @@ function generarDatosAnexoG2(ordenTomasDesktop) {
         }
     });
 
-    // AGROAURORA y EL LOBO siempre van al final de la relación
-    const nombresAlFinal = ['AGROAURORA', 'EL LOBO'];
-    datosAnexoG2.sort((a, b) => {
-        const aAlFinal = nombresAlFinal.some(n => (a.nombreToma || '').toString().trim().toUpperCase().includes(n));
-        const bAlFinal = nombresAlFinal.some(n => (b.nombreToma || '').toString().trim().toUpperCase().includes(n));
-        if (aAlFinal && !bAlFinal) return 1;
-        if (!aAlFinal && bAlFinal) return -1;
-        if (aAlFinal && bAlFinal) return 0;
-        const nombreA = (a.nombreToma || '').toString().trim().toUpperCase();
-        const nombreB = (b.nombreToma || '').toString().trim().toUpperCase();
-        const idxA = ordenFijo[nombreA] !== undefined ? ordenFijo[nombreA] : ordenTomaSelect[nombreA];
-        const idxB = ordenFijo[nombreB] !== undefined ? ordenFijo[nombreB] : ordenTomaSelect[nombreB];
-        if (idxA !== undefined && idxB !== undefined) return idxA - idxB;
-        if (idxA !== undefined) return -1; // tomas conocidas antes que las que no aparecen en ninguna lista
-        if (idxB !== undefined) return 1;
-        return 0; // conserva el orden relativo original si ninguna está identificada
-    });
+    datosAnexoG2.sort((a, b) => compararOrdenTomas(a.nombreToma, b.nombreToma, ordenTomaSelect));
     // Renumerar el ítem tras el reordenamiento
     datosAnexoG2.forEach((fila, idx) => { fila.item = idx + 1; });
 
