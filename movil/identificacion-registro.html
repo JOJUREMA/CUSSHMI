@@ -309,17 +309,56 @@
             return padronA1Promesa;
         }
 
+        // Normaliza una unidad catastral para comparar entre archivos de
+        // origen distintos (el Excel oficial A-1 y el Excel de programación
+        // del PDA no necesariamente la escriben con el mismo formato exacto:
+        // espacios, mayúsculas/minúsculas) — mayúsculas y sin espacios, para
+        // no perder una coincidencia real por una diferencia de formato.
+        function normalizarUC(valor) {
+            return (valor || '').toString().trim().toUpperCase().replace(/\s+/g, '');
+        }
+
         // Empareja por unidad catastral (más confiable) y si no por nombre
         // normalizado — mismo criterio ya usado en Seguimiento PDA/Mapa.
         function emparejarConPadronA1(padronA1, unidadCatastral, nombre) {
-            var uc = (unidadCatastral || '').toString().trim();
+            var uc = normalizarUC(unidadCatastral);
             if (uc) {
-                var porUC = padronA1.find(function (p) { return (p.unidad_catastral || '').toString().trim() === uc; });
+                var porUC = padronA1.find(function (p) { return normalizarUC(p.unidad_catastral) === uc; });
                 if (porUC) return porUC;
             }
             var nombreNorm = (nombre || '').toString().trim().toUpperCase();
             if (!nombreNorm) return null;
             return padronA1.find(function (p) { return (p.apellidos_nombres || '').toString().trim().toUpperCase() === nombreNorm; }) || null;
+        }
+
+        // Mismo criterio, contra el padrón operativo de la toma (el que sale
+        // del Excel de programación del PDA, ya cargado en padronTomaActual)
+        // — de ahí sale lo que el A-1 oficial no tiene: cultivo instalado y
+        // tipo de riego. Un usuario con varios cultivos en la misma unidad
+        // catastral ya viene como UNA sola fila con `cultivos` = arreglo
+        // completo (obtenerParesCultivoAreaUsuario ya los combinó todos al
+        // sincronizar el padrón desde escritorio) — nunca hay que juntar
+        // filas separadas acá, ya llegan combinadas.
+        function emparejarConPadronUsuarios(lista, unidadCatastral, nombre) {
+            var uc = normalizarUC(unidadCatastral);
+            if (uc) {
+                var porUC = lista.find(function (p) { return normalizarUC(p.unidad_catastral) === uc; });
+                if (porUC) return porUC;
+            }
+            var nombreNorm = (nombre || '').toString().trim().toUpperCase();
+            if (!nombreNorm) return null;
+            return lista.find(function (p) { return (p.nombre || '').toString().trim().toUpperCase() === nombreNorm; }) || null;
+        }
+
+        // "ARROZ (2.50 ha), MAÍZ (1.00 ha)" — todos los cultivos de un mismo
+        // usuario en un solo texto, para el campo "Cultivo instalado
+        // actualmente" (un solo registro de identificación, no uno por cultivo).
+        function formatearCultivos(cultivos) {
+            if (!Array.isArray(cultivos) || cultivos.length === 0) return '';
+            return cultivos
+                .filter(function (c) { return c && (c.cultivo || '').toString().trim() !== ''; })
+                .map(function (c) { return c.cultivo.toString().trim() + ' (' + (parseFloat(c.area) || 0).toFixed(2) + ' ha)'; })
+                .join(', ');
         }
 
         var elEstadoTomas = document.getElementById('estadoTomas');
@@ -488,6 +527,25 @@
                 base.claseDerecho = coincidencia.clase_derecho || '';
                 base.volumenM3Anio = coincidencia.volumen_m3 != null ? coincidencia.volumen_m3 : '';
             }
+
+            // Lo que el padrón A-1 NO trae (cultivo instalado, tipo de riego)
+            // sale del padrón operativo — el mismo Excel con el que se
+            // programa el PDA, ya sincronizado en padron_usuarios. Se usa
+            // directo `padronUsuario` si ya es la fila elegida en Pantalla 3;
+            // si no (ej. "+ Agregar usuario nuevo"), se busca por unidad
+            // catastral o nombre en la toma actual. Un usuario con varios
+            // cultivos en la misma unidad catastral ya llega como una sola
+            // fila con todos sus cultivos —formatearCultivos los combina en
+            // un solo texto, nunca se generan registros separados por cultivo.
+            const usuarioPdaExcel = padronUsuario || emparejarConPadronUsuarios(padronTomaActual, base.unidadCatastral, base.apellidosNombres);
+            if (usuarioPdaExcel) {
+                if (!base.apellidosNombres) base.apellidosNombres = usuarioPdaExcel.nombre || '';
+                if (!base.unidadCatastral) base.unidadCatastral = usuarioPdaExcel.unidad_catastral || '';
+                if (!base.padronUsuarioId) base.padronUsuarioId = usuarioPdaExcel.id || null;
+                base.cultivoActual = formatearCultivos(usuarioPdaExcel.cultivos);
+                base.tipoRiego = usuarioPdaExcel.tipo_riego || base.tipoRiego;
+            }
+
             return base;
         }
 
