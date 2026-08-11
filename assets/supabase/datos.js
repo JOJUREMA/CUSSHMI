@@ -962,6 +962,38 @@
         return { ok: true, resultados };
     }
 
+    // Todos los campos del padrón oficial A-1 — para exportar los Formatos
+    // A-1/A-2 oficiales (a diferencia de cargarPadronOficialA1, que solo
+    // trae lo necesario para el autocompletado del móvil). `origen`
+    // distingue qué fila va en cada formato: 'ana_a1' -> Formato A-1
+    // (usuarios con derecho vigente en el RADA), 'campo' -> Formato A-2
+    // (usuarios que el sectorista registró en campo sin derecho formalizado).
+    async function cargarPadronOficialA1CompletoParaExportar(comisionKey) {
+        if (!comisionKey) return { ok: true, resultados: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, resultados: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const TAMANO_PAGINA = 1000;
+        const resultados = [];
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from('padron_oficial_a1')
+                    .select('numero_orden, apellidos_nombres, tipo_documento, numero_documento, departamento, provincia, distrito, localidad, unidad_catastral, area_total_ha, area_bajo_riego_ha, sub_sector_hidraulico, numero_resolucion, clase_derecho, tipo_uso, volumen_m3, canal_derivacion, fuente_agua, cut_expediente, origen, observacion')
+                    .eq('comision_id', comisionId)
+                    .order('origen', { ascending: true })
+                    .order('numero_orden', { ascending: true, nullsFirst: false })
+                    .range(desde, desde + TAMANO_PAGINA - 1),
+                'cargar padrón oficial A-1 completo (exportación)'
+            );
+            if (error || !data) return { ok: false, resultados: [], error: error ? error.mensaje : 'No se pudo cargar el padrón oficial A-1.' };
+            resultados.push(...data);
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return { ok: true, resultados };
+    }
+
     // Un usuario que el sectorista registró en campo y que NO estaba en el
     // padrón oficial A-1 (Anexo A-2: sin derecho formalizado) se incorpora
     // acá con origen='campo' y la observación fija "Remitir a la Junta" —
@@ -994,6 +1026,7 @@
             tipo_uso: datos.tipoUso || null,
             canal_derivacion: datos.canalDerivacion || null,
             fuente_agua: datos.fuenteAgua || null,
+            cut_expediente: datos.cutExpediente || null,
             origen: 'campo',
             observacion: 'Remitir a la Junta',
             actualizado_por: usuarioId,
@@ -1035,6 +1068,7 @@
         desbloquearRegistroIdentificacion,
         guardarPadronOficialA1,
         cargarPadronOficialA1,
+        cargarPadronOficialA1CompletoParaExportar,
         incorporarUsuarioNuevoAPadronOficialA1,
     };
 })();

@@ -1243,6 +1243,9 @@
                     📡 Sincronizar Padrón A-1 (ANA)
                 </button>
                 <input type="file" id="inputPadronOficialA1" accept=".xlsx" style="display:none;" onchange="importarPadronOficialA1(event)">
+                <button class="btn btn-success" id="btnExportarA1A2" onclick="exportarFormatosA1A2()" title="Genera un Excel con los Formatos A-1 (usuarios con derecho vigente) y A-2 (registrados en campo, sin derecho formalizado) oficiales de ANA">
+                    📊 Exportar Formatos A-1/A-2
+                </button>
 
                 <button class="btn btn-secondary" id="btnLimpiar">
                     🔄 Limpiar Datos
@@ -2849,6 +2852,276 @@ const COMISIONES = {
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
                 event.target.value = '';
+            }
+        }
+
+        // ══ Exportación de los Formatos A-1 y A-2 oficiales (R.J. N° 0155-
+        // 2022-ANA) ══ Un solo .xlsx con dos hojas, armadas desde
+        // padron_oficial_a1: origen='ana_a1' -> Formato A-1 (usuarios con
+        // derecho vigente en el RADA, cargados por "Sincronizar Padrón A-1");
+        // origen='campo' -> Formato A-2 (usuarios sin derecho formalizado que
+        // el sectorista incorporó desde "Identificación y registro"). Usa el
+        // ExcelJS ya vendorizado (solo para ESCRIBIR — la lectura de un
+        // archivo real de ANA usa SheetJS, ver importarPadronOficialA1; para
+        // generar un archivo nuevo desde cero ExcelJS funciona igual que en
+        // el resto del sistema, ej. el Excel del Anexo G2).
+        const AAA_NOMBRE = 'JEQUETEPEQUE ZARUMILLA';
+        const ALA_NOMBRE = 'CHIRA';
+        const OPERADOR_INFRAESTRUCTURA = 'JUNTA DE USUARIOS DEL SECTOR HIDRÁULICO MENOR CHIRA - CLASE A';
+
+        function _escribirEncabezadoFormatoOficial(ws, numCols, tituloFormato, tituloDocumento, comisionNombre) {
+            let r = 1;
+
+            const cAnexo = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, numCols);
+            cAnexo.value = 'Anexo A: Padrón de Usuarios de Agua';
+            cAnexo.font = { bold: true, size: 13, color: { argb: 'FF1F4E79' } };
+            cAnexo.alignment = { horizontal: 'center' };
+            r++;
+
+            const cFormato = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, numCols);
+            cFormato.value = tituloFormato;
+            cFormato.font = { bold: true, size: 12 };
+            cFormato.alignment = { horizontal: 'center' };
+            r += 2;
+
+            [
+                ['MINISTERIO DE DESARROLLO AGRARIO Y RIEGO', 11, true],
+                ['AUTORIDAD NACIONAL DEL AGUA - ANA', 10, true],
+                ['Autoridad Administrativa del Agua: ' + AAA_NOMBRE, 9, false],
+                ['Administración Local de Agua: ' + ALA_NOMBRE, 9, false],
+            ].forEach(([texto, size, bold]) => {
+                const c = ws.getCell(r, 1);
+                ws.mergeCells(r, 1, r, numCols);
+                c.value = texto;
+                c.font = { bold: bold, size: size };
+                c.alignment = { horizontal: 'center' };
+                r++;
+            });
+            r++;
+
+            const cDoc = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, numCols);
+            cDoc.value = tituloDocumento;
+            cDoc.font = { bold: true, size: 11 };
+            cDoc.alignment = { horizontal: 'center' };
+            r += 2;
+
+            const cOperador = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, numCols);
+            cOperador.value = 'Nombre del operador de la infraestructura hidraulica: ' + OPERADOR_INFRAESTRUCTURA;
+            cOperador.font = { size: 10 };
+            r++;
+
+            const cSector = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, numCols);
+            cSector.value = 'Nombre del Sector Hidráulico: ' + (comisionNombre || '');
+            cSector.font = { size: 10 };
+            r += 2;
+
+            return r; // primera fila libre para la tabla
+        }
+
+        function _estiloEncabezadoTablaOficial(celda) {
+            const bordeFino = { style: 'thin', color: { argb: 'FF000000' } };
+            celda.font = { bold: true, size: 9, color: { argb: 'FF000000' } };
+            celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+            celda.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            celda.border = { top: bordeFino, left: bordeFino, bottom: bordeFino, right: bordeFino };
+        }
+
+        // Escribe el bloque de encabezados de tabla (2 filas: grupo + columna)
+        // según `grupos` = [{ desde, hasta, texto }] (columnas 1-based) y
+        // `etiquetasCol` = un texto por columna, o null si esa columna ya
+        // quedó cubierta por una fusión VERTICAL (columna sin sub-división,
+        // ej. "N° Orden" o "Sub Sector Hidráulico").
+        function _escribirEncabezadoTabla(ws, filaGrupo, numCols, grupos, etiquetasCol) {
+            const filaCol = filaGrupo + 1;
+            grupos.forEach(({ desde, hasta, texto }) => {
+                if (desde === hasta) {
+                    ws.mergeCells(filaGrupo, desde, filaCol, desde); // fusión vertical: sin sub-división
+                } else {
+                    ws.mergeCells(filaGrupo, desde, filaGrupo, hasta);
+                }
+                ws.getCell(filaGrupo, desde).value = texto;
+            });
+            etiquetasCol.forEach((texto, idx) => {
+                if (texto === null) return; // cubierta por la fusión vertical de arriba
+                ws.getCell(filaCol, idx + 1).value = texto;
+            });
+            for (let c = 1; c <= numCols; c++) {
+                _estiloEncabezadoTablaOficial(ws.getCell(filaGrupo, c));
+                _estiloEncabezadoTablaOficial(ws.getCell(filaCol, c));
+            }
+            ws.getRow(filaGrupo).height = 24;
+            ws.getRow(filaCol).height = 32;
+            return filaCol + 1; // primera fila de datos
+        }
+
+        function _escribirFilaDatos(ws, r, numCols, valores) {
+            const bordeFino = { style: 'thin', color: { argb: 'FF000000' } };
+            const bordeCompleto = { top: bordeFino, left: bordeFino, bottom: bordeFino, right: bordeFino };
+            valores.forEach((val, c) => {
+                const celda = ws.getCell(r, c + 1);
+                celda.value = (val === null || val === undefined) ? '' : val;
+                celda.border = bordeCompleto;
+                celda.font = { size: 9 };
+                celda.alignment = { vertical: 'middle', horizontal: (c === 1) ? 'left' : 'center', wrapText: c === 1 };
+            });
+        }
+
+        function construirHojaFormatoA1(wb, filas, comisionNombre) {
+            const NUM_COLS = 16;
+            const ws = wb.addWorksheet('Formato A-1', {
+                views: [{ showGridLines: false }],
+                pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+            });
+            ws.columns = [
+                { width: 8 }, { width: 30 }, { width: 9 }, { width: 13 },
+                { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
+                { width: 12 }, { width: 10 }, { width: 12 }, { width: 18 },
+                { width: 22 }, { width: 16 }, { width: 12 }, { width: 14 },
+            ];
+
+            const filaGrupo = _escribirEncabezadoFormatoOficial(ws, NUM_COLS, 'Formato A-1: Padrón de Usuarios de Agua', 'PADRON DE USUARIOS DE AGUA', comisionNombre);
+            const r0 = _escribirEncabezadoTabla(ws, filaGrupo, NUM_COLS, [
+                { desde: 1, hasta: 1, texto: 'N° Orden' },
+                { desde: 2, hasta: 4, texto: 'DATOS DEL USUARIO' },
+                { desde: 5, hasta: 11, texto: 'UBICACIÓN DEL PREDIO O UNIDAD PRODUCTIVA' },
+                { desde: 12, hasta: 12, texto: 'SUB SECTOR HIDRÁULICO' },
+                { desde: 13, hasta: 16, texto: 'DATOS DEL DERECHO DE USO OTORGADO' },
+            ], [
+                null, 'Apellidos y Nombres / Razón Social', 'DNI/RUC', 'N° Documento',
+                'Departamento', 'Provincia', 'Distrito', 'Localidad',
+                'Unidad Catastral', 'Área Total (ha)', 'Área bajo riego (ha)',
+                null, 'Resolución / Certificado Nominativo', 'Clase de derecho de Uso',
+                'Tipo de Uso', 'Volumen de Agua (m³)',
+            ]);
+
+            let r = r0;
+            filas.forEach((f, idx) => {
+                _escribirFilaDatos(ws, r, NUM_COLS, [
+                    idx + 1, f.apellidos_nombres, f.tipo_documento, f.numero_documento,
+                    f.departamento, f.provincia, f.distrito, f.localidad,
+                    f.unidad_catastral, f.area_total_ha, f.area_bajo_riego_ha,
+                    f.sub_sector_hidraulico || comisionNombre, f.numero_resolucion, f.clase_derecho,
+                    f.tipo_uso, f.volumen_m3,
+                ]);
+                r++;
+            });
+
+            r++;
+            const cNota = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, NUM_COLS);
+            cNota.value = 'Nota: Clase de derecho de uso según artículo 45° de la Ley de Recursos Hídricos. Tipo de uso según artículo 43° de la Ley de Recursos Hídricos. Solo incluye usuarios con derecho de uso de agua vigente en el RADA.';
+            cNota.font = { italic: true, size: 8 };
+            cNota.alignment = { wrapText: true };
+
+            return ws;
+        }
+
+        function construirHojaFormatoA2(wb, filas, comisionNombre) {
+            const NUM_COLS = 17;
+            const ws = wb.addWorksheet('Formato A-2', {
+                views: [{ showGridLines: false }],
+                pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+            });
+            ws.columns = [
+                { width: 8 }, { width: 30 }, { width: 9 }, { width: 13 },
+                { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
+                { width: 12 }, { width: 10 }, { width: 12 }, { width: 18 },
+                { width: 16 }, { width: 14 }, { width: 18 }, { width: 12 }, { width: 16 },
+            ];
+
+            const filaGrupo = _escribirEncabezadoFormatoOficial(
+                ws, NUM_COLS,
+                'Formato A-2: Relación de personas que reciben el servicio de suministro de agua en proceso de formalización o regularización',
+                'RELACIÓN DE PERSONAS QUE RECIBEN EL SERVICIO DE SUMINISTRO DE AGUA EN PROCESO DE FORMALIZACIÓN O REGULARIZACIÓN',
+                comisionNombre
+            );
+            const r0 = _escribirEncabezadoTabla(ws, filaGrupo, NUM_COLS, [
+                { desde: 1, hasta: 1, texto: 'N° Orden' },
+                { desde: 2, hasta: 4, texto: 'DATOS DE LA PERSONA' },
+                { desde: 5, hasta: 11, texto: 'UBICACIÓN DEL PREDIO O UNIDAD PRODUCTIVA' },
+                { desde: 12, hasta: 12, texto: 'SUB SECTOR HIDRÁULICO' },
+                { desde: 13, hasta: 13, texto: 'CANAL DE DERIVACIÓN' },
+                { desde: 14, hasta: 14, texto: 'FUENTE DE AGUA' },
+                { desde: 15, hasta: 15, texto: 'CUT DE EXPEDIENTE PROCESO FORMALIZACIÓN O REGULARIZACIÓN' },
+                { desde: 16, hasta: 17, texto: 'DATOS DEL USO DEL AGUA' },
+            ], [
+                null, 'Apellidos y Nombres / Razón Social', 'DNI/RUC', 'N° Documento',
+                'Departamento', 'Provincia', 'Distrito', 'Localidad',
+                'Unidad Catastral', 'Área Total (ha)', 'Área bajo riego (ha)',
+                null, null, null, null,
+                'Tipo de Uso', 'Volumen de Agua Utilizado (m³)',
+            ]);
+
+            let r = r0;
+            filas.forEach((f, idx) => {
+                _escribirFilaDatos(ws, r, NUM_COLS, [
+                    idx + 1, f.apellidos_nombres, f.tipo_documento, f.numero_documento,
+                    f.departamento, f.provincia, f.distrito, f.localidad,
+                    f.unidad_catastral, f.area_total_ha, f.area_bajo_riego_ha,
+                    f.sub_sector_hidraulico || comisionNombre, f.canal_derivacion, f.fuente_agua,
+                    f.cut_expediente, f.tipo_uso, f.volumen_m3,
+                ]);
+                r++;
+            });
+
+            r++;
+            const cNota = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, NUM_COLS);
+            cNota.value = 'Nota: para el punto "Unidad Catastral" se registra únicamente cuando se cuenta con el dato. Tipo de uso según artículo 43° de la Ley de Recursos Hídricos. CUT = Código Único de Trámite del expediente presentado ante la ALA.';
+            cNota.font = { italic: true, size: 8 };
+            cNota.alignment = { wrapText: true };
+
+            return ws;
+        }
+
+        async function exportarFormatosA1A2() {
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+
+            const btn = document.getElementById('btnExportarA1A2');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📊 Generando…'; }
+
+            try {
+                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                const resultado = await CusshmiDatos.cargarPadronOficialA1CompletoParaExportar(comisionKey);
+                if (!resultado.ok) { alert('No se pudo cargar el padrón oficial: ' + resultado.error); return; }
+
+                const filasA1 = resultado.resultados.filter((f) => f.origen === 'ana_a1');
+                const filasA2 = resultado.resultados.filter((f) => f.origen === 'campo');
+                if (filasA1.length === 0 && filasA2.length === 0) {
+                    alert('No hay datos en el padrón oficial A-1 para esta comisión todavía. Primero sincroniza el padrón A-1 (o registra usuarios en "Identificación y registro").');
+                    return;
+                }
+
+                const comisionNombre = (COMISIONES[comisionKey] && COMISIONES[comisionKey].nombre) || comisionKey;
+                const wb = new ExcelJS.Workbook();
+                construirHojaFormatoA1(wb, filasA1, comisionNombre);
+                construirHojaFormatoA2(wb, filasA2, comisionNombre);
+
+                const buffer = await wb.xlsx.writeBuffer();
+                const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                const url = URL.createObjectURL(blob);
+                const enlace = document.createElement('a');
+                enlace.href = url;
+                const fecha = new Date().toISOString().split('T')[0];
+                enlace.download = `Formatos_A1_A2_${comisionKey}_${fecha}.xlsx`;
+                document.body.appendChild(enlace);
+                enlace.click();
+                document.body.removeChild(enlace);
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+                alert('✅ Exportado: ' + filasA1.length + ' usuarios en Formato A-1, ' + filasA2.length + ' en Formato A-2.');
+            } catch (e) {
+                console.error('Error al exportar Formatos A-1/A-2:', e);
+                alert('No se pudo generar el archivo: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
             }
         }
 
