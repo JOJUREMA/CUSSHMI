@@ -147,10 +147,10 @@
         <div id="mapaSeguimiento"></div>
         <div id="panelPredioSeguimiento"></div>
         <div class="leyenda-mapa-seguimiento" id="leyendaMapaSeguimiento" style="display:none;">
-            Predios de los usuarios de la lista de arriba, coloreados según su
-            estado. El polígono viene del levantamiento GIS (mapas/*.kml); si
-            un usuario no tiene predio mapeado todavía, no aparece en el mapa
-            pero sí en la lista.
+            Se muestran todos los predios de la toma (levantamiento GIS,
+            mapas/*.kml). Los sombreados por color son los programados en la
+            semana consultada (color según su estado, igual que la lista de
+            arriba); el resto aparece solo con el contorno, sin sombrear.
         </div>
     </div>
 
@@ -296,7 +296,7 @@
 
             if (usuarios.length === 0) {
                 elEstado.textContent = 'No hay usuarios con horario confirmado para esta toma todavía.';
-                renderizarMapaSeguimiento(null, []);
+                renderizarMapaSeguimiento(nombreToma, []);
                 return;
             }
 
@@ -358,6 +358,11 @@
             'finalizado':  { bg: 'rgba(71, 85, 105, 0.25)',  border: '#475569' },
             'sin-horario': { bg: 'rgba(192, 57, 43, 0.30)',  border: '#c0392b' }
         };
+        // Predios de la toma que NO están en la lista de seguimiento de esta
+        // semana (no programados, o programados pero sin horario confirmado
+        // todavía) — se muestran igual (para ver la toma completa) pero SIN
+        // sombrear, solo el contorno.
+        var COLOR_PREDIO_NO_PROGRAMADO = { bg: 'rgba(148, 163, 184, 0.06)', border: 'rgba(148, 163, 184, 0.55)' };
 
         async function obtenerPrediosDeToma(tomaNombre) {
             if (prediosPorTomaCache[tomaNombre]) return prediosPorTomaCache[tomaNombre];
@@ -411,6 +416,17 @@
         }
 
         function mostrarPanelPredioSeguimiento(props) {
+            if (!props._programado) {
+                // Predio de la toma que no está en la lista de seguimiento de
+                // esta semana — se muestra la info cruda del KML nomás.
+                elPanelPredio.innerHTML =
+                    '<div class="nombre-usuario-g3">' + escapeHtml(props.usuario || 'Sin nombre en KML') + '</div>' +
+                    '<div style="font-size:11.5px; opacity:0.85; margin-top:4px;">Lateral: ' + escapeHtml(props.lateral || '-') +
+                    ' · Área (KML): ' + (parseFloat(props.areaHa) || 0).toFixed(2) + ' ha</div>' +
+                    '<div style="font-size:11.5px; opacity:0.7; margin-top:4px; font-style:italic;">No programado en la semana consultada.</div>';
+                elPanelPredio.style.display = 'block';
+                return;
+            }
             var detalle = (props.estado === 'sin-horario')
                 ? 'Horario aún no confirmado en escritorio.'
                 : escapeHtml(props.inicioTexto || '-') + ' → ' + escapeHtml(props.terminoTexto || '-') + ' · ' +
@@ -428,7 +444,8 @@
         // descargado (prediosPorTomaCache) y solo recalcula el cruce y el
         // color, nunca vuelve a descargar el KML en cada refresco.
         async function renderizarMapaSeguimiento(tomaNombre, usuariosConEstado) {
-            if (!tomaNombre || !usuariosConEstado || usuariosConEstado.length === 0) {
+            usuariosConEstado = usuariosConEstado || [];
+            if (!tomaNombre) {
                 elMapaContainer.style.display = 'none';
                 elPanelPredio.style.display = 'none';
                 elLeyendaMapa.style.display = 'none';
@@ -448,20 +465,14 @@
                     return;
                 }
 
-                var prediosCruzados = predios
-                    .map(function (p) {
-                        var usuario = emparejarPredioConUsuario(p, usuariosConEstado);
-                        return usuario ? Object.assign({}, p, usuario) : null;
-                    })
-                    .filter(Boolean);
-
-                if (prediosCruzados.length === 0) {
-                    elMapaContainer.style.display = 'none';
-                    elPanelPredio.style.display = 'none';
-                    elLeyendaMapa.style.display = 'none';
-                    elEstadoMapa.textContent = '';
-                    return;
-                }
+                // TODOS los predios de la toma se muestran siempre — los que
+                // coinciden con un usuario de la lista de arriba (esta
+                // toma/semana) quedan sombreados por estado; el resto se ve
+                // solo con el contorno, sin sombrear.
+                var prediosMarcados = predios.map(function (p) {
+                    var usuario = emparejarPredioConUsuario(p, usuariosConEstado);
+                    return usuario ? Object.assign({}, p, usuario, { _programado: true }) : Object.assign({}, p, { _programado: false });
+                });
 
                 inicializarMapaSeguimientoSiHaceFalta();
                 elMapaContainer.style.display = 'block';
@@ -473,13 +484,16 @@
 
                 var featureCollection = {
                     type: 'FeatureCollection',
-                    features: prediosCruzados.map(function (p) {
+                    features: prediosMarcados.map(function (p) {
                         return { type: 'Feature', properties: p, geometry: { type: 'Polygon', coordinates: [p.coordenadas] } };
                     })
                 };
 
                 capaPredios = L.geoJSON(featureCollection, {
                     style: function (feature) {
+                        if (!feature.properties._programado) {
+                            return { fillColor: COLOR_PREDIO_NO_PROGRAMADO.bg, color: COLOR_PREDIO_NO_PROGRAMADO.border, weight: 1, fillOpacity: 0.12 };
+                        }
                         var color = COLOR_POR_ESTADO_MAPA[feature.properties.estado] || COLOR_POR_ESTADO_MAPA['sin-horario'];
                         return { fillColor: color.bg, color: color.border, weight: 1.5, fillOpacity: 0.55 };
                     },
