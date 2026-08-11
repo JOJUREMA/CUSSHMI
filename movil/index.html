@@ -73,6 +73,10 @@
                     <span class="icono">🚿</span>
                     <span class="texto">Orden de Riego</span>
                 </a>
+                <a class="tile" href="identificacion-registro.html" id="tileIdentificacionRegistro" style="display:none;">
+                    <span class="icono">🧾</span>
+                    <span class="texto">Identificación y registro</span>
+                </a>
             </div>
             <div style="width:100%; max-width:420px;">
                 <button class="boton-secundario" id="btnCerrarSesion">Cerrar sesión</button>
@@ -120,6 +124,15 @@
             var tileOrdenRiego = document.getElementById('tileOrdenRiego');
             if (tileOrdenRiego) {
                 tileOrdenRiego.style.display = (perfil.rol === 'admin' || perfil.rol === 'programador') ? 'flex' : 'none';
+            }
+
+            // "Identificación y registro" (verificación de campo) — mismo
+            // criterio que Orden de Riego: admin o programador (el
+            // "sectorista" del pedido original es el rol programador que ya
+            // existe, no se creó un rol nuevo).
+            var tileIdentificacionRegistro = document.getElementById('tileIdentificacionRegistro');
+            if (tileIdentificacionRegistro) {
+                tileIdentificacionRegistro.style.display = (perfil.rol === 'admin' || perfil.rol === 'programador') ? 'flex' : 'none';
             }
 
             elLogin.style.display = 'none';

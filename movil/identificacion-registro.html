@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Identificación y registro — CUSSHMI Móvil</title>
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#003876">
+    <link rel="icon" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="stylesheet" href="estilos.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <script src="../assets/supabase/supabase-config.js"></script>
+    <script src="../assets/supabase/supabase-client.js"></script>
+    <script src="../assets/supabase/auth.js"></script>
+    <script src="../assets/supabase/migracion.js"></script>
+    <script src="../assets/supabase/datos.js"></script>
+    <script src="../assets/supabase/bloqueo.js"></script>
+    <script src="../assets/supabase/auditoria.js"></script>
+    <script src="../assets/supabase/presencia.js"></script>
+    <script src="../assets/core/clasificacion.js"></script>
+    <script src="../assets/core/utilidades.js"></script>
+    <script src="../assets/core/anexoG2.js"></script>
+    <script src="../assets/core/mapa.js"></script>
+
+    <style>
+        .campo textarea {
+            width: 100%;
+            padding: 11px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.95);
+            color: #002555;
+            font-size: 14px;
+            font-family: inherit;
+            min-height: 70px;
+            resize: vertical;
+        }
+        .campo input:disabled, .campo select:disabled, .campo textarea:disabled {
+            opacity: 0.7;
+        }
+        .seccion-titulo {
+            width: 100%;
+            max-width: 420px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.75;
+            margin: 18px 0 10px;
+        }
+        .seccion-titulo:first-of-type { margin-top: 4px; }
+        .fila-toma {
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 12px 14px;
+            text-align: left;
+            color: #ffffff;
+            cursor: pointer;
+            width: 100%;
+        }
+        .fila-toma .nombre-toma { font-size: 14px; font-weight: 600; }
+        .fila-toma .detalle-toma { font-size: 11.5px; opacity: 0.75; margin-top: 2px; }
+        .badge-registrado {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 9.5px;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            margin-left: 8px;
+            vertical-align: middle;
+            background: #1e7e34;
+            color: #ffffff;
+        }
+        .indicador-clasificacion {
+            width: 100%;
+            max-width: 420px;
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 13px;
+            margin-bottom: 14px;
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .indicador-clasificacion.a1 { background: rgba(30, 126, 52, 0.25); border-color: #1e7e34; }
+        .indicador-clasificacion.a2 { background: rgba(192, 57, 43, 0.25); border-color: #c0392b; }
+        .aviso-bloqueado {
+            width: 100%;
+            max-width: 420px;
+            background: rgba(200, 168, 75, 0.15);
+            border: 1px solid rgba(200, 168, 75, 0.5);
+            border-radius: 8px;
+            padding: 12px 14px;
+            font-size: 13px;
+            margin-bottom: 14px;
+            text-align: center;
+        }
+        .resumen-fila {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 0;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .resumen-fila:last-child { border-bottom: none; }
+        .resumen-fila .etiqueta-resumen { opacity: 0.7; }
+        .resumen-fila .valor-resumen { font-weight: 600; text-align: right; }
+    </style>
+</head>
+<body>
+    <div class="pantalla">
+        <div class="encabezado-modulo">
+            <a class="volver" href="index.html" title="Volver al menú">←</a>
+            <h2>🧾 Identificación y registro</h2>
+        </div>
+
+        <!-- ── Pantalla 2: selección de toma ── -->
+        <div id="vistaTomas" style="width:100%; display:flex; flex-direction:column; align-items:center;">
+            <div class="estado-busqueda" id="estadoTomas">Cargando tomas…</div>
+            <div class="resultados" id="listaTomas"></div>
+        </div>
+
+        <!-- ── Pantalla 3: búsqueda de usuario ── -->
+        <div id="vistaBusqueda" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverATomas" style="max-width:420px;">← Volver a las tomas</button>
+            <h1 id="tituloTomaBusqueda" style="margin-top:14px; font-size:16px;"></h1>
+
+            <div class="buscador campo" style="width:100%; max-width:420px; margin-top:8px;">
+                <label for="inputBusquedaUsuario">Buscar por nombre</label>
+                <input type="text" id="inputBusquedaUsuario" placeholder="ej. Pérez" autocomplete="off">
+            </div>
+
+            <button class="boton" id="btnAgregarNuevo" style="max-width:420px; margin-bottom:14px;">+ Agregar usuario nuevo</button>
+
+            <div class="estado-busqueda" id="estadoBusquedaUsuario"></div>
+            <div class="resultados" id="listaUsuarios"></div>
+        </div>
+
+        <!-- ── Pantalla 4: formulario de registro ── -->
+        <div id="vistaFormulario" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverABusqueda" style="max-width:420px;">← Volver a la búsqueda</button>
+
+            <div class="aviso-bloqueado" id="avisoBloqueadoFormulario" style="display:none; margin-top:14px;">
+                🔒 Registro confirmado. Para editar solicite habilitación al administrador.
+            </div>
+
+            <div class="seccion-titulo" style="margin-top:14px;">A — Datos del usuario</div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputApellidosNombres">Apellidos y nombres</label>
+                <input type="text" id="inputApellidosNombres" autocomplete="off">
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="selectTipoDocumento">Tipo de documento</label>
+                <select id="selectTipoDocumento">
+                    <option value="">-- Selecciona --</option>
+                    <option value="DNI">DNI</option>
+                    <option value="RUC">RUC</option>
+                </select>
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputNumeroDocumento">Número de documento</label>
+                <input type="text" id="inputNumeroDocumento" inputmode="numeric" autocomplete="off">
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputUnidadCatastral">Unidad catastral (UC)</label>
+                <input type="text" id="inputUnidadCatastral" autocomplete="off">
+            </div>
+
+            <div class="seccion-titulo">B — Datos del predio (a verificar en campo)</div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputAreaTotal">Área total del predio (ha)</label>
+                <input type="number" id="inputAreaTotal" min="0" step="0.01">
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputAreaBajoRiego">Área bajo riego verificada (ha)</label>
+                <input type="number" id="inputAreaBajoRiego" min="0" step="0.01">
+                <div class="estado-busqueda" id="avisoAreaExcede" style="display:none; color:#f5a3a3; padding:4px 0 0;">
+                    ⚠️ El área bajo riego no puede superar el área total.
+                </div>
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="selectTipoRiego">Tipo de riego</label>
+                <select id="selectTipoRiego">
+                    <option value="">-- Selecciona --</option>
+                    <option value="Gravedad">Gravedad</option>
+                    <option value="Goteo">Goteo</option>
+                    <option value="Aspersión">Aspersión</option>
+                    <option value="Otro">Otro</option>
+                </select>
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputCultivoActual">Cultivo instalado actualmente</label>
+                <input type="text" id="inputCultivoActual" autocomplete="off">
+            </div>
+
+            <div class="seccion-titulo">C — Derecho de uso de agua</div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="selectTieneDerecho">¿Tiene resolución o certificado nominativo?</label>
+                <select id="selectTieneDerecho">
+                    <option value="">-- Selecciona --</option>
+                    <option value="si">Sí</option>
+                    <option value="no">No</option>
+                    <option value="no_sabe">No sabe</option>
+                </select>
+            </div>
+            <div id="bloqueDerechoSi" style="display:none; width:100%; flex-direction:column; align-items:center;">
+                <div class="campo" style="width:100%; max-width:420px;">
+                    <label for="inputNumeroResolucion">Número de resolución</label>
+                    <input type="text" id="inputNumeroResolucion" autocomplete="off">
+                </div>
+                <div class="campo" style="width:100%; max-width:420px;">
+                    <label for="inputClaseDerecho">Clase de derecho</label>
+                    <input type="text" id="inputClaseDerecho" autocomplete="off">
+                </div>
+                <div class="campo" style="width:100%; max-width:420px;">
+                    <label for="inputVolumenM3Anio">Volumen (m³/año)</label>
+                    <input type="number" id="inputVolumenM3Anio" min="0" step="0.01">
+                </div>
+            </div>
+            <div id="bloqueDerechoNo" style="display:none; width:100%; max-width:420px;">
+                <div class="campo">
+                    <label for="inputCutExpediente">CUT del expediente en trámite</label>
+                    <input type="text" id="inputCutExpediente" autocomplete="off">
+                </div>
+            </div>
+            <div class="indicador-clasificacion" id="indicadorClasificacion" style="display:none;"></div>
+
+            <div class="seccion-titulo">F — Estado y observaciones</div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="selectEstadoPredio">Estado del predio</label>
+                <select id="selectEstadoPredio">
+                    <option value="">-- Selecciona --</option>
+                    <option value="en_produccion">En producción</option>
+                    <option value="en_preparacion">En preparación</option>
+                    <option value="abandonado">Abandonado</option>
+                    <option value="sin_agua">Sin agua</option>
+                </select>
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="textareaObservaciones">Observaciones</label>
+                <textarea id="textareaObservaciones"></textarea>
+            </div>
+
+            <div class="estado-busqueda" id="estadoGuardadoFormulario"></div>
+            <button class="boton" id="btnContinuarConfirmacion" style="max-width:420px;">Continuar →</button>
+        </div>
+
+        <!-- ── Pantalla 5: confirmación ── -->
+        <div id="vistaConfirmacion" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverAFormulario" style="max-width:420px;">← Volver al formulario</button>
+            <h1 style="margin-top:14px; font-size:16px;">Confirmación del registro</h1>
+
+            <div class="tarjeta" style="max-width:420px; margin-top:14px;">
+                <div id="resumenRegistro"></div>
+            </div>
+
+            <div class="aviso-bloqueado" id="avisoBloqueadoConfirmacion" style="display:none; margin-top:16px;">
+                🔒 Registro confirmado. Para editar solicite habilitación al administrador.
+            </div>
+
+            <div class="estado-busqueda" id="estadoConfirmacion"></div>
+            <button class="boton" id="btnConfirmarGuardar" style="max-width:420px; margin-top:10px;">✔ Confirmar y guardar</button>
+            <button class="boton-secundario" id="btnDesbloquear" style="max-width:420px; display:none;">🔓 Desbloquear (admin)</button>
+        </div>
+    </div>
+
+    <script>
+        var perfilActual = null;
+        var comisionKeyActual = null;
+        var esAdmin = false;
+
+        var tomaSeleccionada = null;
+        var padronTomaActual = [];
+        var registrosTomaActual = [];
+        var registroActual = null; // objeto mutado por guardarRegistroIdentificacionDebounced
+
+        var elEstadoTomas = document.getElementById('estadoTomas');
+        var elListaTomas = document.getElementById('listaTomas');
+        var elEstadoBusquedaUsuario = document.getElementById('estadoBusquedaUsuario');
+        var elListaUsuarios = document.getElementById('listaUsuarios');
+
+        // ═══ Pantalla 2 — selección de toma ═══
+        async function mostrarVistaTomas() {
+            document.getElementById('vistaTomas').style.display = 'flex';
+            document.getElementById('vistaBusqueda').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'none';
+            document.getElementById('vistaConfirmacion').style.display = 'none';
+
+            elEstadoTomas.textContent = 'Cargando tomas…';
+            elListaTomas.innerHTML = '';
+
+            var resultadoTomas = await CusshmiDatos.listarTomasConPadron(comisionKeyActual);
+            if (!resultadoTomas.ok) {
+                elEstadoTomas.textContent = resultadoTomas.error || 'No se pudo cargar la lista de tomas.';
+                return;
+            }
+            var tomas = (resultadoTomas.tomas || []).slice().sort(function (a, b) { return compararOrdenTomas(a, b); });
+            if (tomas.length === 0) {
+                elEstadoTomas.textContent = 'No hay padrón sincronizado para tu comisión todavía.';
+                return;
+            }
+
+            var resultadoAvance = await CusshmiDatos.obtenerAvanceRegistroPorToma(comisionKeyActual);
+            var avance = (resultadoAvance.ok && resultadoAvance.avance) ? resultadoAvance.avance : {};
+
+            elEstadoTomas.textContent = '';
+            tomas.forEach(function (toma) {
+                var a = avance[toma] || { registrados: 0, totalPadron: 0, porcentaje: null };
+                var bloque = obtenerBloqueDeToma(toma);
+                var detalle = (a.porcentaje !== null)
+                    ? (a.registrados + ' / ' + a.totalPadron + ' registrados (' + a.porcentaje + '%)')
+                    : (a.registrados + ' registrado(s)');
+
+                var fila = document.createElement('button');
+                fila.className = 'fila-toma';
+                fila.type = 'button';
+                fila.innerHTML =
+                    '<div class="nombre-toma">' + escapeHtml(toma) + '</div>' +
+                    '<div class="detalle-toma">Bloque: ' + escapeHtml(bloque) + ' · ' + escapeHtml(detalle) + '</div>';
+                fila.addEventListener('click', function () { abrirToma(toma); });
+                elListaTomas.appendChild(fila);
+            });
+        }
+
+        // ═══ Pantalla 3 — búsqueda de usuario ═══
+        async function abrirToma(tomaNombre) {
+            tomaSeleccionada = tomaNombre;
+            document.getElementById('vistaTomas').style.display = 'none';
+            document.getElementById('vistaBusqueda').style.display = 'flex';
+            document.getElementById('tituloTomaBusqueda').textContent = 'Toma ' + tomaNombre;
+            document.getElementById('inputBusquedaUsuario').value = '';
+            elEstadoBusquedaUsuario.textContent = 'Cargando padrón de la toma…';
+            elListaUsuarios.innerHTML = '';
+
+            var resultadoPadron = await CusshmiDatos.cargarPadronToma(comisionKeyActual, tomaNombre);
+            padronTomaActual = (resultadoPadron.ok && resultadoPadron.resultados) ? resultadoPadron.resultados : [];
+
+            var resultadoRegistros = await CusshmiDatos.listarRegistrosDeToma(comisionKeyActual, tomaNombre);
+            registrosTomaActual = (resultadoRegistros.ok && resultadoRegistros.registros) ? resultadoRegistros.registros : [];
+
+            if (padronTomaActual.length === 0) {
+                elEstadoBusquedaUsuario.textContent = 'No hay padrón sincronizado para esta toma. Usa "+ Agregar usuario nuevo".';
+            } else {
+                elEstadoBusquedaUsuario.textContent = '';
+            }
+            renderizarListaUsuarios('');
+        }
+
+        function registroDeUsuarioPadron(padronUsuarioId) {
+            return registrosTomaActual.find(function (r) { return r.padron_usuario_id === padronUsuarioId; }) || null;
+        }
+
+        function renderizarListaUsuarios(textoFiltro) {
+            elListaUsuarios.innerHTML = '';
+            var filtro = (textoFiltro || '').trim().toUpperCase();
+            var filas = filtro
+                ? padronTomaActual.filter(function (u) { return (u.nombre || '').toUpperCase().indexOf(filtro) !== -1; })
+                : padronTomaActual;
+
+            if (padronTomaActual.length > 0 && filas.length === 0) {
+                elEstadoBusquedaUsuario.textContent = 'Sin coincidencias — usa "+ Agregar usuario nuevo" si no está en el padrón.';
+            } else if (padronTomaActual.length > 0) {
+                elEstadoBusquedaUsuario.textContent = '';
+            }
+
+            filas.forEach(function (u) {
+                var registro = registroDeUsuarioPadron(u.id);
+                var fila = document.createElement('div');
+                fila.className = 'fila-resultado';
+                fila.innerHTML =
+                    '<div class="nombre-resultado">' + escapeHtml(u.nombre || '-') +
+                    (registro ? '<span class="badge-registrado">' + (registro.confirmado ? '✅ confirmado' : '📝 borrador') + '</span>' : '') +
+                    '</div>' +
+                    '<div class="detalle-resultado">UC: ' + escapeHtml(u.unidad_catastral || '-') + '</div>';
+                fila.addEventListener('click', function () { abrirFormularioDesdeUsuario(u, registro); });
+                elListaUsuarios.appendChild(fila);
+            });
+        }
+
+        document.getElementById('inputBusquedaUsuario').addEventListener('input', function (e) {
+            renderizarListaUsuarios(e.target.value);
+        });
+
+        document.getElementById('btnVolverATomas').addEventListener('click', mostrarVistaTomas);
+
+        document.getElementById('btnAgregarNuevo').addEventListener('click', function () {
+            abrirFormularioDesdeUsuario(null, null);
+        });
+
+        // ═══ Pantalla 4 — formulario ═══
+        function nuevoRegistroBase(padronUsuario) {
+            return {
+                id: null,
+                comisionKey: comisionKeyActual,
+                tomaNombre: tomaSeleccionada,
+                padronUsuarioId: padronUsuario ? padronUsuario.id : null,
+                apellidosNombres: padronUsuario ? (padronUsuario.nombre || '') : '',
+                tipoDocumento: '',
+                numeroDocumento: '',
+                unidadCatastral: padronUsuario ? (padronUsuario.unidad_catastral || '') : '',
+                areaTotalHa: '',
+                areaBajoRiegoHa: '',
+                tipoRiego: '',
+                cultivoActual: '',
+                tieneDerecho: '',
+                numeroResolucion: '',
+                claseDerecho: '',
+                volumenM3Anio: '',
+                cutExpediente: '',
+                clasificacion: '',
+                estadoPredio: '',
+                observaciones: '',
+                confirmado: false,
+            };
+        }
+
+        async function abrirFormularioDesdeUsuario(padronUsuario, registroExistente) {
+            if (registroExistente) {
+                var resultado = await CusshmiDatos.cargarRegistroIdentificacion(registroExistente.id);
+                if (!resultado.ok) { alert(resultado.error || 'No se pudo abrir el registro.'); return; }
+                var r = resultado.registro;
+                registroActual = {
+                    id: r.id,
+                    comisionKey: comisionKeyActual,
+                    tomaNombre: r.toma_nombre,
+                    padronUsuarioId: r.padron_usuario_id,
+                    apellidosNombres: r.apellidos_nombres || '',
+                    tipoDocumento: r.tipo_documento || '',
+                    numeroDocumento: r.numero_documento || '',
+                    unidadCatastral: r.unidad_catastral || '',
+                    areaTotalHa: r.area_total_ha != null ? r.area_total_ha : '',
+                    areaBajoRiegoHa: r.area_bajo_riego_ha != null ? r.area_bajo_riego_ha : '',
+                    tipoRiego: r.tipo_riego || '',
+                    cultivoActual: r.cultivo_actual || '',
+                    tieneDerecho: r.tiene_derecho || '',
+                    numeroResolucion: r.numero_resolucion || '',
+                    claseDerecho: r.clase_derecho || '',
+                    volumenM3Anio: r.volumen_m3_anio != null ? r.volumen_m3_anio : '',
+                    cutExpediente: r.cut_expediente || '',
+                    clasificacion: r.clasificacion || '',
+                    estadoPredio: r.estado_predio || '',
+                    observaciones: r.observaciones || '',
+                    confirmado: !!r.confirmado,
+                };
+            } else {
+                registroActual = nuevoRegistroBase(padronUsuario);
+            }
+            pintarFormularioDesdeRegistro();
+            document.getElementById('vistaBusqueda').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'flex';
+        }
+
+        function pintarFormularioDesdeRegistro() {
+            document.getElementById('inputApellidosNombres').value = registroActual.apellidosNombres;
+            document.getElementById('selectTipoDocumento').value = registroActual.tipoDocumento;
+            document.getElementById('inputNumeroDocumento').value = registroActual.numeroDocumento;
+            document.getElementById('inputUnidadCatastral').value = registroActual.unidadCatastral;
+            document.getElementById('inputAreaTotal').value = registroActual.areaTotalHa;
+            document.getElementById('inputAreaBajoRiego').value = registroActual.areaBajoRiegoHa;
+            document.getElementById('selectTipoRiego').value = registroActual.tipoRiego;
+            document.getElementById('inputCultivoActual').value = registroActual.cultivoActual;
+            document.getElementById('selectTieneDerecho').value = registroActual.tieneDerecho;
+            document.getElementById('inputNumeroResolucion').value = registroActual.numeroResolucion;
+            document.getElementById('inputClaseDerecho').value = registroActual.claseDerecho;
+            document.getElementById('inputVolumenM3Anio').value = registroActual.volumenM3Anio;
+            document.getElementById('inputCutExpediente').value = registroActual.cutExpediente;
+            document.getElementById('selectEstadoPredio').value = registroActual.estadoPredio;
+            document.getElementById('textareaObservaciones').value = registroActual.observaciones;
+
+            actualizarBloquesDerecho();
+            actualizarIndicadorClasificacion();
+            actualizarAvisoArea();
+
+            var bloqueado = registroActual.confirmado;
+            document.getElementById('avisoBloqueadoFormulario').style.display = bloqueado ? 'block' : 'none';
+            document.getElementById('estadoGuardadoFormulario').textContent = '';
+            document.getElementById('btnContinuarConfirmacion').textContent = bloqueado ? 'Ver confirmación →' : 'Continuar →';
+            [
+                'inputApellidosNombres', 'selectTipoDocumento', 'inputNumeroDocumento', 'inputUnidadCatastral',
+                'inputAreaTotal', 'inputAreaBajoRiego', 'selectTipoRiego', 'inputCultivoActual',
+                'selectTieneDerecho', 'inputNumeroResolucion', 'inputClaseDerecho', 'inputVolumenM3Anio',
+                'inputCutExpediente', 'selectEstadoPredio', 'textareaObservaciones',
+            ].forEach(function (id) { document.getElementById(id).disabled = bloqueado; });
+        }
+
+        function actualizarBloquesDerecho() {
+            document.getElementById('bloqueDerechoSi').style.display = (registroActual.tieneDerecho === 'si') ? 'flex' : 'none';
+            document.getElementById('bloqueDerechoNo').style.display = (registroActual.tieneDerecho === 'no' || registroActual.tieneDerecho === 'no_sabe') ? 'block' : 'none';
+        }
+
+        // Indicador automático A-1/A-2: "si" (con derecho formalizado) -> A-1;
+        // "no" o "no_sabe" (sin derecho formalizado confirmable) -> A-2.
+        function calcularClasificacion(tieneDerecho) {
+            if (tieneDerecho === 'si') return 'A-1';
+            if (tieneDerecho === 'no' || tieneDerecho === 'no_sabe') return 'A-2';
+            return '';
+        }
+
+        function actualizarIndicadorClasificacion() {
+            var el = document.getElementById('indicadorClasificacion');
+            registroActual.clasificacion = calcularClasificacion(registroActual.tieneDerecho);
+            if (!registroActual.clasificacion) { el.style.display = 'none'; return; }
+            el.style.display = 'block';
+            el.className = 'indicador-clasificacion ' + (registroActual.clasificacion === 'A-1' ? 'a1' : 'a2');
+            el.textContent = registroActual.clasificacion === 'A-1'
+                ? 'Clasificación: A-1 (con derecho formalizado)'
+                : 'Clasificación: A-2 (sin derecho formalizado)';
+        }
+
+        function actualizarAvisoArea() {
+            var total = parseFloat(registroActual.areaTotalHa);
+            var riego = parseFloat(registroActual.areaBajoRiegoHa);
+            var excede = Number.isFinite(total) && Number.isFinite(riego) && riego > total;
+            document.getElementById('avisoAreaExcede').style.display = excede ? 'block' : 'none';
+            return excede;
+        }
+
+        function pintarEstadoGuardado(estado) {
+            var textos = { escribiendo: '', guardando: 'Guardando…', guardado: 'Guardado ✓', error: '⚠️ No se pudo guardar (sin conexión).' };
+            document.getElementById('estadoGuardadoFormulario').textContent = textos[estado] || '';
+        }
+
+        function autoguardar() {
+            if (registroActual.confirmado) return;
+            CusshmiDatos.guardarRegistroIdentificacionDebounced(registroActual, pintarEstadoGuardado);
+        }
+
+        function enlazarCampo(id, campo) {
+            document.getElementById(id).addEventListener('input', function (e) {
+                registroActual[campo] = e.target.value;
+                autoguardar();
+            });
+        }
+        enlazarCampo('inputApellidosNombres', 'apellidosNombres');
+        enlazarCampo('inputNumeroDocumento', 'numeroDocumento');
+        enlazarCampo('inputUnidadCatastral', 'unidadCatastral');
+        enlazarCampo('inputAreaTotal', 'areaTotalHa');
+        enlazarCampo('inputAreaBajoRiego', 'areaBajoRiegoHa');
+        enlazarCampo('inputCultivoActual', 'cultivoActual');
+        enlazarCampo('inputNumeroResolucion', 'numeroResolucion');
+        enlazarCampo('inputClaseDerecho', 'claseDerecho');
+        enlazarCampo('inputVolumenM3Anio', 'volumenM3Anio');
+        enlazarCampo('inputCutExpediente', 'cutExpediente');
+        enlazarCampo('textareaObservaciones', 'observaciones');
+
+        document.getElementById('inputAreaTotal').addEventListener('input', actualizarAvisoArea);
+        document.getElementById('inputAreaBajoRiego').addEventListener('input', actualizarAvisoArea);
+
+        document.getElementById('selectTipoDocumento').addEventListener('change', function (e) {
+            registroActual.tipoDocumento = e.target.value;
+            autoguardar();
+        });
+        document.getElementById('selectTipoRiego').addEventListener('change', function (e) {
+            registroActual.tipoRiego = e.target.value;
+            autoguardar();
+        });
+        document.getElementById('selectTieneDerecho').addEventListener('change', function (e) {
+            registroActual.tieneDerecho = e.target.value;
+            actualizarBloquesDerecho();
+            actualizarIndicadorClasificacion();
+            autoguardar();
+        });
+        document.getElementById('selectEstadoPredio').addEventListener('change', function (e) {
+            registroActual.estadoPredio = e.target.value;
+            autoguardar();
+        });
+
+        document.getElementById('btnVolverABusqueda').addEventListener('click', async function () {
+            // Guarda de inmediato lo tecleado antes de salir — el autoguardado
+            // tiene 1s de espera y podría no haber alcanzado a disparar todavía.
+            if (registroActual && !registroActual.confirmado && registroActual.apellidosNombres && registroActual.apellidosNombres.trim()) {
+                await CusshmiDatos.guardarRegistroIdentificacion(registroActual);
+            }
+            document.getElementById('vistaFormulario').style.display = 'none';
+            abrirToma(tomaSeleccionada); // refresca padrón/registros para que los badges queden al día
+        });
+
+        document.getElementById('btnContinuarConfirmacion').addEventListener('click', async function () {
+            if (!registroActual.confirmado) {
+                if (!registroActual.apellidosNombres || !registroActual.apellidosNombres.trim()) {
+                    alert('Ingresa apellidos y nombres antes de continuar.');
+                    return;
+                }
+                if (actualizarAvisoArea()) {
+                    alert('El área bajo riego no puede superar el área total.');
+                    return;
+                }
+                var resultado = await CusshmiDatos.guardarRegistroIdentificacion(registroActual);
+                if (!resultado.ok) { alert('No se pudo guardar: ' + resultado.error); return; }
+                registroActual.id = resultado.id;
+            }
+            mostrarConfirmacion();
+        });
+
+        // ═══ Pantalla 5 — confirmación ═══
+        var ETIQUETAS_TIPO_RIEGO = { Gravedad: 'Gravedad', Goteo: 'Goteo', 'Aspersión': 'Aspersión', Otro: 'Otro' };
+        var ETIQUETAS_DERECHO = { si: 'Sí', no: 'No', no_sabe: 'No sabe' };
+        var ETIQUETAS_ESTADO_PREDIO = { en_produccion: 'En producción', en_preparacion: 'En preparación', abandonado: 'Abandonado', sin_agua: 'Sin agua' };
+
+        function filaResumen(etiqueta, valor) {
+            return '<div class="resumen-fila"><span class="etiqueta-resumen">' + escapeHtml(etiqueta) + '</span>' +
+                '<span class="valor-resumen">' + escapeHtml(valor || '-') + '</span></div>';
+        }
+
+        function mostrarConfirmacion() {
+            document.getElementById('vistaFormulario').style.display = 'none';
+            document.getElementById('vistaConfirmacion').style.display = 'flex';
+
+            var r = registroActual;
+            var html = '';
+            html += filaResumen('Toma', r.tomaNombre);
+            html += filaResumen('Apellidos y nombres', r.apellidosNombres);
+            html += filaResumen('Documento', (r.tipoDocumento || '-') + (r.numeroDocumento ? ' ' + r.numeroDocumento : ''));
+            html += filaResumen('Unidad catastral', r.unidadCatastral);
+            html += filaResumen('Área total (ha)', r.areaTotalHa);
+            html += filaResumen('Área bajo riego (ha)', r.areaBajoRiegoHa);
+            html += filaResumen('Tipo de riego', ETIQUETAS_TIPO_RIEGO[r.tipoRiego] || '-');
+            html += filaResumen('Cultivo actual', r.cultivoActual);
+            html += filaResumen('¿Tiene derecho?', ETIQUETAS_DERECHO[r.tieneDerecho] || '-');
+            if (r.tieneDerecho === 'si') {
+                html += filaResumen('N° resolución', r.numeroResolucion);
+                html += filaResumen('Clase de derecho', r.claseDerecho);
+                html += filaResumen('Volumen (m³/año)', r.volumenM3Anio);
+            } else if (r.tieneDerecho === 'no' || r.tieneDerecho === 'no_sabe') {
+                html += filaResumen('CUT expediente', r.cutExpediente);
+            }
+            html += filaResumen('Clasificación', r.clasificacion);
+            html += filaResumen('Estado del predio', ETIQUETAS_ESTADO_PREDIO[r.estadoPredio] || '-');
+            html += filaResumen('Observaciones', r.observaciones);
+            document.getElementById('resumenRegistro').innerHTML = html;
+
+            var bloqueado = r.confirmado;
+            document.getElementById('avisoBloqueadoConfirmacion').style.display = bloqueado ? 'block' : 'none';
+            document.getElementById('btnConfirmarGuardar').style.display = bloqueado ? 'none' : 'block';
+            document.getElementById('btnDesbloquear').style.display = (bloqueado && esAdmin) ? 'block' : 'none';
+            document.getElementById('estadoConfirmacion').textContent = '';
+        }
+
+        document.getElementById('btnVolverAFormulario').addEventListener('click', function () {
+            document.getElementById('vistaConfirmacion').style.display = 'none';
+            pintarFormularioDesdeRegistro();
+            document.getElementById('vistaFormulario').style.display = 'flex';
+        });
+
+        document.getElementById('btnConfirmarGuardar').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacion');
+            elEstado.textContent = 'Confirmando…';
+            var resultado = await CusshmiDatos.confirmarRegistroIdentificacion(registroActual.id);
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroActual.confirmado = true;
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Confirmación', 'Identificación y registro', registroActual.apellidosNombres + ' — Toma ' + registroActual.tomaNombre);
+            }
+            mostrarConfirmacion();
+        });
+
+        document.getElementById('btnDesbloquear').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacion');
+            elEstado.textContent = 'Desbloqueando…';
+            var resultado = await CusshmiDatos.desbloquearRegistroIdentificacion(registroActual.id);
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroActual.confirmado = false;
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Desbloqueo', 'Identificación y registro', registroActual.apellidosNombres + ' — Toma ' + registroActual.tomaNombre);
+            }
+            document.getElementById('vistaConfirmacion').style.display = 'none';
+            pintarFormularioDesdeRegistro();
+            document.getElementById('vistaFormulario').style.display = 'flex';
+        });
+
+        // ═══ Arranque ═══
+        (async function iniciar() {
+            if (typeof CusshmiAuth === 'undefined') {
+                location.href = 'index.html';
+                return;
+            }
+            var resultado = await CusshmiAuth.recuperarSesion();
+            if (!resultado.ok) {
+                location.href = 'index.html';
+                return;
+            }
+            perfilActual = resultado.perfil;
+            comisionKeyActual = perfilActual.comisionClave;
+            esAdmin = perfilActual.rol === 'admin';
+            if (comisionKeyActual) localStorage.setItem('cusshmi_comision', comisionKeyActual);
+            if (perfilActual.rol !== 'admin' && perfilActual.rol !== 'programador') {
+                elEstadoTomas.textContent = 'Tu usuario no tiene permiso para este módulo.';
+                return;
+            }
+            mostrarVistaTomas();
+        })();
+    </script>
+</body>
+</html>

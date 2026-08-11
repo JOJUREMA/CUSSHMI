@@ -4,7 +4,7 @@
 // llamadas a Supabase ni a ningun otro origen/ruta fuera de esta lista:
 // los datos siempre vienen en vivo, una sola fuente de informacion.
 
-const CACHE_NAME = 'cusshmi-movil-shell-v11';
+const CACHE_NAME = 'cusshmi-movil-shell-v12';
 const SHELL_URLS = [
   './',
   './index.html',
@@ -12,6 +12,7 @@ const SHELL_URLS = [
   './pda-programado.html',
   './seguimiento.html',
   './orden-riego.html',
+  './identificacion-registro.html',
   './estilos.css',
   './manifest.json',
   './icons/icon-192.png',

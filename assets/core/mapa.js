@@ -93,6 +93,19 @@ function filtrarPorToma(predios, tomaNombre) {
     return (predios || []).filter((p) => p.toma === clave);
 }
 
+// Nombre de bloque a mostrar para una toma (Pantalla 2 de "Identificación y
+// registro") — se deriva del nombre de archivo KML ya mapeado en
+// KML_POR_TOMA, no es un dato nuevo. Una toma en dos bloques (caso SD10)
+// muestra ambos separados por "/"; una toma aún no mapeada en el GIS
+// muestra "—" en vez de fallar.
+function obtenerBloqueDeToma(tomaNombre) {
+    const archivos = KML_POR_TOMA[normalizarNombreToma(tomaNombre)];
+    if (!archivos || archivos.length === 0) return '—';
+    return archivos
+        .map((archivo) => archivo.replace(/^BLOQUE_(DE_RIEGO_)?/, '').replace(/\.kml$/i, ''))
+        .join('/');
+}
+
 // Enriquece un predio del KML con datos vigentes de padron_usuarios (Fase
 // 2) cuando hay coincidencia — primero por unidad catastral (clave más
 // confiable), si no por nombre normalizado. Nunca oculta el predio si no

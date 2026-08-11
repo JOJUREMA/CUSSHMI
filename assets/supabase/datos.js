@@ -652,6 +652,215 @@
         return canal;
     }
 
+    // ── Módulo móvil "Identificación y registro" (Fase A) ──────────────────
+    // Cuenta cuántas filas de `comisionId` hay por toma_nombre en una tabla,
+    // paginando de a 1000 (mismo límite/patrón que listarTomasConPadron) para
+    // no perder tomas cuando una comisión supera esa cantidad de filas.
+    async function _contarPorToma(tabla, comisionId) {
+        const TAMANO_PAGINA = 1000;
+        const conteos = {};
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from(tabla).select('toma_nombre').eq('comision_id', comisionId).range(desde, desde + TAMANO_PAGINA - 1),
+                'contar ' + tabla + ' por toma'
+            );
+            if (error || !data) return null;
+            data.forEach((fila) => {
+                if (!fila.toma_nombre) return;
+                conteos[fila.toma_nombre] = (conteos[fila.toma_nombre] || 0) + 1;
+            });
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return conteos;
+    }
+
+    // Para la Pantalla 2 ("Selección de toma"): cuántos usuarios ya tienen
+    // registro de campo vs. cuántos hay en el padrón sincronizado, por toma.
+    // Si una toma no tiene padrón sincronizado todavía, se devuelve el
+    // conteo de registros igual (porcentaje null) — la pantalla decide cómo
+    // mostrarlo, para no mostrar un "0/0" confuso.
+    async function obtenerAvanceRegistroPorToma(comisionKey) {
+        if (!comisionKey) return { ok: true, avance: {} };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, avance: {}, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const [registrosPorToma, padronPorToma] = await Promise.all([
+            _contarPorToma('identificacion_registros', comisionId),
+            _contarPorToma('padron_usuarios', comisionId),
+        ]);
+        if (!registrosPorToma || !padronPorToma) {
+            return { ok: false, avance: {}, error: 'No se pudo calcular el avance de registro.' };
+        }
+
+        const tomas = new Set([...Object.keys(registrosPorToma), ...Object.keys(padronPorToma)]);
+        const avance = {};
+        tomas.forEach((toma) => {
+            const registrados = registrosPorToma[toma] || 0;
+            const totalPadron = padronPorToma[toma] || 0;
+            avance[toma] = {
+                registrados,
+                totalPadron,
+                porcentaje: totalPadron > 0 ? Math.round((registrados / totalPadron) * 100) : null,
+            };
+        });
+        return { ok: true, avance };
+    }
+
+    // Qué usuarios de una toma ya tienen un registro de identificación
+    // (confirmado o borrador) — para marcar "✅ ya registrado" en la
+    // Pantalla 3 y evitar duplicar registros del mismo usuario.
+    async function listarRegistrosDeToma(comisionKey, tomaNombre) {
+        if (!comisionKey || !tomaNombre) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('identificacion_registros')
+                .select('id, padron_usuario_id, apellidos_nombres, unidad_catastral, confirmado')
+                .eq('comision_id', comisionId)
+                .eq('toma_nombre', tomaNombre),
+            'listar registros de identificación de la toma'
+        );
+        if (error) return { ok: false, registros: [], error: error.mensaje || 'No se pudo listar los registros.' };
+        return { ok: true, registros: data || [] };
+    }
+
+    // Un registro completo por id — para reabrir un borrador (Pantalla 3→4)
+    // o para revisar/desbloquear uno ya confirmado (Pantalla 5).
+    async function cargarRegistroIdentificacion(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('identificacion_registros').select('*').eq('id', id).maybeSingle(),
+            'cargar registro de identificación'
+        );
+        if (error) return { ok: false, error: error.mensaje };
+        if (!data) return { ok: false, error: 'Registro no encontrado.' };
+        return { ok: true, registro: data };
+    }
+
+    // Upsert del registro — si `datos.id` viene informado, actualiza; si no,
+    // inserta y devuelve el id nuevo. Usada tanto por el autoguardado de
+    // borrador (Pantalla 4) como por "Confirmar y guardar" (Pantalla 5, que
+    // llama esto una última vez y después confirmarRegistroIdentificacion).
+    // `datos`: {id?, comisionKey, tomaNombre, padronUsuarioId?,
+    //   apellidosNombres, tipoDocumento, numeroDocumento, unidadCatastral,
+    //   areaTotalHa, areaBajoRiegoHa, tipoRiego, cultivoActual, tieneDerecho,
+    //   numeroResolucion, claseDerecho, volumenM3Anio, cutExpediente,
+    //   clasificacion, estadoPredio, observaciones}.
+    async function guardarRegistroIdentificacion(datos) {
+        if (!datos || !datos.comisionKey || !datos.tomaNombre || !datos.apellidosNombres) {
+            return { ok: false, error: 'Faltan datos obligatorios (comisión, toma o apellidos y nombres).' };
+        }
+        const comisionId = await resolverComisionId(datos.comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + datos.comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const fila = {
+            comision_id: comisionId,
+            toma_nombre: datos.tomaNombre,
+            padron_usuario_id: datos.padronUsuarioId || null,
+            apellidos_nombres: datos.apellidosNombres,
+            tipo_documento: datos.tipoDocumento || null,
+            numero_documento: datos.numeroDocumento || null,
+            unidad_catastral: datos.unidadCatastral || null,
+            area_total_ha: Number.isFinite(parseFloat(datos.areaTotalHa)) ? parseFloat(datos.areaTotalHa) : null,
+            area_bajo_riego_ha: Number.isFinite(parseFloat(datos.areaBajoRiegoHa)) ? parseFloat(datos.areaBajoRiegoHa) : null,
+            tipo_riego: datos.tipoRiego || null,
+            cultivo_actual: datos.cultivoActual || null,
+            tiene_derecho: datos.tieneDerecho || null,
+            numero_resolucion: datos.numeroResolucion || null,
+            clase_derecho: datos.claseDerecho || null,
+            volumen_m3_anio: Number.isFinite(parseFloat(datos.volumenM3Anio)) ? parseFloat(datos.volumenM3Anio) : null,
+            cut_expediente: datos.cutExpediente || null,
+            clasificacion: datos.clasificacion || null,
+            estado_predio: datos.estadoPredio || null,
+            observaciones: datos.observaciones || null,
+            creado_por: usuarioId,
+            actualizado_en: new Date().toISOString(),
+        };
+
+        if (datos.id) {
+            const { error } = await client.from('identificacion_registros').update(fila).eq('id', datos.id);
+            if (error) return { ok: false, error: error.message };
+            return { ok: true, id: datos.id };
+        }
+
+        const { data: creado, error } = await client.from('identificacion_registros').insert(fila).select('id').single();
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, id: creado.id };
+    }
+
+    let debounceTimerRegistro = null;
+
+    /**
+     * Autoguardado de borrador mientras se completa la Pantalla 4 (espera de
+     * 1s desde el último cambio, mismo criterio que guardarNotaAnexoG2Debounced).
+     * ⚠️ Muta `datos.id` en sitio tras el primer guardado exitoso — el
+     * llamador debe reusar el MISMO objeto `datos` en llamadas sucesivas
+     * para que los autoguardados siguientes actualicen en vez de duplicar.
+     */
+    function guardarRegistroIdentificacionDebounced(datos, onEstado) {
+        if (debounceTimerRegistro) clearTimeout(debounceTimerRegistro);
+        if (onEstado) onEstado('escribiendo');
+        debounceTimerRegistro = setTimeout(async () => {
+            if (onEstado) onEstado('guardando');
+            const resultado = await guardarRegistroIdentificacion(datos);
+            if (resultado.ok && !datos.id) datos.id = resultado.id;
+            if (onEstado) onEstado(resultado.ok ? 'guardado' : 'error');
+        }, 1000);
+    }
+
+    // Confirmar (Pantalla 5): bloquea el registro para edición futura salvo
+    // por un administrador. Si la RLS bloquea la actualización (registro ya
+    // confirmado por otra vía, o sin permiso) .select().maybeSingle() vuelve
+    // null en vez de una fila — se reporta como error explícito en vez de
+    // "éxito" silencioso.
+    async function confirmarRegistroIdentificacion(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('identificacion_registros')
+            .update({ confirmado: true, confirmado_en: new Date().toISOString() })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo confirmar: el registro no existe o ya no se puede editar.' };
+        return { ok: true };
+    }
+
+    // Desbloquear (solo admin — la interfaz solo debe ofrecer este botón si
+    // perfil.rol === 'admin', reforzado igual por identreg_update en
+    // 012_identificacion_registro.sql, mismo criterio de doble candado que
+    // eliminarProgramacionTomaUI en el escritorio).
+    async function desbloquearRegistroIdentificacion(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('identificacion_registros')
+            .update({ confirmado: false })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo desbloquear: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+
     window.CusshmiDatos = {
         cargarNotaAnexoG2,
         guardarNotaAnexoG2,
@@ -672,5 +881,12 @@
         generarEnlaceConfirmacionG4,
         listarConfirmacionesG4,
         suscribirseAConfirmacionesG4Vivo,
+        obtenerAvanceRegistroPorToma,
+        listarRegistrosDeToma,
+        cargarRegistroIdentificacion,
+        guardarRegistroIdentificacion,
+        guardarRegistroIdentificacionDebounced,
+        confirmarRegistroIdentificacion,
+        desbloquearRegistroIdentificacion,
     };
 })();
