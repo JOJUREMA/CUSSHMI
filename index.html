@@ -1074,6 +1074,12 @@
 
 <!-- ══ Supabase — Fase 1: solo conexión, no interviene en ningún flujo todavía ══ -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- SheetJS — solo para leer el Formato A-1 oficial de ANA (importarPadronOficialA1).
+     No reemplaza al ExcelJS vendorizado (que sigue usándose para todo lo demás: G2,
+     programación semanal, etc.) — se probó que ExcelJS 4.4 no logra abrir este archivo
+     real de ANA (worksheets vacío sin error, aunque el .xlsx es válido) mientras que
+     SheetJS sí lo lee correctamente, verificado contra el archivo real del usuario. -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="assets/supabase/supabase-config.js"></script>
 <script src="assets/supabase/supabase-client.js"></script>
 <script src="assets/supabase/auth.js"></script>
@@ -1233,6 +1239,10 @@
                 <button class="btn btn-primary" id="btnSincronizarPadron" disabled onclick="sincronizarPadronASupabase()" title="Sube el padrón (nombre, deuda, cultivos) a Supabase para que el módulo móvil 'Condición del Usuario' pueda consultarlo">
                     📡 Sincronizar Padrón
                 </button>
+                <button class="btn btn-primary" id="btnSincronizarPadronA1" onclick="document.getElementById('inputPadronOficialA1').click()" title="Sube el Formato A-1 oficial de ANA (DNI, área, resolución, clase de derecho, volumen) para que 'Identificación y registro' autocomplete esos datos">
+                    📡 Sincronizar Padrón A-1 (ANA)
+                </button>
+                <input type="file" id="inputPadronOficialA1" accept=".xlsx" style="display:none;" onchange="importarPadronOficialA1(event)">
 
                 <button class="btn btn-secondary" id="btnLimpiar">
                     🔄 Limpiar Datos
@@ -2741,6 +2751,104 @@ const COMISIONES = {
                 alert('✅ Padrón sincronizado: ' + totalGuardados + ' usuarios en ' + nombresTomas.length + ' tomas.');
             } else {
                 alert('⚠️ Padrón sincronizado parcialmente (' + totalGuardados + ' usuarios).\n\nFallaron estas tomas:\n' + fallidas.join('\n'));
+            }
+        }
+
+        // Formato A-1 oficial de ANA: archivo aparte del Excel semanal de
+        // riego, con encabezados fusionados en las filas 8-13 y una fila por
+        // registro desde la 14 (con filas separadoras en blanco entre
+        // registros). No se asume el número de fila del encabezado: se
+        // recorre TODA la hoja y se toma como fila de datos cualquiera cuyo
+        // valor de columna A sea un número — el encabezado y las filas en
+        // blanco no lo son (texto o vacío), así que se descartan solas sin
+        // depender de en qué fila exacta empieza la tabla.
+        // Columnas ancla de cada bloque fusionado (para una celda fusionada,
+        // el valor real vive solo en la celda superior-izquierda del bloque
+        // — por eso se lee la columna ancla de cada grupo, nunca las demás):
+        // A=N° orden, B=Apellidos y nombres, C=Tipo doc., D=N° doc.,
+        // E=Departamento, F=Provincia, G=Distrito, H=Localidad,
+        // I=Unidad catastral, J=Área total, K=Área bajo riego,
+        // L(:M)=Sub sector hidráulico, N(:P)=Resolución/certificado,
+        // Q=Clase de derecho, R(:S)=Tipo de uso, T(:U)=Volumen de agua.
+        //
+        // ⚠️ Usa SheetJS (window.XLSX, cargado por CDN), NO el ExcelJS
+        // vendorizado que usa el resto del sistema: se verificó contra el
+        // archivo real de ANA que ExcelJS 4.4 lo abre sin error pero con
+        // worksheets vacío (no reconoce ninguna hoja), mientras que SheetJS
+        // lo lee correctamente. No se tocó ExcelJS ni ninguna de sus otras
+        // funciones (G2, programación semanal) — siguen igual.
+        async function importarPadronOficialA1(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (typeof XLSX === 'undefined') { alert('Librería de lectura de Excel no disponible'); event.target.value = ''; return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); event.target.value = ''; return; }
+
+            const btn = document.getElementById('btnSincronizarPadronA1');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📡 Leyendo archivo…'; }
+
+            try {
+                const buffer = await file.arrayBuffer();
+                const wb = XLSX.read(buffer, { type: 'array' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                if (!ws || !ws['!ref']) throw new Error('El archivo no tiene datos reconocibles.');
+
+                const celda = (col, fila) => { const c = ws[col + fila]; return c ? c.v : undefined; };
+                const leerTexto = (col, fila) => {
+                    const v = celda(col, fila);
+                    return (v === undefined || v === null) ? '' : v.toString().trim();
+                };
+                const leerNumero = (col, fila) => {
+                    const n = parseFloat(celda(col, fila));
+                    return Number.isFinite(n) ? n : null;
+                };
+
+                const rango = XLSX.utils.decode_range(ws['!ref']);
+                const filas = [];
+                for (let r = rango.s.r; r <= rango.e.r; r++) {
+                    const filaNum = r + 1;
+                    const numeroOrden = celda('A', filaNum);
+                    if (typeof numeroOrden !== 'number' || numeroOrden <= 0) continue; // encabezado o separador: se omite
+
+                    filas.push({
+                        numeroOrden,
+                        apellidosNombres: leerTexto('B', filaNum),
+                        tipoDocumento: leerTexto('C', filaNum) || null,
+                        numeroDocumento: leerTexto('D', filaNum) || null,
+                        departamento: leerTexto('E', filaNum) || null,
+                        provincia: leerTexto('F', filaNum) || null,
+                        distrito: leerTexto('G', filaNum) || null,
+                        localidad: leerTexto('H', filaNum) || null,
+                        unidadCatastral: leerTexto('I', filaNum) || null,
+                        areaTotalHa: leerNumero('J', filaNum),
+                        areaBajoRiegoHa: leerNumero('K', filaNum),
+                        subSectorHidraulico: leerTexto('L', filaNum) || null,
+                        numeroResolucion: leerTexto('N', filaNum) || null,
+                        claseDerecho: leerTexto('Q', filaNum) || null,
+                        tipoUso: leerTexto('R', filaNum) || null,
+                        volumenM3: leerNumero('T', filaNum),
+                    });
+                }
+
+                if (filas.length === 0) {
+                    alert('No se encontraron registros reconocibles en el archivo. Verifica que sea el Formato A-1 oficial de ANA (mismo diseño de encabezados fusionados).');
+                    return;
+                }
+
+                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                const resultado = await CusshmiDatos.guardarPadronOficialA1(comisionKey, filas);
+                if (!resultado.ok) {
+                    alert('⚠️ No se pudo sincronizar el padrón A-1: ' + (resultado.error || 'error desconocido') +
+                        (resultado.guardados ? ('\n\n(' + resultado.guardados + ' registros sí se guardaron antes del error.)') : ''));
+                    return;
+                }
+                alert('✅ Padrón oficial A-1 sincronizado: ' + resultado.guardados + ' registros de ' + filas.length + ' leídos.');
+            } catch (e) {
+                console.error('Error al importar padrón oficial A-1:', e);
+                alert('No se pudo leer el archivo: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+                event.target.value = '';
             }
         }
 

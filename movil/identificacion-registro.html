@@ -283,6 +283,33 @@
         var registrosTomaActual = [];
         var registroActual = null; // objeto mutado por guardarRegistroIdentificacionDebounced
 
+        // Padrón oficial A-1 de ANA (toda la comisión, no por toma — el
+        // archivo oficial no trae toma) — se carga una sola vez por sesión
+        // y se cruza en memoria contra el usuario elegido para autocompletar
+        // las Secciones A/B/C. Si el padrón operativo (padron_usuarios) no
+        // tiene a alguien pero el A-1 sí, igual se autocompleta.
+        var padronA1Promesa = null;
+        function obtenerPadronA1() {
+            if (!padronA1Promesa) {
+                padronA1Promesa = CusshmiDatos.cargarPadronOficialA1(comisionKeyActual)
+                    .then(function (r) { return (r.ok && r.resultados) ? r.resultados : []; });
+            }
+            return padronA1Promesa;
+        }
+
+        // Empareja por unidad catastral (más confiable) y si no por nombre
+        // normalizado — mismo criterio ya usado en Seguimiento PDA/Mapa.
+        function emparejarConPadronA1(padronA1, unidadCatastral, nombre) {
+            var uc = (unidadCatastral || '').toString().trim();
+            if (uc) {
+                var porUC = padronA1.find(function (p) { return (p.unidad_catastral || '').toString().trim() === uc; });
+                if (porUC) return porUC;
+            }
+            var nombreNorm = (nombre || '').toString().trim().toUpperCase();
+            if (!nombreNorm) return null;
+            return padronA1.find(function (p) { return (p.apellidos_nombres || '').toString().trim().toUpperCase() === nombreNorm; }) || null;
+        }
+
         var elEstadoTomas = document.getElementById('estadoTomas');
         var elListaTomas = document.getElementById('listaTomas');
         var elEstadoBusquedaUsuario = document.getElementById('estadoBusquedaUsuario');
@@ -397,8 +424,14 @@
         });
 
         // ═══ Pantalla 4 — formulario ═══
-        function nuevoRegistroBase(padronUsuario) {
-            return {
+        // Autocompleta desde el padrón oficial A-1 (DNI, área, resolución,
+        // clase de derecho, volumen) siempre que se pueda cruzar por unidad
+        // catastral o nombre — "los datos deben cargar automáticamente salvo
+        // que no se encuentren disponibles", tal como lo pidió el usuario.
+        // Solo aplica a un registro NUEVO: si ya existe un borrador guardado,
+        // lo que el sectorista ya escribió no se pisa (ver abrirFormularioDesdeUsuario).
+        async function nuevoRegistroBase(padronUsuario) {
+            var base = {
                 id: null,
                 comisionKey: comisionKeyActual,
                 tomaNombre: tomaSeleccionada,
@@ -420,7 +453,26 @@
                 estadoPredio: '',
                 observaciones: '',
                 confirmado: false,
+                _a1Encontrado: false,
+                _a1Incorporado: false,
             };
+
+            var padronA1 = await obtenerPadronA1();
+            var coincidencia = emparejarConPadronA1(padronA1, base.unidadCatastral, base.apellidosNombres);
+            if (coincidencia) {
+                base._a1Encontrado = true;
+                if (!base.apellidosNombres) base.apellidosNombres = coincidencia.apellidos_nombres || '';
+                if (!base.unidadCatastral) base.unidadCatastral = coincidencia.unidad_catastral || '';
+                base.tipoDocumento = coincidencia.tipo_documento || '';
+                base.numeroDocumento = coincidencia.numero_documento || '';
+                base.areaTotalHa = coincidencia.area_total_ha != null ? coincidencia.area_total_ha : '';
+                base.areaBajoRiegoHa = coincidencia.area_bajo_riego_ha != null ? coincidencia.area_bajo_riego_ha : '';
+                base.tieneDerecho = coincidencia.numero_resolucion ? 'si' : '';
+                base.numeroResolucion = coincidencia.numero_resolucion || '';
+                base.claseDerecho = coincidencia.clase_derecho || '';
+                base.volumenM3Anio = coincidencia.volumen_m3 != null ? coincidencia.volumen_m3 : '';
+            }
+            return base;
         }
 
         async function abrirFormularioDesdeUsuario(padronUsuario, registroExistente) {
@@ -450,13 +502,22 @@
                     estadoPredio: r.estado_predio || '',
                     observaciones: r.observaciones || '',
                     confirmado: !!r.confirmado,
+                    // Un registro que se reabre ya pasó (o no) por la
+                    // incorporación al padrón A-1 en su primera confirmación
+                    // — no se vuelve a intentar al reconfirmar, para no
+                    // duplicar la fila de un usuario sin unidad catastral.
+                    _a1Incorporado: true,
                 };
+                pintarFormularioDesdeRegistro();
+                document.getElementById('vistaBusqueda').style.display = 'none';
+                document.getElementById('vistaFormulario').style.display = 'flex';
             } else {
-                registroActual = nuevoRegistroBase(padronUsuario);
+                document.getElementById('vistaBusqueda').style.display = 'none';
+                document.getElementById('estadoGuardadoFormulario').textContent = 'Cargando datos del padrón oficial…';
+                document.getElementById('vistaFormulario').style.display = 'flex';
+                registroActual = await nuevoRegistroBase(padronUsuario);
+                pintarFormularioDesdeRegistro();
             }
-            pintarFormularioDesdeRegistro();
-            document.getElementById('vistaBusqueda').style.display = 'none';
-            document.getElementById('vistaFormulario').style.display = 'flex';
         }
 
         function pintarFormularioDesdeRegistro() {
@@ -660,7 +721,36 @@
             if (window.CusshmiAuditoria) {
                 CusshmiAuditoria.registrarAuditoria('Confirmación', 'Identificación y registro', registroActual.apellidosNombres + ' — Toma ' + registroActual.tomaNombre);
             }
+
+            // Anexo A-2 (sin derecho formalizado): si este usuario no estaba
+            // ya en el padrón oficial A-1, se incorpora con la observación
+            // "Remitir a la Junta", tal como lo pidió el usuario — solo una
+            // vez por registro (_a1Incorporado evita duplicar en reconfirmaciones).
+            var mensajeIncorporacion = '';
+            if (registroActual.clasificacion === 'A-2' && !registroActual._a1Incorporado) {
+                var incorporado = await CusshmiDatos.incorporarUsuarioNuevoAPadronOficialA1({
+                    comisionKey: comisionKeyActual,
+                    apellidosNombres: registroActual.apellidosNombres,
+                    tipoDocumento: registroActual.tipoDocumento,
+                    numeroDocumento: registroActual.numeroDocumento,
+                    unidadCatastral: registroActual.unidadCatastral,
+                    areaTotalHa: registroActual.areaTotalHa,
+                    areaBajoRiegoHa: registroActual.areaBajoRiegoHa,
+                });
+                if (incorporado.ok) {
+                    registroActual._a1Incorporado = true;
+                    padronA1Promesa = null; // forzar recarga del padrón A-1 en la próxima toma para que ya lo reconozca
+                    mensajeIncorporacion = 'Incorporado al padrón A-1 con la observación "Remitir a la Junta".';
+                } else {
+                    // No bloquea la confirmación (ya quedó guardada) — se
+                    // avisa nomás, para no perder el registro de campo por un
+                    // problema de red en este paso adicional.
+                    mensajeIncorporacion = '⚠️ No se pudo incorporar al padrón A-1: ' + incorporado.error;
+                }
+            }
+
             mostrarConfirmacion();
+            if (mensajeIncorporacion) document.getElementById('estadoConfirmacion').textContent = mensajeIncorporacion;
         });
 
         document.getElementById('btnDesbloquear').addEventListener('click', async function () {

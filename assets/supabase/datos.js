@@ -861,6 +861,145 @@
         return { ok: true };
     }
 
+    // ── Padrón oficial A-1 (R.J. N° 0155-2022-ANA) ──────────────────────────
+    // Carga masiva desde escritorio (parser del Excel oficial de ANA, formato
+    // de encabezados fusionados). `filasEntrada`: [{numeroOrden,
+    // apellidosNombres, tipoDocumento, numeroDocumento, departamento,
+    // provincia, distrito, localidad, unidadCatastral, areaTotalHa,
+    // areaBajoRiegoHa, subSectorHidraulico, numeroResolucion, claseDerecho,
+    // tipoUso, volumenM3}, ...].
+    async function guardarPadronOficialA1(comisionKey, filasEntrada) {
+        if (!comisionKey) return { ok: false, error: 'Falta comisión.' };
+        if (!Array.isArray(filasEntrada) || filasEntrada.length === 0) return { ok: true, guardados: 0 };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const filas = filasEntrada.map((f) => ({
+            comision_id: comisionId,
+            numero_orden: Number.isFinite(parseInt(f.numeroOrden, 10)) ? parseInt(f.numeroOrden, 10) : null,
+            apellidos_nombres: (f.apellidosNombres || '-').toString(),
+            tipo_documento: f.tipoDocumento || null,
+            numero_documento: f.numeroDocumento != null ? f.numeroDocumento.toString() : null,
+            departamento: f.departamento || null,
+            provincia: f.provincia || null,
+            distrito: f.distrito || null,
+            localidad: f.localidad || null,
+            unidad_catastral: (f.unidadCatastral != null && f.unidadCatastral !== '') ? f.unidadCatastral.toString() : null,
+            area_total_ha: Number.isFinite(parseFloat(f.areaTotalHa)) ? parseFloat(f.areaTotalHa) : null,
+            area_bajo_riego_ha: Number.isFinite(parseFloat(f.areaBajoRiegoHa)) ? parseFloat(f.areaBajoRiegoHa) : null,
+            sub_sector_hidraulico: f.subSectorHidraulico || null,
+            numero_resolucion: f.numeroResolucion || null,
+            clase_derecho: f.claseDerecho || null,
+            tipo_uso: f.tipoUso || null,
+            volumen_m3: Number.isFinite(parseFloat(f.volumenM3)) ? parseFloat(f.volumenM3) : null,
+            origen: 'ana_a1',
+            actualizado_por: usuarioId,
+        }));
+
+        // Mismo motivo que guardarPadronToma: Postgres rechaza el upsert si
+        // dos filas del mismo arreglo comparten la clave de conflicto
+        // (comisión + unidad catastral) — se queda con la última aparición.
+        // Las filas sin unidad catastral (excepcional en el archivo oficial)
+        // no tienen clave de conflicto real: siempre insertan, nunca
+        // actualizan — si se repite la carga podrían duplicarse; caso raro,
+        // no se resuelve acá.
+        const filasPorClave = new Map();
+        const sinUC = [];
+        filas.forEach((fila) => {
+            if (!fila.unidad_catastral) { sinUC.push(fila); return; }
+            filasPorClave.set(fila.unidad_catastral, fila);
+        });
+        const filasSinDuplicados = Array.from(filasPorClave.values()).concat(sinUC);
+
+        const TAMANO_LOTE = 500; // evitar un solo request gigante con miles de filas
+        let guardados = 0;
+        for (let i = 0; i < filasSinDuplicados.length; i += TAMANO_LOTE) {
+            const lote = filasSinDuplicados.slice(i, i + TAMANO_LOTE);
+            const { error } = await client.from('padron_oficial_a1').upsert(lote, { onConflict: 'comision_id,unidad_catastral' });
+            if (error) return { ok: false, error: error.message, guardados };
+            guardados += lote.length;
+        }
+        return { ok: true, guardados };
+    }
+
+    // Todo el padrón oficial A-1 de una comisión — para cruzarlo en el
+    // cliente (por unidad catastral o nombre) contra el usuario elegido en
+    // "Identificación y registro" y autocompletar las Secciones A y C.
+    // Paginado de a 1000 (mismo límite/patrón que listarTomasConPadron).
+    async function cargarPadronOficialA1(comisionKey) {
+        if (!comisionKey) return { ok: true, resultados: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, resultados: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const TAMANO_PAGINA = 1000;
+        const resultados = [];
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from('padron_oficial_a1')
+                    .select('id, apellidos_nombres, tipo_documento, numero_documento, unidad_catastral, area_total_ha, area_bajo_riego_ha, numero_resolucion, clase_derecho, tipo_uso, volumen_m3, origen')
+                    .eq('comision_id', comisionId)
+                    .range(desde, desde + TAMANO_PAGINA - 1),
+                'cargar padrón oficial A-1'
+            );
+            if (error || !data) return { ok: false, resultados: [], error: error ? error.mensaje : 'No se pudo cargar el padrón oficial A-1.' };
+            resultados.push(...data);
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return { ok: true, resultados };
+    }
+
+    // Un usuario que el sectorista registró en campo y que NO estaba en el
+    // padrón oficial A-1 (Anexo A-2: sin derecho formalizado) se incorpora
+    // acá con origen='campo' y la observación fija "Remitir a la Junta" —
+    // así queda dentro del mismo padrón para futuras consultas/exportación,
+    // marcado para que la Junta lo formalice.
+    async function incorporarUsuarioNuevoAPadronOficialA1(datos) {
+        if (!datos || !datos.comisionKey || !datos.apellidosNombres) {
+            return { ok: false, error: 'Faltan datos obligatorios.' };
+        }
+        const comisionId = await resolverComisionId(datos.comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + datos.comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const fila = {
+            comision_id: comisionId,
+            apellidos_nombres: datos.apellidosNombres,
+            tipo_documento: datos.tipoDocumento || null,
+            numero_documento: datos.numeroDocumento || null,
+            unidad_catastral: datos.unidadCatastral || null,
+            area_total_ha: Number.isFinite(parseFloat(datos.areaTotalHa)) ? parseFloat(datos.areaTotalHa) : null,
+            area_bajo_riego_ha: Number.isFinite(parseFloat(datos.areaBajoRiegoHa)) ? parseFloat(datos.areaBajoRiegoHa) : null,
+            origen: 'campo',
+            observacion: 'Remitir a la Junta',
+            actualizado_por: usuarioId,
+        };
+
+        const { error } = datos.unidadCatastral
+            ? await client.from('padron_oficial_a1').upsert(fila, { onConflict: 'comision_id,unidad_catastral' })
+            : await client.from('padron_oficial_a1').insert(fila);
+        if (error) return { ok: false, error: error.message };
+        return { ok: true };
+    }
+
     window.CusshmiDatos = {
         cargarNotaAnexoG2,
         guardarNotaAnexoG2,
@@ -888,5 +1027,8 @@
         guardarRegistroIdentificacionDebounced,
         confirmarRegistroIdentificacion,
         desbloquearRegistroIdentificacion,
+        guardarPadronOficialA1,
+        cargarPadronOficialA1,
+        incorporarUsuarioNuevoAPadronOficialA1,
     };
 })();
