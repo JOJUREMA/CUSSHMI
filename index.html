@@ -1239,12 +1239,8 @@
                 <button class="btn btn-primary" id="btnSincronizarPadron" disabled onclick="sincronizarPadronASupabase()" title="Sube el padrón (nombre, deuda, cultivos) a Supabase para que el módulo móvil 'Condición del Usuario' pueda consultarlo">
                     📡 Sincronizar Padrón
                 </button>
-                <button class="btn btn-primary" id="btnSincronizarPadronA1" onclick="document.getElementById('inputPadronOficialA1').click()" title="Sube el Formato A-1 oficial de ANA (DNI, área, resolución, clase de derecho, volumen) para que 'Identificación y registro' autocomplete esos datos">
-                    📡 Sincronizar Padrón A-1 (ANA)
-                </button>
-                <input type="file" id="inputPadronOficialA1" accept=".xlsx" style="display:none;" onchange="importarPadronOficialA1(event)">
-                <button class="btn btn-success" id="btnExportarA1A2" onclick="exportarFormatosA1A2()" title="Genera un Excel con los Formatos A-1 (usuarios con derecho vigente) y A-2 (registrados en campo, sin derecho formalizado) oficiales de ANA">
-                    📊 Exportar Formatos A-1/A-2
+                <button class="btn btn-primary" id="btnAbrirPadronA1" onclick="abrirModalPadronA1()" title="Sincronizar y exportar el Padrón A-1/A-2 oficial de ANA — el módulo móvil 'Identificación y registro'">
+                    🧾 Identificación y Registro (Padrón A-1)
                 </button>
 
                 <button class="btn btn-secondary" id="btnLimpiar">
@@ -1349,6 +1345,32 @@
 
             <button class="btn btn-secondary" onclick="cerrarModalSimularSemana()" style="width: 80%;">
                 ❌ Cancelar
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL IDENTIFICACIÓN Y REGISTRO (PADRÓN A-1/A-2 OFICIAL DE ANA) -->
+    <div id="modalPadronA1" class="modal-overlay">
+        <div class="modal-container" style="text-align: center; padding: 30px; max-width: 480px;">
+            <h3>🧾 Identificación y Registro — Padrón A-1 (ANA)</h3>
+            <p class="info-text" style="text-align:left;">
+                Este padrón oficial (A-1/A-2) es <strong>independiente</strong> del Excel TOMAS.xlsx
+                que usas para programar el PDA — son complementarios, no se pisan entre sí.
+                El Excel de programación del PDA sigue funcionando con total normalidad,
+                sin verse afectado por lo que hagas aquí.
+            </p>
+
+            <button class="btn btn-primary" id="btnSincronizarPadronA1" onclick="document.getElementById('inputPadronOficialA1').click()" style="width: 100%;" title="Sube el Formato A-1 oficial de ANA (DNI, área, resolución, clase de derecho, volumen) para que 'Identificación y registro' autocomplete esos datos">
+                📡 Sincronizar Padrón A-1 (ANA)
+            </button>
+            <input type="file" id="inputPadronOficialA1" accept=".xlsx" style="display:none;" onchange="importarPadronOficialA1(event)">
+
+            <button class="btn btn-success" id="btnExportarA1A2" onclick="exportarFormatosA1A2()" style="width: 100%; margin-top: 12px;" title="Genera un Excel con los Formatos A-1 (usuarios con derecho vigente) y A-2 (registrados en campo, sin derecho formalizado) oficiales de ANA">
+                📊 Exportar Formatos A-1/A-2
+            </button>
+
+            <button class="btn btn-secondary" onclick="cerrarModalPadronA1()" style="width: 100%; margin-top: 12px;">
+                ❌ Cerrar
             </button>
         </div>
     </div>
@@ -4297,6 +4319,16 @@ function abrirModalSimularSemana() {
 
 function cerrarModalSimularSemana() {
     const modal = document.getElementById('modalSimularSemana');
+    if (modal) modal.classList.remove('active');
+}
+
+function abrirModalPadronA1() {
+    const modal = document.getElementById('modalPadronA1');
+    if (modal) modal.classList.add('active');
+}
+
+function cerrarModalPadronA1() {
+    const modal = document.getElementById('modalPadronA1');
     if (modal) modal.classList.remove('active');
 }
 
