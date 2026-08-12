@@ -224,6 +224,12 @@
             </div>
             <div class="estado-busqueda" id="areaOficialTexto" style="max-width:420px;"></div>
 
+            <div class="aviso-bloqueado" id="avisoPoligonoExistente" style="display:none; margin-top:10px; background: rgba(37,99,235,0.15); border-color:#1d4ed8;"></div>
+            <div id="accionesPoligonoExistente" style="display:none; gap:8px; width:100%; max-width:420px; margin-bottom:10px;">
+                <button class="boton" id="btnUsarPoligonoExistente" style="max-width:none; flex:1; padding:10px; font-size:12.5px;">✅ Coincide — usar este polígono</button>
+                <button class="boton-secundario" id="btnCapturarPropio" style="max-width:none; flex:1; padding:10px; font-size:12.5px;">✏️ No coincide — capturar el mío</button>
+            </div>
+
             <div class="seccion-titulo">Vértices del predio (UTM Zona 17S)</div>
             <div class="estado-busqueda" style="max-width:420px; opacity:0.75;">
                 Toca un punto del mapa para agregarlo manualmente, o usa el botón para capturarlo por GPS. Tantos vértices como tenga el predio — sin límite.
@@ -295,8 +301,59 @@
 
         var mapaLeaflet = null;
         var capaPoligono = null;
+        var capaPoligonoKml = null; // polígono ya mapeado (GIS/KML) del predio, referencia visual — nunca se edita acá
         var marcadoresVertices = [];
         var sincronizandoAhora = false;
+
+        // Caché de predios KML por toma (Fase 4 — Mapa de predios) para
+        // cruzar el registro actual contra el polígono ya mapeado, mismo
+        // patrón de fetch+caché que obtenerPrediosDeToma() en seguimiento.html.
+        var prediosTomaKmlCache = {};
+        async function obtenerPrediosDeToma(tomaNombre) {
+            if (prediosTomaKmlCache[tomaNombre]) return prediosTomaKmlCache[tomaNombre];
+            var archivos = (typeof KML_POR_TOMA !== 'undefined' && KML_POR_TOMA[tomaNombre]) || [];
+            if (archivos.length === 0) {
+                prediosTomaKmlCache[tomaNombre] = [];
+                return [];
+            }
+            var listas = await Promise.all(archivos.map(function (nombreArchivo) {
+                return fetch('../mapas/' + nombreArchivo).then(function (resp) {
+                    if (!resp.ok) throw new Error('No se pudo descargar ' + nombreArchivo);
+                    return resp.text();
+                }).then(function (texto) { return parsearKmlATomas(texto); });
+            })).catch(function () { return []; });
+            var todos = [].concat.apply([], listas);
+            var predios = filtrarPorToma(todos, tomaNombre);
+            prediosTomaKmlCache[tomaNombre] = predios;
+            return predios;
+        }
+
+        // Mismo criterio base que cruzarPredioConPadron() (assets/core/mapa.js):
+        // primero por unidad catastral, si no por nombre normalizado. Con un
+        // ajuste adicional confirmado contra datos reales: el KML (fuente
+        // GIS) trae la unidad catastral SIN ceros a la izquierda ("38727")
+        // mientras que el padrón sincronizado la trae con ceros ("038727") —
+        // se comparan sin ceros a la izquierda. Y el nombre en el KML viene
+        // "APELLIDOS, NOMBRES" (con coma) mientras el padrón trae
+        // "APELLIDOS NOMBRES" (sin coma) — se compara sin comas.
+        function _ucSinCerosIzq(valor) {
+            return normalizarUC(valor).replace(/^0+/, '');
+        }
+        function _nombreSinComas(valor) {
+            return (valor || '').toString().replace(/,/g, ' ').trim().toUpperCase().replace(/\s+/g, ' ');
+        }
+        function buscarPredioKmlDelUsuario(tomaNombre, unidadCatastral, nombre) {
+            return obtenerPrediosDeToma(tomaNombre).then(function (predios) {
+                var uc = _ucSinCerosIzq(unidadCatastral);
+                if (uc) {
+                    var porUC = predios.find(function (p) { return _ucSinCerosIzq(p.catastralKey) === uc; });
+                    if (porUC) return porUC;
+                }
+                var nombreNorm = _nombreSinComas(nombre);
+                if (!nombreNorm) return null;
+                return predios.find(function (p) { return _nombreSinComas(p.usuario) === nombreNorm; }) || null;
+            });
+        }
 
         // Padrón oficial A-1 (comisión completa) — se usa solo para leer el
         // "área oficial registrada" con la que comparar el área medida por
@@ -558,6 +615,7 @@
                 solicitudEdicion: false,
                 solicitudEdicionPorNombre: '',
                 solicitudEdicionEn: null,
+                poligonoKmlExistente: null, // {catastralKey, usuario, areaHa, coordenadas} del GIS, o null si no hay
             };
             if (!base.apellidosNombres || !base.unidadCatastral) {
                 var usuarioPdaExcel = padronUsuario || emparejarConPadronUsuarios(padronTomaActual, base.unidadCatastral, base.apellidosNombres);
@@ -570,6 +628,7 @@
             var padronA1 = await obtenerPadronA1();
             var coincidencia = emparejarConPadronA1(padronA1, base.unidadCatastral, base.apellidosNombres);
             base.areaDeclaradaHa = (coincidencia && coincidencia.area_bajo_riego_ha != null) ? parseFloat(coincidencia.area_bajo_riego_ha) : null;
+            base.poligonoKmlExistente = await buscarPredioKmlDelUsuario(base.tomaNombre, base.unidadCatastral, base.apellidosNombres);
             return base;
         }
 
@@ -593,7 +652,9 @@
                     solicitudEdicion: !!r.solicitud_edicion,
                     solicitudEdicionPorNombre: r.solicitud_edicion_por_nombre || '',
                     solicitudEdicionEn: r.solicitud_edicion_en || null,
+                    poligonoKmlExistente: null,
                 };
+                registroActual.poligonoKmlExistente = await buscarPredioKmlDelUsuario(registroActual.tomaNombre, registroActual.unidadCatastral, registroActual.apellidosNombres);
 
                 // Preferir vértices locales si hay más que los del servidor
                 // (quedaron capturados sin conexión y no se alcanzaron a
@@ -652,6 +713,7 @@
             renderizarListaVertices();
             redibujarPoligono();
             renderizarFotos();
+            actualizarAvisoPoligonoExistente();
 
             var bloqueado = registroActual.confirmado;
             document.getElementById('avisoBloqueadoFormulario').style.display = bloqueado ? 'block' : 'none';
@@ -662,6 +724,28 @@
                 document.getElementById(id).disabled = bloqueado;
             });
             actualizarIndicadorSincronizacion(bloqueado ? '' : 'listo');
+        }
+
+        // El aviso/botones de "usar el polígono ya mapeado" solo tienen
+        // sentido antes de que el sectorista haya empezado su propia
+        // captura (si ya hay vértices propios, tocar "usar" los
+        // reemplazaría en silencio) y nunca sobre un registro confirmado.
+        // El polígono de referencia en sí (dibujado por redibujarPoligono)
+        // se sigue mostrando siempre que exista, incluso con vértices
+        // propios ya capturados — eso es lo que permite comparar visualmente.
+        function actualizarAvisoPoligonoExistente() {
+            var elAviso = document.getElementById('avisoPoligonoExistente');
+            var elAcciones = document.getElementById('accionesPoligonoExistente');
+            var predio = registroActual.poligonoKmlExistente;
+            var mostrar = !!predio && registroActual.vertices.length === 0 && !registroActual.confirmado;
+            if (!mostrar) {
+                elAviso.style.display = 'none';
+                elAcciones.style.display = 'none';
+                return;
+            }
+            elAviso.style.display = 'block';
+            elAviso.textContent = '📍 Ya existe un polígono mapeado para este predio (área: ' + predio.areaHa.toFixed(2) + ' ha). ¿Coincide con el campo?';
+            elAcciones.style.display = 'flex';
         }
 
         // ── Vértices / mapa ──
@@ -679,7 +763,7 @@
             }).addTo(mapaLeaflet);
             mapaLeaflet.on('click', async function (e) {
                 if (!registroActual || registroActual.confirmado) return;
-                await agregarVertice(e.latlng.lat, e.latlng.lng, null);
+                await agregarVertice(e.latlng.lat, e.latlng.lng, null, 'manual');
                 document.getElementById('estadoVertices').textContent = 'Vértice ' + registroActual.vertices.length + ' agregado manualmente en el mapa.';
             });
             // Centrar el mapa en la ubicación actual si se puede, para no
@@ -695,14 +779,16 @@
         }
 
         // Agrega un vértice al polígono — `precisionM` es la precisión del
-        // GPS en metros, o null si el punto se eligió a mano en el mapa
-        // (no tiene precisión de GPS que reportar).
-        async function agregarVertice(lat, lon, precisionM) {
+        // GPS en metros, o null si el punto se eligió a mano en el mapa o
+        // vino de un polígono ya mapeado (no tiene precisión de GPS que
+        // reportar). `origen` es 'gps' | 'manual' | 'mapeado' — solo para
+        // mostrar en la lista de vértices, no afecta el cálculo.
+        async function agregarVertice(lat, lon, precisionM, origen) {
             var utm = latLonAUtm17S(lat, lon);
             registroActual.vertices.push({
                 orden: registroActual.vertices.length + 1,
                 easting: utm.easting, northing: utm.northing, zonaUtm: '17S',
-                lat: lat, lon: lon, precisionM: precisionM,
+                lat: lat, lon: lon, precisionM: precisionM, origen: origen || 'manual',
                 capturadoEn: new Date().toISOString(),
             });
             await guardarVerticesLocal(registroActual.id, registroActual.vertices);
@@ -718,8 +804,20 @@
             setTimeout(function () { mapaLeaflet.invalidateSize(); }, 50);
 
             if (capaPoligono) { mapaLeaflet.removeLayer(capaPoligono); capaPoligono = null; }
+            if (capaPoligonoKml) { mapaLeaflet.removeLayer(capaPoligonoKml); capaPoligonoKml = null; }
             marcadoresVertices.forEach(function (m) { mapaLeaflet.removeLayer(m); });
             marcadoresVertices = [];
+
+            // Polígono ya mapeado (GIS/KML) del predio, si existe — capa de
+            // referencia visual en su ubicación real, distinta (punteada
+            // azul) del polígono que el sectorista está capturando ahora.
+            // Se dibuja SIEMPRE que exista, aunque ya haya vértices propios,
+            // para poder comparar a simple vista.
+            var predioKml = registroActual.poligonoKmlExistente;
+            var latlngsKml = predioKml ? predioKml.coordenadas.map(function (par) { return [par[1], par[0]]; }) : [];
+            if (latlngsKml.length >= 3) {
+                capaPoligonoKml = L.polygon(latlngsKml, { color: '#1d4ed8', fillColor: '#1d4ed8', fillOpacity: 0.08, weight: 2, dashArray: '6 6' }).addTo(mapaLeaflet);
+            }
 
             var latlngs = registroActual.vertices.map(function (v) { return [v.lat, v.lon]; });
             if (latlngs.length >= 3) {
@@ -734,9 +832,10 @@
                 marcadoresVertices.push(marcador);
             });
 
-            if (latlngs.length > 0) {
+            if (latlngs.length > 0 || capaPoligonoKml) {
                 var capasGrupo = marcadoresVertices.slice();
                 if (capaPoligono) capasGrupo.push(capaPoligono);
+                if (capaPoligonoKml) capasGrupo.push(capaPoligonoKml);
                 var grupo = L.featureGroup(capasGrupo);
                 mapaLeaflet.fitBounds(grupo.getBounds(), { padding: [30, 30], maxZoom: 19 });
             }
@@ -748,7 +847,10 @@
             registroActual.vertices.forEach(function (v, idx) {
                 var fila = document.createElement('div');
                 fila.className = 'fila-vertice';
-                var origenTexto = v.precisionM != null ? ('GPS ±' + Math.round(v.precisionM) + ' m') : 'manual';
+                var origen = v.origen || (v.precisionM != null ? 'gps' : 'manual'); // fallback para vértices guardados antes de este campo
+                var origenTexto = origen === 'gps' ? ('GPS ±' + Math.round(v.precisionM) + ' m')
+                    : origen === 'mapeado' ? 'polígono mapeado'
+                    : 'manual';
                 fila.innerHTML = '<div><strong>Vértice ' + (idx + 1) + '</strong><br>' +
                     '<span style="font-size:11.5px; opacity:0.8;">Este: ' + Math.round(v.easting) + ' m · Norte: ' + Math.round(v.northing) +
                     ' m · Zona ' + escapeHtml(v.zonaUtm || '17S') + ' · ' + origenTexto + '</span></div>';
@@ -800,11 +902,45 @@
             if (!navigator.geolocation) { alert('Este dispositivo no soporta geolocalización.'); return; }
             document.getElementById('estadoVertices').textContent = 'Obteniendo ubicación…';
             navigator.geolocation.getCurrentPosition(async function (pos) {
-                await agregarVertice(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+                await agregarVertice(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, 'gps');
                 document.getElementById('estadoVertices').textContent = 'Vértice ' + registroActual.vertices.length + ' capturado por GPS (precisión ' + Math.round(pos.coords.accuracy) + ' m).';
             }, function (err) {
                 document.getElementById('estadoVertices').textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '. Puedes tocar el mapa para agregarlo manualmente.';
             }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+        });
+
+        // "Coincide — usar este polígono": convierte los vértices del predio
+        // ya mapeado (GIS/KML) en los vértices del registro, con
+        // origen:'mapeado' para distinguirlos en la lista. No se toca el KML
+        // en sí (queda intacto en registroActual.poligonoKmlExistente para
+        // seguir mostrándose como referencia).
+        document.getElementById('btnUsarPoligonoExistente').addEventListener('click', async function () {
+            if (!registroActual || registroActual.confirmado) return;
+            var predio = registroActual.poligonoKmlExistente;
+            if (!predio) return;
+            registroActual.vertices = predio.coordenadas.map(function (par, idx) {
+                var utm = latLonAUtm17S(par[1], par[0]);
+                return {
+                    orden: idx + 1, easting: utm.easting, northing: utm.northing, zonaUtm: '17S',
+                    lat: par[1], lon: par[0], precisionM: null, origen: 'mapeado',
+                    capturadoEn: new Date().toISOString(),
+                };
+            });
+            await guardarVerticesLocal(registroActual.id, registroActual.vertices);
+            recalcularAreaYComparacion();
+            renderizarListaVertices();
+            redibujarPoligono();
+            actualizarAvisoPoligonoExistente();
+            document.getElementById('estadoVertices').textContent = 'Se copiaron ' + registroActual.vertices.length + ' vértices del polígono ya mapeado.';
+            intentarSincronizarPendientes();
+        });
+
+        // "No coincide — capturar el mío": no borra nada, solo oculta el
+        // aviso para dejar paso libre a la captura por GPS/manual — el
+        // polígono KML sigue dibujado como referencia en el mapa.
+        document.getElementById('btnCapturarPropio').addEventListener('click', function () {
+            document.getElementById('avisoPoligonoExistente').style.display = 'none';
+            document.getElementById('accionesPoligonoExistente').style.display = 'none';
         });
 
         // ── Fotos ──
