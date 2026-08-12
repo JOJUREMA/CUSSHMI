@@ -4,7 +4,7 @@
 // llamadas a Supabase ni a ningun otro origen/ruta fuera de esta lista:
 // los datos siempre vienen en vivo, una sola fuente de informacion.
 
-const CACHE_NAME = 'cusshmi-movil-shell-v20';
+const CACHE_NAME = 'cusshmi-movil-shell-v21';
 const SHELL_URLS = [
   './',
   './index.html',
@@ -14,10 +14,16 @@ const SHELL_URLS = [
   './orden-riego.html',
   './identificacion-registro.html',
   './siembra-intencion.html',
+  './sinceramiento-areas.html',
   './estilos.css',
   './manifest.json',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  // Leaflet vendorizado (Sinceramiento de Áreas dibuja el polígono sin
+  // conexión) — mismo origen, así que el fetch handler de abajo SÍ los
+  // intercepta y sirve desde caché (a diferencia de un CDN cross-origin).
+  './vendor/leaflet.css',
+  './vendor/leaflet.js'
 ];
 // g4/confirmar.html NO se agrega acá a propósito: es una página pública
 // por token, ajena a la app instalada (se abre desde un enlace compartido,

@@ -1206,6 +1206,253 @@
         return { ok: true, registros };
     }
 
+    // ── Sinceramiento de Áreas (vértices GPS→UTM, polígono, fotos) ──────────
+    // Mismo patrón exacto que Identificación y registro / Declaración de
+    // Intención de Siembra: candado tras confirmar + solicitud de edición
+    // vía RPC para cuando está bloqueado. La captura de vértices/fotos en sí
+    // pasa por IndexedDB primero (assets/core/capturaOffline.js, funciona
+    // sin conexión) — estas funciones son el destino final cuando hay red,
+    // no participan en la lógica offline.
+
+    async function obtenerAvanceSinceramientoPorToma(comisionKey) {
+        if (!comisionKey) return { ok: true, avance: {} };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, avance: {}, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const [registrosPorToma, padronPorToma] = await Promise.all([
+            _contarPorToma('sinceramiento_areas', comisionId),
+            _contarPorToma('padron_usuarios', comisionId),
+        ]);
+        if (!registrosPorToma || !padronPorToma) {
+            return { ok: false, avance: {}, error: 'No se pudo calcular el avance de sinceramiento.' };
+        }
+
+        const tomas = new Set([...Object.keys(registrosPorToma), ...Object.keys(padronPorToma)]);
+        const avance = {};
+        tomas.forEach((toma) => {
+            const registrados = registrosPorToma[toma] || 0;
+            const totalPadron = padronPorToma[toma] || 0;
+            avance[toma] = {
+                registrados,
+                totalPadron,
+                porcentaje: totalPadron > 0 ? Math.round((registrados / totalPadron) * 100) : null,
+            };
+        });
+        return { ok: true, avance };
+    }
+
+    async function listarRegistrosSinceramientoDeToma(comisionKey, tomaNombre) {
+        if (!comisionKey || !tomaNombre) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('sinceramiento_areas')
+                .select('id, padron_usuario_id, apellidos_nombres, unidad_catastral, confirmado')
+                .eq('comision_id', comisionId)
+                .eq('toma_nombre', tomaNombre),
+            'listar registros de sinceramiento de la toma'
+        );
+        if (error) return { ok: false, registros: [], error: error.mensaje || 'No se pudo listar los registros.' };
+        return { ok: true, registros: data || [] };
+    }
+
+    async function cargarRegistroSinceramiento(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('sinceramiento_areas').select('*').eq('id', id).maybeSingle(),
+            'cargar registro de sinceramiento'
+        );
+        if (error) return { ok: false, error: error.mensaje };
+        if (!data) return { ok: false, error: 'Registro no encontrado.' };
+        return { ok: true, registro: data };
+    }
+
+    // `datos`: {id, comisionKey, tomaNombre, padronUsuarioId?,
+    //   apellidosNombres, unidadCatastral, verticesUtm: [...],
+    //   areaMedidaHa, areaDeclaradaHa, fotosUrls: [...]}.
+    //
+    // A diferencia de los demás módulos, acá `id` SIEMPRE lo genera el
+    // cliente (`crypto.randomUUID()`, ver movil/sinceramiento-areas.html)
+    // desde antes del primer guardado — la captura de vértices tiene que
+    // poder guardarse en IndexedDB (assets/core/capturaOffline.js) sin
+    // conexión, y para eso necesita una clave estable desde el primer
+    // vértice, no una que recién exista cuando el servidor la genere. Por
+    // eso este `upsert` (no el patrón insert/update de los otros módulos):
+    // la primera llamada CREA la fila con ese id, las siguientes la
+    // actualizan — mismo id de punta a punta, local y remoto.
+    async function guardarRegistroSinceramiento(datos) {
+        if (!datos || !datos.id || !datos.comisionKey || !datos.tomaNombre || !datos.apellidosNombres) {
+            return { ok: false, error: 'Faltan datos obligatorios (comisión, toma o apellidos y nombres).' };
+        }
+        const comisionId = await resolverComisionId(datos.comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + datos.comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const fila = {
+            id: datos.id,
+            comision_id: comisionId,
+            toma_nombre: datos.tomaNombre,
+            padron_usuario_id: datos.padronUsuarioId || null,
+            apellidos_nombres: datos.apellidosNombres,
+            unidad_catastral: datos.unidadCatastral || null,
+            vertices_utm: Array.isArray(datos.verticesUtm) ? datos.verticesUtm : [],
+            area_medida_ha: Number.isFinite(parseFloat(datos.areaMedidaHa)) ? parseFloat(datos.areaMedidaHa) : null,
+            area_declarada_ha: Number.isFinite(parseFloat(datos.areaDeclaradaHa)) ? parseFloat(datos.areaDeclaradaHa) : null,
+            fotos_urls: Array.isArray(datos.fotosUrls) ? datos.fotosUrls : [],
+            creado_por: usuarioId,
+            actualizado_en: new Date().toISOString(),
+        };
+
+        const { data: guardado, error } = await client.from('sinceramiento_areas')
+            .upsert(fila, { onConflict: 'id' })
+            .select('id').single();
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, id: guardado.id };
+    }
+
+    let debounceTimerSinceramiento = null;
+
+    function guardarRegistroSinceramientoDebounced(datos, onEstado) {
+        if (debounceTimerSinceramiento) clearTimeout(debounceTimerSinceramiento);
+        if (onEstado) onEstado('escribiendo');
+        debounceTimerSinceramiento = setTimeout(async () => {
+            if (onEstado) onEstado('guardando');
+            const resultado = await guardarRegistroSinceramiento(datos);
+            if (resultado.ok && !datos.id) datos.id = resultado.id;
+            if (onEstado) onEstado(resultado.ok ? 'guardado' : 'error');
+        }, 1000);
+    }
+
+    async function confirmarRegistroSinceramiento(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('sinceramiento_areas')
+            .update({ confirmado: true, confirmado_en: new Date().toISOString() })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo confirmar: el registro no existe o ya no se puede editar.' };
+        return { ok: true };
+    }
+
+    async function desbloquearRegistroSinceramiento(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('sinceramiento_areas')
+            .update({ confirmado: false, solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo desbloquear: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+
+    async function solicitarEdicionSinceramiento(id, nombreSolicitante) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.rpc('solicitar_edicion_sinceramiento', { registro_id: id, nombre_solicitante: nombreSolicitante || null }),
+            'solicitar edición de registro de sinceramiento'
+        );
+        if (error) return { ok: false, error: error.mensaje || 'No se pudo enviar la solicitud.' };
+        return { ok: true };
+    }
+
+    async function listarSolicitudesEdicionSinceramiento(comisionKey) {
+        if (!comisionKey) return { ok: true, solicitudes: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, solicitudes: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('sinceramiento_areas')
+                .select('id, toma_nombre, apellidos_nombres, unidad_catastral, solicitud_edicion_por_nombre, solicitud_edicion_en')
+                .eq('comision_id', comisionId)
+                .eq('solicitud_edicion', true)
+                .order('solicitud_edicion_en', { ascending: true }),
+            'listar solicitudes de edición de sinceramiento'
+        );
+        if (error) return { ok: false, solicitudes: [], error: error.mensaje || 'No se pudo listar las solicitudes.' };
+        return { ok: true, solicitudes: data || [] };
+    }
+
+    async function rechazarSolicitudEdicionSinceramiento(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('sinceramiento_areas')
+            .update({ solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo rechazar: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+
+    // Sube una foto al bucket privado `sinceramiento-fotos`
+    // ({comision_id}/{registro_id}/{archivo}) y la agrega a `fotos_urls`
+    // del registro si todavía no está — se llama una vez por foto, después
+    // de que `capturaOffline.js` ya la guardó localmente.
+    async function subirFotoSinceramiento(comisionKey, registroId, blob, nombreArchivo) {
+        if (!comisionKey || !registroId || !blob) return { ok: false, error: 'Faltan datos para subir la foto.' };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+
+        const path = comisionId + '/' + registroId + '/' + nombreArchivo;
+        const { error: errorSubida } = await client.storage.from('sinceramiento-fotos').upload(path, blob, { upsert: true });
+        if (errorSubida) return { ok: false, error: errorSubida.message };
+
+        const actual = await cargarRegistroSinceramiento(registroId);
+        if (!actual.ok) return { ok: true, path }; // la foto ya se subió; el registro se actualizará en el próximo guardado
+
+        const fotosActuales = Array.isArray(actual.registro.fotos_urls) ? actual.registro.fotos_urls : [];
+        if (!fotosActuales.some((f) => f.path === path)) {
+            fotosActuales.push({ path, nombreArchivo, subidoEn: new Date().toISOString() });
+            const { error: errorUpdate } = await client.from('sinceramiento_areas')
+                .update({ fotos_urls: fotosActuales }).eq('id', registroId);
+            if (errorUpdate) return { ok: false, error: errorUpdate.message };
+        }
+        return { ok: true, path };
+    }
+
+    async function obtenerUrlFirmadaFotoSinceramiento(path) {
+        if (!path) return { ok: false, error: 'Falta la ruta de la foto.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.storage.from('sinceramiento-fotos').createSignedUrl(path, 3600);
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, url: data.signedUrl };
+    }
+
     // ── Padrón oficial A-1 (R.J. N° 0155-2022-ANA) ──────────────────────────
     // Carga masiva desde escritorio (parser del Excel oficial de ANA, formato
     // de encabezados fusionados). `filasEntrada`: [{numeroOrden,
@@ -1472,6 +1719,18 @@
         listarSolicitudesEdicionSiembra,
         rechazarSolicitudEdicionSiembra,
         cargarRegistrosSiembraParaExportar,
+        obtenerAvanceSinceramientoPorToma,
+        listarRegistrosSinceramientoDeToma,
+        cargarRegistroSinceramiento,
+        guardarRegistroSinceramiento,
+        guardarRegistroSinceramientoDebounced,
+        confirmarRegistroSinceramiento,
+        desbloquearRegistroSinceramiento,
+        solicitarEdicionSinceramiento,
+        listarSolicitudesEdicionSinceramiento,
+        rechazarSolicitudEdicionSinceramiento,
+        subirFotoSinceramiento,
+        obtenerUrlFirmadaFotoSinceramiento,
         cargarRegistrosIdentificacionParaExportar,
         guardarPadronOficialA1,
         cargarPadronOficialA1,

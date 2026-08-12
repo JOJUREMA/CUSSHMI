@@ -81,6 +81,10 @@
                     <span class="icono">🌱</span>
                     <span class="texto">Declaración de Intención de Siembra</span>
                 </a>
+                <a class="tile" href="sinceramiento-areas.html" id="tileSinceramiento" style="display:none;">
+                    <span class="icono">📐</span>
+                    <span class="texto">Sinceramiento de Áreas</span>
+                </a>
                 <div class="tile deshabilitado">
                     <span class="icono">📦</span>
                     <span class="texto">Actualización del inventario</span>
@@ -149,6 +153,12 @@
             var tileSiembraDIS = document.getElementById('tileSiembraDIS');
             if (tileSiembraDIS) {
                 tileSiembraDIS.style.display = (perfil.rol === 'admin' || perfil.rol === 'programador') ? 'flex' : 'none';
+            }
+
+            // "Sinceramiento de Áreas" — mismo criterio que los anteriores.
+            var tileSinceramiento = document.getElementById('tileSinceramiento');
+            if (tileSinceramiento) {
+                tileSinceramiento.style.display = (perfil.rol === 'admin' || perfil.rol === 'programador') ? 'flex' : 'none';
             }
 
             elLogin.style.display = 'none';
