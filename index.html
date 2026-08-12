@@ -15250,6 +15250,34 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
     const simultaneoPorDiaOffset = toma.simultaneoPorDiaOffset || {};
     const diasActivosPorCultivo = toma.diasActivosPorCultivo || {};
 
+    // ⚠️ Bug reportado (toma SD11, ARROZ/PLATANO con horas de menos en el G-3): los mapas de
+    // "HORAS DE RIEGO POR DÍA" (horasPorDiaOffset, caudalPorCultivoPorDiaOffset, etc.) solo
+    // tienen entradas para offsets 0-6 (una semana). Cuando el reparto POR TURNOS de un cultivo
+    // no encaja exacto en esos 7 días (ej. el último usuario termina unas horas después del
+    // cierre de semana), los usuarios siguientes caían en un offset ≥7 sin datos — y el código
+    // usaba como respaldo el caudal TOTAL de la toma (suma de todos los cultivos, ej. 0.2 m³/s)
+    // en vez del caudal propio del cultivo (ej. 0.1 m³/s), entregando el doble de rápido y
+    // dejando el total de horas de ese cultivo muy por debajo de lo programado. La semana de
+    // "HORAS DE RIEGO POR DÍA" en realidad se repite tantas veces como haga falta para terminar
+    // de atender a todos los usuarios — offsetSemana() traduce cualquier offset absoluto (2ª,
+    // 3ª... semana) al offset 0-6 equivalente, para que la búsqueda de caudal/horas SIEMPRE
+    // encuentre el dato del cultivo, nunca caiga al total. inicioDelDia/finDelDia (posición real
+    // en el calendario) siguen calculándose con el offset absoluto, sin envolver — solo la
+    // CONFIGURACIÓN de ese día (caudal, horas, simultáneo, orden) se busca envuelta.
+    function offsetSemana(diaOffsetAbs) {
+        return ((diaOffsetAbs % 7) + 7) % 7;
+    }
+    // Siguiente día activo de un cultivo en offset ABSOLUTO: primero busca dentro de la misma
+    // semana: si no queda ninguno, salta a la semana siguiente y toma el primer día activo de su
+    // patrón semanal (el patrón se repite semana a semana mientras haga falta).
+    function siguienteDiaActivoAbs(diaOffsetAbs, diasDelCultivo) {
+        if (!diasDelCultivo || diasDelCultivo.length === 0) return null;
+        const inicioSemanaAbs = diaOffsetAbs - offsetSemana(diaOffsetAbs);
+        const siguienteEnSemana = diasDelCultivo.find(o => o > offsetSemana(diaOffsetAbs));
+        if (siguienteEnSemana !== undefined) return inicioSemanaAbs + siguienteEnSemana;
+        return inicioSemanaAbs + 7 + diasDelCultivo[0];
+    }
+
     // ⚠️ El día "activo" se evalúa PARA EL CULTIVO del usuario, no para la toma completa: un
     // cultivo puede tener caudal 0 en días donde otro cultivo sí riega (ej. ARROZ lunes-miércoles,
     // PLÁTANO jueves-domingo). Usar la lista de días de la toma completa haría que ese cultivo
@@ -15260,13 +15288,18 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
     // saltarSiNoCabeEnElDia (decide si un turno CABE completo en lo que resta del día en que
     // arrancó, más abajo).
     function ventanaDiaCultivo(diaOffset, claveCultivo) {
+        // diaSemana = el offset 0-6 real dentro del patrón semanal — toda la CONFIGURACIÓN del
+        // día (activo/no, horas, caudal, simultáneo, orden) se busca con este, envolviendo a
+        // partir de la 2ª semana. diaOffset (absoluto) se sigue usando tal cual para la posición
+        // real en el calendario (inicioDelDia/finDelDia), más abajo.
+        const diaSemana = offsetSemana(diaOffset);
         const diasDelCultivo = (claveCultivo && diasActivosPorCultivo[claveCultivo]) || diasActivosOffsets;
-        const esActivo = !diasDelCultivo || diasDelCultivo.indexOf(diaOffset) !== -1;
-        const horasCultivoMap = horasPorCultivoPorDiaOffset[diaOffset];
+        const esActivo = !diasDelCultivo || diasDelCultivo.indexOf(diaSemana) !== -1;
+        const horasCultivoMap = horasPorCultivoPorDiaOffset[diaSemana];
         const horasCultivoEspecificas = claveCultivo && horasCultivoMap ? horasCultivoMap[claveCultivo] : undefined;
         const horasDia = Number.isFinite(horasCultivoEspecificas)
             ? horasCultivoEspecificas
-            : (Number.isFinite(horasPorDiaOffset[diaOffset]) ? horasPorDiaOffset[diaOffset] : 24);
+            : (Number.isFinite(horasPorDiaOffset[diaSemana]) ? horasPorDiaOffset[diaSemana] : 24);
 
         // Si el día NO es simultáneo, cada cultivo riega en su propia sub-ventana dentro del
         // día, desplazada por la suma de horas de los cultivos con orden MENOR (turnos
@@ -15274,8 +15307,8 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         // programaciones de antes de este cambio), todos comparten el mismo inicio de día,
         // como siempre.
         let desplazamientoMin = 0;
-        const esSimultaneoDia = simultaneoPorDiaOffset[diaOffset] !== false;
-        const ordenMap = ordenPorCultivoPorDiaOffset[diaOffset];
+        const esSimultaneoDia = simultaneoPorDiaOffset[diaSemana] !== false;
+        const ordenMap = ordenPorCultivoPorDiaOffset[diaSemana];
         if (!esSimultaneoDia && claveCultivo && ordenMap && horasCultivoMap && Number.isFinite(ordenMap[claveCultivo])) {
             const miOrden = ordenMap[claveCultivo];
             Object.keys(ordenMap).forEach(otraClave => {
@@ -15308,9 +15341,10 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         // su propio turno (relevante solo en días por turnos, donde el cursor puede llegar
         // "temprano" heredado del inicio común del día).
         if (esActivo && minAbs < finDelDia) return Math.max(minAbs, inicioDelDia);
-        // Buscar el siguiente día activo PARA ESTE CULTIVO y saltar directamente a su hora de inicio
-        const siguiente = diasDelCultivo.find(o => o > diaOffset);
-        if (siguiente === undefined) return minAbs; // no hay más días programados para este cultivo: se deja tal cual
+        // Buscar el siguiente día activo PARA ESTE CULTIVO (repitiendo el patrón semanal hacia
+        // adelante tantas semanas como haga falta) y saltar directamente a su hora de inicio.
+        const siguiente = siguienteDiaActivoAbs(diaOffset, diasDelCultivo);
+        if (siguiente === null) return minAbs; // el cultivo no tiene ningún día activo: se deja tal cual
         return siguiente * 1440 + horaInicioBaseMin;
     }
 
@@ -15329,8 +15363,8 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         const diaOffset = Math.floor((inicioMinAbs - horaInicioBaseMin) / 1440);
         const { esActivo, finDelDia } = ventanaDiaCultivo(diaOffset, claveCultivo);
         if (!esActivo || inicioMinAbs + tiempoMinNecesarios <= finDelDia + 0.01) return inicioMinAbs;
-        const siguiente = diasDelCultivo.find(o => o > diaOffset);
-        if (siguiente === undefined) return inicioMinAbs; // no hay más días activos: se deja tal cual
+        const siguiente = siguienteDiaActivoAbs(diaOffset, diasDelCultivo);
+        if (siguiente === null) return inicioMinAbs; // el cultivo no tiene ningún día activo: se deja tal cual
         return siguiente * 1440 + horaInicioBaseMin;
     }
 
@@ -15377,15 +15411,16 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         let diaOffsetUsuario, caudalDelDia, caudalUsuarioAuto, tiempoHrsAuto;
         for (let intento = 0; intento < 8; intento++) {
             diaOffsetUsuario = Math.floor((inicioMinAbs - horaInicioBaseMin) / 1440);
-            const mapaCultivoDelDia = toma.caudalPorCultivoPorDiaOffset ? toma.caudalPorCultivoPorDiaOffset[diaOffsetUsuario] : null;
+            const diaSemanaUsuario = offsetSemana(diaOffsetUsuario); // repite el patrón semanal a partir de la 2ª semana
+            const mapaCultivoDelDia = toma.caudalPorCultivoPorDiaOffset ? toma.caudalPorCultivoPorDiaOffset[diaSemanaUsuario] : null;
             const claveCultivoUsuario = _normCultivo(u.cultivo);
             const caudalCultivoUsuario = (mapaCultivoDelDia && Number.isFinite(mapaCultivoDelDia[claveCultivoUsuario]))
                 ? mapaCultivoDelDia[claveCultivoUsuario]
                 : null;
             caudalDelDia = (caudalCultivoUsuario !== null)
                 ? caudalCultivoUsuario
-                : ((toma.caudalPorDiaOffset && Number.isFinite(toma.caudalPorDiaOffset[diaOffsetUsuario]))
-                    ? toma.caudalPorDiaOffset[diaOffsetUsuario]
+                : ((toma.caudalPorDiaOffset && Number.isFinite(toma.caudalPorDiaOffset[diaSemanaUsuario]))
+                    ? toma.caudalPorDiaOffset[diaSemanaUsuario]
                     : caudalTotalM3s); // sin programación diaria/por cultivo detallada: se conserva el comportamiento anterior
 
             // ⚠️ Diagnóstico: si el día SÍ tiene desglose por cultivo pero el cultivo de este usuario
@@ -15512,11 +15547,12 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
                 const chkK = document.getElementById('paralelo_' + tomaIdx + '_' + k);
                 if (chkK && chkK.checked) {
                     const uK = toma.usuarios[k];
-                    const mapaCultivoDiaK = toma.caudalPorCultivoPorDiaOffset ? toma.caudalPorCultivoPorDiaOffset[diaOffsetUsuario] : null;
+                    const diaSemanaK = offsetSemana(diaOffsetUsuario); // repite el patrón semanal a partir de la 2ª semana
+                    const mapaCultivoDiaK = toma.caudalPorCultivoPorDiaOffset ? toma.caudalPorCultivoPorDiaOffset[diaSemanaK] : null;
                     const claveK = _normCultivo(uK.cultivo);
                     const caudalBaseK = (mapaCultivoDiaK && Number.isFinite(mapaCultivoDiaK[claveK]))
                         ? mapaCultivoDiaK[claveK]
-                        : ((toma.caudalPorDiaOffset && Number.isFinite(toma.caudalPorDiaOffset[diaOffsetUsuario])) ? toma.caudalPorDiaOffset[diaOffsetUsuario] : caudalTotalM3s);
+                        : ((toma.caudalPorDiaOffset && Number.isFinite(toma.caudalPorDiaOffset[diaSemanaK])) ? toma.caudalPorDiaOffset[diaSemanaK] : caudalTotalM3s);
                     const caudalK = currentGroupLen > 0 ? (caudalBaseK / currentGroupLen) : 0;
                     const tKmin = caudalK > 0 ? (uK.volCorregido / caudalK / 3600 * 60) : 0;
                     maxTermino = Math.max(maxTermino, inicioMinAbs + tKmin);
