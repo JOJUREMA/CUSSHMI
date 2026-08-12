@@ -224,16 +224,23 @@
             </div>
             <div class="estado-busqueda" id="areaOficialTexto" style="max-width:420px;"></div>
 
-            <div class="seccion-titulo">Vértices del predio (GPS → UTM Zona 17S)</div>
+            <div class="seccion-titulo">Vértices del predio (UTM Zona 17S)</div>
+            <div class="estado-busqueda" style="max-width:420px; opacity:0.75;">
+                Toca un punto del mapa para agregarlo manualmente, o usa el botón para capturarlo por GPS. Tantos vértices como tenga el predio — sin límite.
+            </div>
             <div class="estado-busqueda" id="estadoVertices" style="max-width:420px;"></div>
             <div id="mapaVertices"></div>
-            <button class="boton" id="btnCapturarVertice" style="max-width:420px; margin-bottom:10px;">📍 Capturar vértice</button>
+            <button class="boton" id="btnCapturarVertice" style="max-width:420px; margin-bottom:10px;">📍 Capturar vértice por GPS (mi ubicación)</button>
             <div id="listaVertices" style="width:100%; display:flex; flex-direction:column; align-items:center;"></div>
             <div class="total-siembra" id="comparacionAreas">Captura al menos 3 vértices para calcular el área.</div>
 
             <div class="seccion-titulo">Fotos del predio (hasta 3)</div>
+            <div class="estado-busqueda" style="max-width:420px; opacity:0.75;">
+                Cada foto queda marcada con la fecha, hora y coordenadas UTM del lugar donde se tomó.
+            </div>
             <input type="file" id="inputFoto" accept="image/*" capture="environment" style="display:none;">
             <button class="boton-secundario" id="btnTomarFoto" style="max-width:420px; margin-bottom:10px;">📷 Tomar foto</button>
+            <div class="estado-busqueda" id="estadoFoto" style="max-width:420px;"></div>
             <div id="listaFotos" style="width:100%; max-width:420px; text-align:center;"></div>
 
             <div class="estado-busqueda" id="estadoSincronizacion" style="max-width:420px; margin-top:10px;"></div>
@@ -658,6 +665,11 @@
         }
 
         // ── Vértices / mapa ──
+        // Dos formas de agregar un vértice, ambas terminan en la misma
+        // función: por GPS (botón, mi ubicación en tiempo real) o tocando
+        // el mapa directamente (punto elegido a mano — útil cuando el GPS
+        // no tiene buena señal, o para corregir a ojo sobre la imagen
+        // satelital). Sin límite de vértices: tantos como tenga el predio.
         function inicializarMapaSiHaceFalta() {
             if (mapaLeaflet) return;
             mapaLeaflet = L.map('mapaVertices', { preferCanvas: true }).setView([-4.9, -80.6], 12);
@@ -665,6 +677,39 @@
                 attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
                 maxZoom: 19
             }).addTo(mapaLeaflet);
+            mapaLeaflet.on('click', async function (e) {
+                if (!registroActual || registroActual.confirmado) return;
+                await agregarVertice(e.latlng.lat, e.latlng.lng, null);
+                document.getElementById('estadoVertices').textContent = 'Vértice ' + registroActual.vertices.length + ' agregado manualmente en el mapa.';
+            });
+            // Centrar el mapa en la ubicación actual si se puede, para no
+            // arrancar siempre en la misma vista genérica de la región —
+            // best effort, sin bloquear ni avisar si falla.
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function (pos) {
+                    if (registroActual && registroActual.vertices.length === 0) {
+                        mapaLeaflet.setView([pos.coords.latitude, pos.coords.longitude], 17);
+                    }
+                }, function () { }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
+            }
+        }
+
+        // Agrega un vértice al polígono — `precisionM` es la precisión del
+        // GPS en metros, o null si el punto se eligió a mano en el mapa
+        // (no tiene precisión de GPS que reportar).
+        async function agregarVertice(lat, lon, precisionM) {
+            var utm = latLonAUtm17S(lat, lon);
+            registroActual.vertices.push({
+                orden: registroActual.vertices.length + 1,
+                easting: utm.easting, northing: utm.northing, zonaUtm: '17S',
+                lat: lat, lon: lon, precisionM: precisionM,
+                capturadoEn: new Date().toISOString(),
+            });
+            await guardarVerticesLocal(registroActual.id, registroActual.vertices);
+            recalcularAreaYComparacion();
+            renderizarListaVertices();
+            redibujarPoligono();
+            intentarSincronizarPendientes();
         }
 
         function redibujarPoligono() {
@@ -703,9 +748,10 @@
             registroActual.vertices.forEach(function (v, idx) {
                 var fila = document.createElement('div');
                 fila.className = 'fila-vertice';
+                var origenTexto = v.precisionM != null ? ('GPS ±' + Math.round(v.precisionM) + ' m') : 'manual';
                 fila.innerHTML = '<div><strong>Vértice ' + (idx + 1) + '</strong><br>' +
                     '<span style="font-size:11.5px; opacity:0.8;">Este: ' + Math.round(v.easting) + ' m · Norte: ' + Math.round(v.northing) +
-                    ' m · Zona ' + escapeHtml(v.zonaUtm || '17S') + ' · precisión ' + Math.round(v.precisionM || 0) + ' m</span></div>';
+                    ' m · Zona ' + escapeHtml(v.zonaUtm || '17S') + ' · ' + origenTexto + '</span></div>';
                 if (!registroActual.confirmado) {
                     var btnQuitar = document.createElement('button');
                     btnQuitar.type = 'button';
@@ -754,22 +800,10 @@
             if (!navigator.geolocation) { alert('Este dispositivo no soporta geolocalización.'); return; }
             document.getElementById('estadoVertices').textContent = 'Obteniendo ubicación…';
             navigator.geolocation.getCurrentPosition(async function (pos) {
-                var lat = pos.coords.latitude, lon = pos.coords.longitude, precision = pos.coords.accuracy;
-                var utm = latLonAUtm17S(lat, lon);
-                registroActual.vertices.push({
-                    orden: registroActual.vertices.length + 1,
-                    easting: utm.easting, northing: utm.northing, zonaUtm: '17S',
-                    lat: lat, lon: lon, precisionM: precision,
-                    capturadoEn: new Date().toISOString(),
-                });
-                await guardarVerticesLocal(registroActual.id, registroActual.vertices);
-                recalcularAreaYComparacion();
-                renderizarListaVertices();
-                redibujarPoligono();
-                document.getElementById('estadoVertices').textContent = 'Vértice ' + registroActual.vertices.length + ' capturado (precisión ' + Math.round(precision) + ' m).';
-                intentarSincronizarPendientes();
+                await agregarVertice(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+                document.getElementById('estadoVertices').textContent = 'Vértice ' + registroActual.vertices.length + ' capturado por GPS (precisión ' + Math.round(pos.coords.accuracy) + ' m).';
             }, function (err) {
-                document.getElementById('estadoVertices').textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '.';
+                document.getElementById('estadoVertices').textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '. Puedes tocar el mapa para agregarlo manualmente.';
             }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
         });
 
@@ -805,6 +839,74 @@
             document.getElementById('btnTomarFoto').style.display = (registroActual.confirmado || registroActual.fotos.length >= 3) ? 'none' : 'block';
         }
 
+        // Ubicación puntual para la etiqueta de la foto — independiente de
+        // los vértices del predio (la foto puede ser de cualquier ángulo,
+        // no necesariamente parada justo en una esquina). Si el GPS no
+        // responde a tiempo, la foto igual se guarda, solo que la etiqueta
+        // dice "Ubicación no disponible" en vez de bloquear la captura.
+        function obtenerUbicacionParaEtiqueta() {
+            return new Promise(function (resolve) {
+                if (!navigator.geolocation) { resolve(null); return; }
+                navigator.geolocation.getCurrentPosition(
+                    function (pos) { resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }); },
+                    function () { resolve(null); },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+                );
+            });
+        }
+
+        // Dibuja la fecha/hora y las coordenadas UTM directamente sobre los
+        // píxeles de la foto (no son metadatos que se puedan perder al
+        // compartir el archivo) — una franja semitransparente abajo con
+        // texto blanco, mismo criterio que una marca de agua de cámara GPS.
+        async function generarFotoConEtiqueta(archivoOriginal) {
+            var ubicacion = await obtenerUbicacionParaEtiqueta();
+            var lineas = [new Date().toLocaleString('es-PE')];
+            if (ubicacion) {
+                var utm = latLonAUtm17S(ubicacion.lat, ubicacion.lon);
+                lineas.push('UTM 17S — Este: ' + Math.round(utm.easting) + ' m, Norte: ' + Math.round(utm.northing) + ' m');
+            } else {
+                lineas.push('Ubicación no disponible');
+            }
+
+            var urlTemporal = URL.createObjectURL(archivoOriginal);
+            var imagen;
+            try {
+                imagen = await new Promise(function (resolve, reject) {
+                    var img = new Image();
+                    img.onload = function () { resolve(img); };
+                    img.onerror = reject;
+                    img.src = urlTemporal;
+                });
+            } catch (e) {
+                URL.revokeObjectURL(urlTemporal);
+                return archivoOriginal; // no se pudo procesar — se guarda la foto tal cual antes que perderla
+            }
+
+            var canvas = document.createElement('canvas');
+            canvas.width = imagen.naturalWidth;
+            canvas.height = imagen.naturalHeight;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(imagen, 0, 0);
+            URL.revokeObjectURL(urlTemporal);
+
+            var tamanoFuente = Math.max(16, Math.round(canvas.width * 0.028));
+            ctx.font = tamanoFuente + 'px sans-serif';
+            var alturaLinea = tamanoFuente * 1.4;
+            var alturaCaja = alturaLinea * lineas.length + 16;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(0, canvas.height - alturaCaja, canvas.width, alturaCaja);
+            ctx.fillStyle = '#ffffff';
+            ctx.textBaseline = 'middle';
+            lineas.forEach(function (texto, idx) {
+                ctx.fillText(texto, 10, canvas.height - alturaCaja + 8 + alturaLinea * idx + alturaLinea / 2);
+            });
+
+            return new Promise(function (resolve) {
+                canvas.toBlob(function (blob) { resolve(blob || archivoOriginal); }, 'image/jpeg', 0.85);
+            });
+        }
+
         document.getElementById('btnTomarFoto').addEventListener('click', function () {
             document.getElementById('inputFoto').click();
         });
@@ -814,11 +916,19 @@
             e.target.value = '';
             if (!archivo) return;
             if (registroActual.fotos.length >= 3) { alert('Ya se tomaron 3 fotos (máximo).'); return; }
+
+            var elEstadoFoto = document.getElementById('estadoFoto');
+            elEstadoFoto.textContent = 'Etiquetando foto con fecha, hora y ubicación…';
+            document.getElementById('btnTomarFoto').disabled = true;
+            var fotoEtiquetada = await generarFotoConEtiqueta(archivo);
+            document.getElementById('btnTomarFoto').disabled = false;
+            elEstadoFoto.textContent = '';
+
             var nombreArchivo = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.jpg';
-            var idLocal = await guardarFotoLocal(registroActual.id, archivo, nombreArchivo);
+            var idLocal = await guardarFotoLocal(registroActual.id, fotoEtiquetada, nombreArchivo);
             registroActual.fotos.push({
                 idLocal: idLocal, path: null, nombreArchivo: nombreArchivo,
-                sincronizada: false, urlMostrar: URL.createObjectURL(archivo),
+                sincronizada: false, urlMostrar: URL.createObjectURL(fotoEtiquetada),
             });
             renderizarFotos();
             intentarSincronizarPendientes();
