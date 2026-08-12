@@ -15348,22 +15348,41 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         return siguiente * 1440 + horaInicioBaseMin;
     }
 
-    // ⚠️ Bug reportado: un turno automático (no simultáneo) que ARRANCA dentro de la ventana del
-    // día (porque otro usuario ya consumió parte de esas horas) podía seguir entregando agua más
-    // allá de las horas que "HORAS DE RIEGO POR DÍA" declaró para ese día — ej. quedaban 0.75h el
-    // martes pero el turno completo (3.75h) se quedaba entero el martes, de 10:15 a 14:00, en vez
-    // de pasar al viernes. Si el turno completo no cabe en lo que resta del día en que arrancó, se
-    // mueve ENTERO al siguiente día activo del cultivo (no se parte entre dos días — así lo pidió
-    // el usuario). Si tampoco cabe entero en ningún día siguiente, se deja en el último día
-    // probado tal cual (mismo respaldo que el comportamiento anterior, para no dejar un turno sin
-    // horario).
+    // ⚠️ Bug reportado (turnos saltando semanas de más — toma con ARROZ/LIMON/PLATANO donde
+    // ARROZ riega los 7 días seguidos): esta función comparaba el turno completo contra la
+    // ventana de UN SOLO día (24h) — cualquier turno de más de 24h (normal para un usuario con
+    // mucha área) SIEMPRE "no cabía", así que el motor lo saltaba entero al día siguiente en
+    // CADA reintento, sin aprovechar que ese día siguiente era el mismo cultivo, activo, sin
+    // ningún corte real (ej. lunes 24h seguido de martes 24h son continuos, no hay vacío entre
+    // ellos). El resultado: usuarios terminando semanas después de lo esperado aunque la suma
+    // total del cultivo cupiera exacta en la semana programada. Ahora se calcula hasta dónde
+    // llega el TRAMO CONTINUO de días activos (sin vacíos ni cortes) a partir del día de inicio
+    // — un turno solo salta cuando de verdad cruzaría un vacío (día inactivo, o un día cuya
+    // ventana no empalma exacta con la anterior, ej. horas parciales compartidas con otro
+    // cultivo por turnos). Si cabe dentro del tramo continuo, se deja tal cual (fluye a través
+    // de los días sin cortarse); si no cabe, se mueve ENTERO al siguiente día activo tras el
+    // corte (no se parte el turno — así lo pidió el usuario).
+    function finDelTramoContinuo(diaOffsetInicial, claveCultivo) {
+        let dia = diaOffsetInicial;
+        let ventana = ventanaDiaCultivo(dia, claveCultivo);
+        if (!ventana.esActivo) return null;
+        let finTramo = ventana.finDelDia;
+        for (let i = 0; i < 60; i++) { // límite de seguridad (~2 meses de días consecutivos)
+            const ventanaSiguiente = ventanaDiaCultivo(dia + 1, claveCultivo);
+            if (!ventanaSiguiente.esActivo || Math.abs(ventanaSiguiente.inicioDelDia - finTramo) > 0.01) break;
+            finTramo = ventanaSiguiente.finDelDia;
+            dia += 1;
+        }
+        return finTramo;
+    }
+
     function saltarSiNoCabeEnElDia(inicioMinAbs, tiempoMinNecesarios, claveCultivo) {
         const diasDelCultivo = (claveCultivo && diasActivosPorCultivo[claveCultivo]) || diasActivosOffsets;
         if (!diasDelCultivo) return inicioMinAbs; // sin restricción por día: comportamiento anterior
         const diaOffset = Math.floor((inicioMinAbs - horaInicioBaseMin) / 1440);
-        const { esActivo, finDelDia } = ventanaDiaCultivo(diaOffset, claveCultivo);
-        if (!esActivo || inicioMinAbs + tiempoMinNecesarios <= finDelDia + 0.01) return inicioMinAbs;
-        const siguiente = siguienteDiaActivoAbs(diaOffset, diasDelCultivo);
+        const finTramo = finDelTramoContinuo(diaOffset, claveCultivo);
+        if (finTramo === null || inicioMinAbs + tiempoMinNecesarios <= finTramo + 0.01) return inicioMinAbs;
+        const siguiente = siguienteDiaActivoAbs(Math.floor((finTramo - horaInicioBaseMin) / 1440) - 1, diasDelCultivo);
         if (siguiente === null) return inicioMinAbs; // el cultivo no tiene ningún día activo: se deja tal cual
         return siguiente * 1440 + horaInicioBaseMin;
     }
