@@ -768,10 +768,20 @@
             });
             // Centrar el mapa en la ubicación actual si se puede, para no
             // arrancar siempre en la misma vista genérica de la región —
-            // best effort, sin bloquear ni avisar si falla.
+            // best effort, sin bloquear ni avisar si falla. ⚠️ Bug reportado:
+            // esta lectura de GPS es asíncrona (hasta 8s) y puede resolver
+            // DESPUÉS de que redibujarPoligono() ya centró el mapa en el
+            // polígono ya mapeado (KML) del predio — si eso pasa, el
+            // dispositivo (que puede estar lejos del predio real: en la
+            // oficina, en otro punto del campo, etc.) le "roba" la vista al
+            // polígono correcto, dando la impresión de que el polígono está
+            // mal ubicado cuando en realidad el mapa saltó a otro lugar. Por
+            // eso NO se recentra si ya hay un polígono de referencia que
+            // mostrar — ese, cuando existe, manda sobre el GPS del
+            // dispositivo.
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(function (pos) {
-                    if (registroActual && registroActual.vertices.length === 0) {
+                    if (registroActual && registroActual.vertices.length === 0 && !registroActual.poligonoKmlExistente) {
                         mapaLeaflet.setView([pos.coords.latitude, pos.coords.longitude], 17);
                     }
                 }, function () { }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
