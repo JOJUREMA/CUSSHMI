@@ -15362,6 +15362,16 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
     // cultivo por turnos). Si cabe dentro del tramo continuo, se deja tal cual (fluye a través
     // de los días sin cortarse); si no cabe, se mueve ENTERO al siguiente día activo tras el
     // corte (no se parte el turno — así lo pidió el usuario).
+    // Devuelve {finTramo, ultimoDia} — ultimoDia es el offset ABSOLUTO del último día
+    // activo dentro del tramo continuo, para que saltarSiNoCabeEnElDia pueda pedir
+    // directamente "el siguiente día activo después de éste" sin tener que
+    // re-derivarlo a partir del minuto exacto de finTramo (bug real encontrado: cuando
+    // el último día del tramo NO usa sus 24h completas —ej. una toma con solo 3h/día
+    // programadas—, finTramo cae DENTRO del mismo día-bucket que ultimoDia en vez de
+    // caer justo en el borde del siguiente, y la aritmética anterior [floor(...) - 1]
+    // retrocedía un día de más, encontrando el MISMO día como "siguiente" y dejando el
+    // turno del segundo usuario pegado al del primero en vez de saltar al próximo día
+    // activo real).
     function finDelTramoContinuo(diaOffsetInicial, claveCultivo) {
         let dia = diaOffsetInicial;
         let ventana = ventanaDiaCultivo(dia, claveCultivo);
@@ -15373,16 +15383,16 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
             finTramo = ventanaSiguiente.finDelDia;
             dia += 1;
         }
-        return finTramo;
+        return { finTramo: finTramo, ultimoDia: dia };
     }
 
     function saltarSiNoCabeEnElDia(inicioMinAbs, tiempoMinNecesarios, claveCultivo) {
         const diasDelCultivo = (claveCultivo && diasActivosPorCultivo[claveCultivo]) || diasActivosOffsets;
         if (!diasDelCultivo) return inicioMinAbs; // sin restricción por día: comportamiento anterior
         const diaOffset = Math.floor((inicioMinAbs - horaInicioBaseMin) / 1440);
-        const finTramo = finDelTramoContinuo(diaOffset, claveCultivo);
-        if (finTramo === null || inicioMinAbs + tiempoMinNecesarios <= finTramo + 0.01) return inicioMinAbs;
-        const siguiente = siguienteDiaActivoAbs(Math.floor((finTramo - horaInicioBaseMin) / 1440) - 1, diasDelCultivo);
+        const tramo = finDelTramoContinuo(diaOffset, claveCultivo);
+        if (tramo === null || inicioMinAbs + tiempoMinNecesarios <= tramo.finTramo + 0.01) return inicioMinAbs;
+        const siguiente = siguienteDiaActivoAbs(tramo.ultimoDia, diasDelCultivo);
         if (siguiente === null) return inicioMinAbs; // el cultivo no tiene ningún día activo: se deja tal cual
         return siguiente * 1440 + horaInicioBaseMin;
     }
