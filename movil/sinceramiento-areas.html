@@ -249,6 +249,7 @@
             <div class="estado-busqueda" id="textoEstadoPoligono" style="max-width:420px; opacity:0.85;"></div>
             <div id="mapaVertices"></div>
             <button class="boton" id="btnEditarPoligono" style="max-width:420px; margin-bottom:10px;"></button>
+            <button class="boton-secundario" id="btnDeshacerEdicionPoligono" style="max-width:420px; margin-bottom:10px; display:none;">↩️ Deshacer edición — volver al polígono del SIG</button>
             <div class="total-siembra" id="comparacionAreas">Captura al menos 3 vértices para calcular el área.</div>
 
             <div class="seccion-titulo">Fotos del predio (hasta 3)</div>
@@ -835,10 +836,12 @@
         function actualizarPanelPoligono() {
             var elTexto = document.getElementById('textoEstadoPoligono');
             var elBoton = document.getElementById('btnEditarPoligono');
+            var elDeshacer = document.getElementById('btnDeshacerEdicionPoligono');
             var bloqueado = registroActual.confirmado;
 
             if (bloqueado) {
                 elBoton.style.display = 'none';
+                elDeshacer.style.display = 'none';
                 elTexto.textContent = registroActual.vertices.length > 0
                     ? '📐 Polígono confirmado (' + registroActual.vertices.length + ' vértices).'
                     : 'Sin polígono capturado.';
@@ -849,6 +852,7 @@
                 elTexto.textContent = 'Aún no hay un polígono registrado en el sistema (SIG) para este predio.';
                 elBoton.textContent = '📐 Crear polígono';
                 elBoton.style.display = 'block';
+                elDeshacer.style.display = 'none';
                 return;
             }
 
@@ -858,10 +862,29 @@
                 : '✏️ Polígono editado por ti.';
             elBoton.textContent = '✏️ Editar polígono';
             elBoton.style.display = 'block';
+            // Solo tiene sentido "deshacer" cuando hay a qué volver (existe
+            // el polígono original del SIG) y el actual ya no coincide con
+            // él — si nunca se editó, no hay nada que deshacer.
+            elDeshacer.style.display = (!coincide && registroActual.poligonoKmlExistente) ? 'block' : 'none';
         }
 
         document.getElementById('btnEditarPoligono').addEventListener('click', function () {
             abrirEditorPoligono(registroActual.vertices);
+        });
+
+        // Deshace la edición hecha sobre el polígono: descarta los vértices
+        // actuales y vuelve a los del polígono ya registrado en el sistema
+        // (SIG), tal como estaban antes de que el sectorista los tocara.
+        document.getElementById('btnDeshacerEdicionPoligono').addEventListener('click', async function () {
+            if (!registroActual || registroActual.confirmado || !registroActual.poligonoKmlExistente) return;
+            var confirmado = confirm('¿Deshacer la edición y volver al polígono registrado en el sistema (SIG)? Se perderán los cambios hechos sobre los vértices.');
+            if (!confirmado) return;
+            registroActual.vertices = poligonoKmlComoVertices(registroActual.poligonoKmlExistente);
+            await guardarVerticesLocal(registroActual.id, registroActual.vertices);
+            recalcularAreaYComparacion();
+            actualizarPanelPoligono();
+            redibujarPoligonoPreview();
+            intentarSincronizarPendientes();
         });
 
         function inicializarMapaPreviewSiHaceFalta() {
