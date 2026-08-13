@@ -103,28 +103,49 @@
             margin: 10px 0;
             display: none;
         }
-        .fila-vertice {
+        /* Editor de polígono a pantalla completa — cubre TODO el viewport
+           (el "maximizar" pedido), independiente del max-width:420px y el
+           padding del resto de las pantallas móviles. */
+        .editor-poligono {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            background: #001830;
+            flex-direction: column;
+        }
+        .editor-poligono-header, .editor-poligono-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            flex-shrink: 0;
+        }
+        .editor-poligono-header {
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 13px;
+        }
+        .editor-poligono-footer { flex-direction: column; gap: 6px; }
+        .editor-poligono-footer .estado-busqueda { color: #ffffff; opacity: 0.85; }
+        .editor-poligono-mapa { flex: 1; min-height: 0; }
+        .mapa-comparacion {
             width: 100%;
             max-width: 420px;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            height: 26vh;
             border-radius: 10px;
-            padding: 10px 12px;
-            margin-bottom: 8px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
+            margin: 6px 0;
         }
-        .btn-quitar-mini {
-            background: rgba(192, 57, 43, 0.25);
-            border: 1px solid #c0392b;
-            color: #ffffff;
-            border-radius: 6px;
-            padding: 6px 10px;
-            font-size: 11.5px;
-            cursor: pointer;
-            flex-shrink: 0;
+        /* Marcador arrastrable del editor — DivIcon (HTML/CSS, sin imagen)
+           a propósito: el ícono por defecto de L.marker() no está
+           vendorizado (este módulo solo vendorizó Leaflet en sí, ver
+           <head>), y un ícono roto/una descarga fallida en campo sin señal
+           no es aceptable para la herramienta principal de edición. */
+        .marcador-vertice-editor {
+            width: 26px; height: 26px; border-radius: 50%;
+            background: #ffffff; border: 2px solid #003876; color: #003876;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 700; box-shadow: 0 1px 3px rgba(0,0,0,0.5);
         }
         .total-siembra {
             width: 100%;
@@ -224,20 +245,10 @@
             </div>
             <div class="estado-busqueda" id="areaOficialTexto" style="max-width:420px;"></div>
 
-            <div class="aviso-bloqueado" id="avisoPoligonoExistente" style="display:none; margin-top:10px; background: rgba(37,99,235,0.15); border-color:#1d4ed8;"></div>
-            <div id="accionesPoligonoExistente" style="display:none; gap:8px; width:100%; max-width:420px; margin-bottom:10px;">
-                <button class="boton" id="btnUsarPoligonoExistente" style="max-width:none; flex:1; padding:10px; font-size:12.5px;">✅ Coincide — usar este polígono</button>
-                <button class="boton-secundario" id="btnCapturarPropio" style="max-width:none; flex:1; padding:10px; font-size:12.5px;">✏️ No coincide — capturar el mío</button>
-            </div>
-
             <div class="seccion-titulo">Vértices del predio (UTM Zona 17S)</div>
-            <div class="estado-busqueda" style="max-width:420px; opacity:0.75;">
-                Toca un punto del mapa para agregarlo manualmente, o usa el botón para capturarlo por GPS. Tantos vértices como tenga el predio — sin límite.
-            </div>
-            <div class="estado-busqueda" id="estadoVertices" style="max-width:420px;"></div>
+            <div class="estado-busqueda" id="textoEstadoPoligono" style="max-width:420px; opacity:0.85;"></div>
             <div id="mapaVertices"></div>
-            <button class="boton" id="btnCapturarVertice" style="max-width:420px; margin-bottom:10px;">📍 Capturar vértice por GPS (mi ubicación)</button>
-            <div id="listaVertices" style="width:100%; display:flex; flex-direction:column; align-items:center;"></div>
+            <button class="boton" id="btnEditarPoligono" style="max-width:420px; margin-bottom:10px;"></button>
             <div class="total-siembra" id="comparacionAreas">Captura al menos 3 vértices para calcular el área.</div>
 
             <div class="seccion-titulo">Fotos del predio (hasta 3)</div>
@@ -252,6 +263,37 @@
             <div class="estado-busqueda" id="estadoSincronizacion" style="max-width:420px; margin-top:10px;"></div>
             <button class="boton-secundario" id="btnVolverABusquedaAbajo" style="max-width:420px; margin-top:6px;">← Volver a la búsqueda</button>
             <button class="boton" id="btnContinuarConfirmacion" style="max-width:420px; margin-top:10px;">Continuar →</button>
+        </div>
+
+        <!-- ── Editor de polígono a pantalla completa (no es una "vista" del
+             flujo normal — cubre TODA la pantalla mientras está abierto) ── -->
+        <div id="vistaEditorPoligono" class="editor-poligono" style="display:none;">
+            <div class="editor-poligono-header">
+                <button class="boton-secundario" id="btnCerrarEditor" type="button" style="max-width:none; padding:8px 14px; font-size:12.5px;">✕ Cerrar</button>
+                <span>Editar polígono</span>
+                <button class="boton" id="btnFinalizarEdicion" type="button" style="max-width:none; padding:8px 14px; font-size:12.5px;">✔ Finalizar</button>
+            </div>
+            <div id="mapaEditorPoligono" class="editor-poligono-mapa"></div>
+            <div class="editor-poligono-footer">
+                <div class="estado-busqueda" id="estadoEditorPoligono" style="max-width:none;"></div>
+                <button class="boton" id="btnGpsEditor" type="button" style="max-width:420px;">📍 Agregar vértice por GPS</button>
+            </div>
+        </div>
+
+        <!-- ── Comparación del polígono nuevo contra el que ya existía ── -->
+        <div id="vistaComparacionPoligono" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <h1 style="margin-top:14px; font-size:16px;">Comparación de polígonos</h1>
+
+            <div class="seccion-titulo" style="margin-top:14px;">Polígono nuevo</div>
+            <div id="mapaCompNuevo" class="mapa-comparacion"></div>
+
+            <div class="seccion-titulo" id="tituloCompExistente">Polígono registrado en el sistema (SIG)</div>
+            <div id="mapaCompExistente" class="mapa-comparacion"></div>
+
+            <div class="total-siembra" id="textoDiferenciasPoligono"></div>
+
+            <button class="boton" id="btnGuardarPoligonoNuevo" style="max-width:420px;">✅ Guardar este polígono</button>
+            <button class="boton-secundario" id="btnSeguirEditandoPoligono" style="max-width:420px;">✏️ Seguir editando</button>
         </div>
 
         <!-- ── Pantalla 5: confirmación ── -->
@@ -299,11 +341,25 @@
         var registrosTomaActual = [];
         var registroActual = null; // objeto local — id SIEMPRE generado por el cliente (ver nuevoRegistroBase)
 
-        var mapaLeaflet = null;
+        var mapaLeaflet = null; // vista previa compacta, dentro del formulario — solo lectura
         var capaPoligono = null;
-        var capaPoligonoKml = null; // polígono ya mapeado (GIS/KML) del predio, referencia visual — nunca se edita acá
         var marcadoresVertices = [];
         var sincronizandoAhora = false;
+
+        // Editor de polígono a pantalla completa — estado aparte del
+        // formulario: `verticesEdicionTemp` es una copia de trabajo, nunca
+        // toca registroActual.vertices hasta que se guarda desde la
+        // pantalla de comparación (ver btnGuardarPoligonoNuevo).
+        var mapaEditor = null;
+        var capaPoligonoEditor = null;
+        var marcadoresEditor = [];
+        var verticesEdicionTemp = [];
+
+        // Pantalla de comparación (nuevo vs. lo que ya existía en el SIG) —
+        // dos mini-mapas independientes, uno por polígono.
+        var mapaCompNuevo = null;
+        var mapaCompExistente = null;
+        var poligonoPropuestoTemp = null; // vértices ya finalizados en el editor, en espera de "Guardar" o "Seguir editando"
 
         // Caché de predios KML por toma (Fase 4 — Mapa de predios) para
         // cruzar el registro actual contra el polígono ya mapeado, mismo
@@ -599,6 +655,40 @@
         // IndexedDB sin conexión desde el primer vértice, y para eso
         // necesita una clave estable desde antes del primer guardado en
         // Supabase (ver guardarRegistroSinceramiento en datos.js).
+        // Convierte el polígono ya mapeado (GIS/KML) de un predio en el
+        // arreglo de vértices que usa este módulo — mismo cálculo que antes
+        // hacía el botón "usar este polígono". Ya NO se pide confirmación
+        // para usarlo: el polígono del SIG, cuando existe, ES el punto de
+        // partida del registro desde el arranque (se puede editar después,
+        // ver abrirEditorPoligono).
+        function poligonoKmlComoVertices(predioKml) {
+            return predioKml.coordenadas.map(function (par, idx) {
+                var utm = latLonAUtm17S(par[1], par[0]);
+                return {
+                    orden: idx + 1, easting: utm.easting, northing: utm.northing, zonaUtm: '17S',
+                    lat: par[1], lon: par[0], precisionM: null, origen: 'mapeado',
+                    capturadoEn: new Date().toISOString(),
+                };
+            });
+        }
+
+        // Se calcula en vez de guardarse como bandera aparte: compara los
+        // vértices actuales contra los que resultarían de convertir el
+        // polígono del SIG tal cual — así el panel compacto sabe si mostrar
+        // "esto es lo que ya estaba registrado" o "esto lo editaste tú",
+        // sin necesitar una columna nueva en Supabase ni mantenerla en
+        // sincronía manualmente.
+        function poligonoCoincideConKml(vertices, poligonoKml) {
+            if (!poligonoKml) return false;
+            var esperados = poligonoKmlComoVertices(poligonoKml);
+            if (esperados.length !== (vertices || []).length) return false;
+            for (var i = 0; i < esperados.length; i++) {
+                if (Math.abs(esperados[i].easting - vertices[i].easting) > 0.01 ||
+                    Math.abs(esperados[i].northing - vertices[i].northing) > 0.01) return false;
+            }
+            return true;
+        }
+
         async function nuevoRegistroBase(padronUsuario) {
             var base = {
                 id: crypto.randomUUID(),
@@ -629,6 +719,9 @@
             var coincidencia = emparejarConPadronA1(padronA1, base.unidadCatastral, base.apellidosNombres);
             base.areaDeclaradaHa = (coincidencia && coincidencia.area_bajo_riego_ha != null) ? parseFloat(coincidencia.area_bajo_riego_ha) : null;
             base.poligonoKmlExistente = await buscarPredioKmlDelUsuario(base.tomaNombre, base.unidadCatastral, base.apellidosNombres);
+            if (base.poligonoKmlExistente && base.vertices.length === 0) {
+                base.vertices = poligonoKmlComoVertices(base.poligonoKmlExistente);
+            }
             return base;
         }
 
@@ -662,6 +755,15 @@
                 var verticesLocales = await obtenerVerticesLocal(registroActual.id);
                 if (Array.isArray(verticesLocales) && verticesLocales.length > registroActual.vertices.length) {
                     registroActual.vertices = verticesLocales;
+                }
+
+                // Si el registro se creó antes de tener ningún vértice (ej.
+                // se guardó solo con nombre/UC) y ahora existe un polígono
+                // en el SIG, se siembra recién acá — nunca si ya hay
+                // vértices propios guardados (local o en servidor), para no
+                // pisar una edición ya hecha.
+                if (registroActual.poligonoKmlExistente && registroActual.vertices.length === 0) {
+                    registroActual.vertices = poligonoKmlComoVertices(registroActual.poligonoKmlExistente);
                 }
 
                 // Fotos: mezclar lo ya sincronizado (r.fotos_urls, con URL
@@ -710,15 +812,12 @@
                 : 'Sin área oficial registrada todavía en el Padrón A-1.';
 
             recalcularAreaYComparacion();
-            renderizarListaVertices();
-            redibujarPoligono();
+            actualizarPanelPoligono();
+            redibujarPoligonoPreview();
             renderizarFotos();
-            actualizarAvisoPoligonoExistente();
 
             var bloqueado = registroActual.confirmado;
             document.getElementById('avisoBloqueadoFormulario').style.display = bloqueado ? 'block' : 'none';
-            document.getElementById('btnCapturarVertice').style.display = bloqueado ? 'none' : 'block';
-            document.getElementById('estadoVertices').textContent = '';
             document.getElementById('btnContinuarConfirmacion').textContent = bloqueado ? 'Ver confirmación →' : 'Continuar →';
             ['inputApellidosNombres', 'inputUnidadCatastral'].forEach(function (id) {
                 document.getElementById(id).disabled = bloqueado;
@@ -726,108 +825,70 @@
             actualizarIndicadorSincronizacion(bloqueado ? '' : 'listo');
         }
 
-        // El aviso/botones de "usar el polígono ya mapeado" solo tienen
-        // sentido antes de que el sectorista haya empezado su propia
-        // captura (si ya hay vértices propios, tocar "usar" los
-        // reemplazaría en silencio) y nunca sobre un registro confirmado.
-        // El polígono de referencia en sí (dibujado por redibujarPoligono)
-        // se sigue mostrando siempre que exista, incluso con vértices
-        // propios ya capturados — eso es lo que permite comparar visualmente.
-        function actualizarAvisoPoligonoExistente() {
-            var elAviso = document.getElementById('avisoPoligonoExistente');
-            var elAcciones = document.getElementById('accionesPoligonoExistente');
-            var predio = registroActual.poligonoKmlExistente;
-            var mostrar = !!predio && registroActual.vertices.length === 0 && !registroActual.confirmado;
-            if (!mostrar) {
-                elAviso.style.display = 'none';
-                elAcciones.style.display = 'none';
+        // ── Vértices / mapa ──
+        // El polígono del predio ya NO se construye a mano dentro de este
+        // panel: si existe en el SIG, se cargó solo (ver
+        // poligonoKmlComoVertices, llamado desde nuevoRegistroBase/reapertura)
+        // y este panel es una vista previa de solo lectura — el único botón
+        // decide si se acepta tal cual (seguir con "Continuar →" más abajo)
+        // o si se entra al editor de pantalla completa a modificarlo.
+        function actualizarPanelPoligono() {
+            var elTexto = document.getElementById('textoEstadoPoligono');
+            var elBoton = document.getElementById('btnEditarPoligono');
+            var bloqueado = registroActual.confirmado;
+
+            if (bloqueado) {
+                elBoton.style.display = 'none';
+                elTexto.textContent = registroActual.vertices.length > 0
+                    ? '📐 Polígono confirmado (' + registroActual.vertices.length + ' vértices).'
+                    : 'Sin polígono capturado.';
                 return;
             }
-            elAviso.style.display = 'block';
-            elAviso.textContent = '📍 Ya existe un polígono mapeado para este predio (área: ' + predio.areaHa.toFixed(2) + ' ha). ¿Coincide con el campo?';
-            elAcciones.style.display = 'flex';
+
+            if (registroActual.vertices.length === 0) {
+                elTexto.textContent = 'Aún no hay un polígono registrado en el sistema (SIG) para este predio.';
+                elBoton.textContent = '📐 Crear polígono';
+                elBoton.style.display = 'block';
+                return;
+            }
+
+            var coincide = poligonoCoincideConKml(registroActual.vertices, registroActual.poligonoKmlExistente);
+            elTexto.textContent = coincide
+                ? '📍 Polígono registrado en el sistema (SIG). Si coincide con el campo, continúa. Si no, edítalo.'
+                : '✏️ Polígono editado por ti.';
+            elBoton.textContent = '✏️ Editar polígono';
+            elBoton.style.display = 'block';
         }
 
-        // ── Vértices / mapa ──
-        // Dos formas de agregar un vértice, ambas terminan en la misma
-        // función: por GPS (botón, mi ubicación en tiempo real) o tocando
-        // el mapa directamente (punto elegido a mano — útil cuando el GPS
-        // no tiene buena señal, o para corregir a ojo sobre la imagen
-        // satelital). Sin límite de vértices: tantos como tenga el predio.
-        function inicializarMapaSiHaceFalta() {
+        document.getElementById('btnEditarPoligono').addEventListener('click', function () {
+            abrirEditorPoligono(registroActual.vertices);
+        });
+
+        function inicializarMapaPreviewSiHaceFalta() {
             if (mapaLeaflet) return;
             mapaLeaflet = L.map('mapaVertices', { preferCanvas: true }).setView([-4.9, -80.6], 12);
             L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
                 attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
                 maxZoom: 19
             }).addTo(mapaLeaflet);
-            mapaLeaflet.on('click', async function (e) {
-                if (!registroActual || registroActual.confirmado) return;
-                await agregarVertice(e.latlng.lat, e.latlng.lng, null, 'manual');
-                document.getElementById('estadoVertices').textContent = 'Vértice ' + registroActual.vertices.length + ' agregado manualmente en el mapa.';
-            });
-            // Centrar el mapa en la ubicación actual si se puede, para no
-            // arrancar siempre en la misma vista genérica de la región —
-            // best effort, sin bloquear ni avisar si falla. ⚠️ Bug reportado:
-            // esta lectura de GPS es asíncrona (hasta 8s) y puede resolver
-            // DESPUÉS de que redibujarPoligono() ya centró el mapa en el
-            // polígono ya mapeado (KML) del predio — si eso pasa, el
-            // dispositivo (que puede estar lejos del predio real: en la
-            // oficina, en otro punto del campo, etc.) le "roba" la vista al
-            // polígono correcto, dando la impresión de que el polígono está
-            // mal ubicado cuando en realidad el mapa saltó a otro lugar. Por
-            // eso NO se recentra si ya hay un polígono de referencia que
-            // mostrar — ese, cuando existe, manda sobre el GPS del
-            // dispositivo.
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(function (pos) {
-                    if (registroActual && registroActual.vertices.length === 0 && !registroActual.poligonoKmlExistente) {
-                        mapaLeaflet.setView([pos.coords.latitude, pos.coords.longitude], 17);
-                    }
-                }, function () { }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
+        }
+
+        // Vista previa compacta, de solo lectura — sin manejador de click
+        // (agregar/editar vértices pasó exclusivamente al editor de pantalla
+        // completa) y sin recentrado por GPS (con vértices ya poblados desde
+        // el arranque, fitBounds sobre el polígono siempre basta).
+        function redibujarPoligonoPreview() {
+            if (registroActual.vertices.length === 0) {
+                document.getElementById('mapaVertices').style.display = 'none';
+                return;
             }
-        }
-
-        // Agrega un vértice al polígono — `precisionM` es la precisión del
-        // GPS en metros, o null si el punto se eligió a mano en el mapa o
-        // vino de un polígono ya mapeado (no tiene precisión de GPS que
-        // reportar). `origen` es 'gps' | 'manual' | 'mapeado' — solo para
-        // mostrar en la lista de vértices, no afecta el cálculo.
-        async function agregarVertice(lat, lon, precisionM, origen) {
-            var utm = latLonAUtm17S(lat, lon);
-            registroActual.vertices.push({
-                orden: registroActual.vertices.length + 1,
-                easting: utm.easting, northing: utm.northing, zonaUtm: '17S',
-                lat: lat, lon: lon, precisionM: precisionM, origen: origen || 'manual',
-                capturadoEn: new Date().toISOString(),
-            });
-            await guardarVerticesLocal(registroActual.id, registroActual.vertices);
-            recalcularAreaYComparacion();
-            renderizarListaVertices();
-            redibujarPoligono();
-            intentarSincronizarPendientes();
-        }
-
-        function redibujarPoligono() {
-            inicializarMapaSiHaceFalta();
+            inicializarMapaPreviewSiHaceFalta();
             document.getElementById('mapaVertices').style.display = 'block';
             setTimeout(function () { mapaLeaflet.invalidateSize(); }, 50);
 
             if (capaPoligono) { mapaLeaflet.removeLayer(capaPoligono); capaPoligono = null; }
-            if (capaPoligonoKml) { mapaLeaflet.removeLayer(capaPoligonoKml); capaPoligonoKml = null; }
             marcadoresVertices.forEach(function (m) { mapaLeaflet.removeLayer(m); });
             marcadoresVertices = [];
-
-            // Polígono ya mapeado (GIS/KML) del predio, si existe — capa de
-            // referencia visual en su ubicación real, distinta (punteada
-            // azul) del polígono que el sectorista está capturando ahora.
-            // Se dibuja SIEMPRE que exista, aunque ya haya vértices propios,
-            // para poder comparar a simple vista.
-            var predioKml = registroActual.poligonoKmlExistente;
-            var latlngsKml = predioKml ? predioKml.coordenadas.map(function (par) { return [par[1], par[0]]; }) : [];
-            if (latlngsKml.length >= 3) {
-                capaPoligonoKml = L.polygon(latlngsKml, { color: '#1d4ed8', fillColor: '#1d4ed8', fillOpacity: 0.08, weight: 2, dashArray: '6 6' }).addTo(mapaLeaflet);
-            }
 
             var latlngs = registroActual.vertices.map(function (v) { return [v.lat, v.lon]; });
             if (latlngs.length >= 3) {
@@ -842,46 +903,10 @@
                 marcadoresVertices.push(marcador);
             });
 
-            if (latlngs.length > 0 || capaPoligonoKml) {
-                var capasGrupo = marcadoresVertices.slice();
-                if (capaPoligono) capasGrupo.push(capaPoligono);
-                if (capaPoligonoKml) capasGrupo.push(capaPoligonoKml);
-                var grupo = L.featureGroup(capasGrupo);
-                mapaLeaflet.fitBounds(grupo.getBounds(), { padding: [30, 30], maxZoom: 19 });
-            }
-        }
-
-        function renderizarListaVertices() {
-            var cont = document.getElementById('listaVertices');
-            cont.innerHTML = '';
-            registroActual.vertices.forEach(function (v, idx) {
-                var fila = document.createElement('div');
-                fila.className = 'fila-vertice';
-                var origen = v.origen || (v.precisionM != null ? 'gps' : 'manual'); // fallback para vértices guardados antes de este campo
-                var origenTexto = origen === 'gps' ? ('GPS ±' + Math.round(v.precisionM) + ' m')
-                    : origen === 'mapeado' ? 'polígono mapeado'
-                    : 'manual';
-                fila.innerHTML = '<div><strong>Vértice ' + (idx + 1) + '</strong><br>' +
-                    '<span style="font-size:11.5px; opacity:0.8;">Este: ' + Math.round(v.easting) + ' m · Norte: ' + Math.round(v.northing) +
-                    ' m · Zona ' + escapeHtml(v.zonaUtm || '17S') + ' · ' + origenTexto + '</span></div>';
-                if (!registroActual.confirmado) {
-                    var btnQuitar = document.createElement('button');
-                    btnQuitar.type = 'button';
-                    btnQuitar.className = 'btn-quitar-mini';
-                    btnQuitar.textContent = '🗑 Quitar';
-                    btnQuitar.addEventListener('click', async function () {
-                        registroActual.vertices.splice(idx, 1);
-                        registroActual.vertices.forEach(function (vv, i2) { vv.orden = i2 + 1; });
-                        await guardarVerticesLocal(registroActual.id, registroActual.vertices);
-                        recalcularAreaYComparacion();
-                        renderizarListaVertices();
-                        redibujarPoligono();
-                        intentarSincronizarPendientes();
-                    });
-                    fila.appendChild(btnQuitar);
-                }
-                cont.appendChild(fila);
-            });
+            var capasGrupo = marcadoresVertices.slice();
+            if (capaPoligono) capasGrupo.push(capaPoligono);
+            var grupo = L.featureGroup(capasGrupo);
+            mapaLeaflet.fitBounds(grupo.getBounds(), { padding: [30, 30], maxZoom: 19 });
         }
 
         function recalcularAreaYComparacion() {
@@ -907,50 +932,207 @@
             el.textContent = texto;
         }
 
-        document.getElementById('btnCapturarVertice').addEventListener('click', function () {
+        // ── Editor de polígono a pantalla completa ──
+        // Construye un vértice del formato que usa este módulo a partir de
+        // lat/lon — mismo cálculo que antes hacía agregarVertice(), ahora
+        // reutilizado tanto por el tap-para-agregar como por el botón GPS,
+        // ambos dentro del editor.
+        function construirVertice(lat, lon, precisionM, origen, orden) {
+            var utm = latLonAUtm17S(lat, lon);
+            return {
+                orden: orden, easting: utm.easting, northing: utm.northing, zonaUtm: '17S',
+                lat: lat, lon: lon, precisionM: precisionM || null, origen: origen,
+                capturadoEn: new Date().toISOString(),
+            };
+        }
+
+        function renumerarVertices(lista) {
+            lista.forEach(function (v, i) { v.orden = i + 1; });
+        }
+
+        function iconoVerticeEditor(numero) {
+            return L.divIcon({
+                className: 'marcador-vertice-editor',
+                html: String(numero),
+                iconSize: [26, 26],
+                iconAnchor: [13, 13],
+            });
+        }
+
+        function inicializarMapaEditorSiHaceFalta() {
+            if (mapaEditor) return;
+            mapaEditor = L.map('mapaEditorPoligono', { preferCanvas: true }).setView([-4.9, -80.6], 12);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            }).addTo(mapaEditor);
+            mapaEditor.on('click', function (e) {
+                verticesEdicionTemp.push(construirVertice(e.latlng.lat, e.latlng.lng, null, 'manual', verticesEdicionTemp.length + 1));
+                redibujarEditor();
+            });
+        }
+
+        function actualizarEstadoEditor() {
+            var area = verticesEdicionTemp.length >= 3
+                ? calcularAreaPoligonoHa(verticesEdicionTemp.map(function (v) { return { easting: v.easting, northing: v.northing }; }))
+                : null;
+            document.getElementById('estadoEditorPoligono').textContent = verticesEdicionTemp.length + ' vértice(s)' +
+                (area != null ? ' · Área: ' + area.toFixed(2) + ' ha' : ' · faltan al menos 3 para calcular el área');
+        }
+
+        function redibujarEditor() {
+            setTimeout(function () { mapaEditor.invalidateSize(); }, 50);
+
+            if (capaPoligonoEditor) { mapaEditor.removeLayer(capaPoligonoEditor); capaPoligonoEditor = null; }
+            marcadoresEditor.forEach(function (m) { mapaEditor.removeLayer(m); });
+            marcadoresEditor = [];
+
+            var latlngs = verticesEdicionTemp.map(function (v) { return [v.lat, v.lon]; });
+            if (latlngs.length >= 3) {
+                capaPoligonoEditor = L.polygon(latlngs, { color: '#c8a84b', fillColor: '#c8a84b', fillOpacity: 0.35, weight: 2 }).addTo(mapaEditor);
+            } else if (latlngs.length === 2) {
+                capaPoligonoEditor = L.polyline(latlngs, { color: '#c8a84b', weight: 2 }).addTo(mapaEditor);
+            }
+
+            verticesEdicionTemp.forEach(function (v, idx) {
+                var marcador = L.marker([v.lat, v.lon], { draggable: true, icon: iconoVerticeEditor(idx + 1) }).addTo(mapaEditor);
+                // Arrastrar mueve el punto sin redibujar todo el editor (se
+                // vería brusco a mitad de un drag) — solo se recalculan sus
+                // coordenadas UTM y se redibuja el trazo del polígono.
+                marcador.on('dragend', function (e) {
+                    var ll = e.target.getLatLng();
+                    var utm = latLonAUtm17S(ll.lat, ll.lng);
+                    v.lat = ll.lat; v.lon = ll.lng; v.easting = utm.easting; v.northing = utm.northing; v.origen = 'manual';
+                    if (capaPoligonoEditor) capaPoligonoEditor.setLatLngs(verticesEdicionTemp.map(function (vv) { return [vv.lat, vv.lon]; }));
+                    actualizarEstadoEditor();
+                });
+                var btnQuitar = document.createElement('button');
+                btnQuitar.type = 'button';
+                btnQuitar.className = 'boton-secundario';
+                btnQuitar.style.cssText = 'max-width:none; padding:6px 10px; font-size:11.5px;';
+                btnQuitar.textContent = '🗑 Quitar este vértice';
+                btnQuitar.addEventListener('click', function () {
+                    var pos = verticesEdicionTemp.indexOf(v);
+                    if (pos !== -1) verticesEdicionTemp.splice(pos, 1);
+                    renumerarVertices(verticesEdicionTemp);
+                    redibujarEditor();
+                });
+                marcador.bindPopup(btnQuitar);
+                marcadoresEditor.push(marcador);
+            });
+
+            if (latlngs.length > 0) {
+                var capasGrupo = marcadoresEditor.slice();
+                if (capaPoligonoEditor) capasGrupo.push(capaPoligonoEditor);
+                var grupo = L.featureGroup(capasGrupo);
+                mapaEditor.fitBounds(grupo.getBounds(), { padding: [40, 40], maxZoom: 19 });
+            }
+            actualizarEstadoEditor();
+        }
+
+        function abrirEditorPoligono(verticesIniciales) {
             if (!registroActual || registroActual.confirmado) return;
+            verticesEdicionTemp = (verticesIniciales || []).map(function (v) { return Object.assign({}, v); });
+            document.getElementById('vistaFormulario').style.display = 'none';
+            document.getElementById('vistaComparacionPoligono').style.display = 'none';
+            document.getElementById('vistaEditorPoligono').style.display = 'flex';
+            inicializarMapaEditorSiHaceFalta();
+            redibujarEditor();
+        }
+
+        document.getElementById('btnGpsEditor').addEventListener('click', function () {
             if (!navigator.geolocation) { alert('Este dispositivo no soporta geolocalización.'); return; }
-            document.getElementById('estadoVertices').textContent = 'Obteniendo ubicación…';
-            navigator.geolocation.getCurrentPosition(async function (pos) {
-                await agregarVertice(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, 'gps');
-                document.getElementById('estadoVertices').textContent = 'Vértice ' + registroActual.vertices.length + ' capturado por GPS (precisión ' + Math.round(pos.coords.accuracy) + ' m).';
+            var elEstado = document.getElementById('estadoEditorPoligono');
+            elEstado.textContent = 'Obteniendo ubicación…';
+            navigator.geolocation.getCurrentPosition(function (pos) {
+                verticesEdicionTemp.push(construirVertice(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, 'gps', verticesEdicionTemp.length + 1));
+                redibujarEditor();
             }, function (err) {
-                document.getElementById('estadoVertices').textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '. Puedes tocar el mapa para agregarlo manualmente.';
+                elEstado.textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '.';
             }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
         });
 
-        // "Coincide — usar este polígono": convierte los vértices del predio
-        // ya mapeado (GIS/KML) en los vértices del registro, con
-        // origen:'mapeado' para distinguirlos en la lista. No se toca el KML
-        // en sí (queda intacto en registroActual.poligonoKmlExistente para
-        // seguir mostrándose como referencia).
-        document.getElementById('btnUsarPoligonoExistente').addEventListener('click', async function () {
-            if (!registroActual || registroActual.confirmado) return;
-            var predio = registroActual.poligonoKmlExistente;
-            if (!predio) return;
-            registroActual.vertices = predio.coordenadas.map(function (par, idx) {
-                var utm = latLonAUtm17S(par[1], par[0]);
-                return {
-                    orden: idx + 1, easting: utm.easting, northing: utm.northing, zonaUtm: '17S',
-                    lat: par[1], lon: par[0], precisionM: null, origen: 'mapeado',
-                    capturadoEn: new Date().toISOString(),
-                };
-            });
+        document.getElementById('btnCerrarEditor').addEventListener('click', function () {
+            verticesEdicionTemp = [];
+            document.getElementById('vistaEditorPoligono').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'flex';
+        });
+
+        document.getElementById('btnFinalizarEdicion').addEventListener('click', function () {
+            if (verticesEdicionTemp.length < 3) { alert('Captura al menos 3 vértices antes de finalizar.'); return; }
+            renumerarVertices(verticesEdicionTemp);
+            poligonoPropuestoTemp = verticesEdicionTemp;
+            document.getElementById('vistaEditorPoligono').style.display = 'none';
+            mostrarComparacionPoligono();
+        });
+
+        // ── Comparación del polígono nuevo contra el que ya existía ──
+        function dibujarPoligonoEnMiniMapa(mapaExistenteVar, contenedorId, latlngs, color) {
+            if (!mapaExistenteVar) {
+                mapaExistenteVar = L.map(contenedorId, { preferCanvas: true }).setView([-4.9, -80.6], 12);
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
+                    maxZoom: 19
+                }).addTo(mapaExistenteVar);
+            }
+            setTimeout(function () { mapaExistenteVar.invalidateSize(); }, 50);
+            mapaExistenteVar.eachLayer(function (capa) { if (capa instanceof L.Polygon) mapaExistenteVar.removeLayer(capa); });
+            if (latlngs.length >= 3) {
+                var capa = L.polygon(latlngs, { color: color, fillColor: color, fillOpacity: 0.3, weight: 2 }).addTo(mapaExistenteVar);
+                mapaExistenteVar.fitBounds(capa.getBounds(), { padding: [20, 20], maxZoom: 19 });
+            }
+            return mapaExistenteVar;
+        }
+
+        function mostrarComparacionPoligono() {
+            document.getElementById('vistaComparacionPoligono').style.display = 'flex';
+
+            var latlngsNuevo = poligonoPropuestoTemp.map(function (v) { return [v.lat, v.lon]; });
+            mapaCompNuevo = dibujarPoligonoEnMiniMapa(mapaCompNuevo, 'mapaCompNuevo', latlngsNuevo, '#c8a84b');
+            var areaNueva = calcularAreaPoligonoHa(poligonoPropuestoTemp.map(function (v) { return { easting: v.easting, northing: v.northing }; }));
+
+            var predioKml = registroActual.poligonoKmlExistente;
+            var elTituloExistente = document.getElementById('tituloCompExistente');
+            var elMapaExistente = document.getElementById('mapaCompExistente');
+            var elTexto = document.getElementById('textoDiferenciasPoligono');
+
+            if (!predioKml) {
+                elTituloExistente.style.display = 'none';
+                elMapaExistente.style.display = 'none';
+                elTexto.textContent = '📐 Polígono creado: ' + areaNueva.toFixed(2) + ' ha (' + poligonoPropuestoTemp.length +
+                    ' vértices). No había un polígono previamente registrado en el sistema para comparar.';
+                return;
+            }
+            elTituloExistente.style.display = 'block';
+            elMapaExistente.style.display = 'block';
+
+            var verticesExistente = poligonoKmlComoVertices(predioKml);
+            var latlngsExistente = verticesExistente.map(function (v) { return [v.lat, v.lon]; });
+            mapaCompExistente = dibujarPoligonoEnMiniMapa(mapaCompExistente, 'mapaCompExistente', latlngsExistente, '#1d4ed8');
+            var areaExistente = calcularAreaPoligonoHa(verticesExistente.map(function (v) { return { easting: v.easting, northing: v.northing }; }));
+
+            var diferencia = areaNueva - areaExistente;
+            var porcentaje = areaExistente > 0 ? (diferencia / areaExistente) * 100 : 0;
+            elTexto.textContent = '📐 Polígono nuevo: ' + areaNueva.toFixed(2) + ' ha (' + poligonoPropuestoTemp.length + ' vértices) · Polígono registrado: ' +
+                areaExistente.toFixed(2) + ' ha (' + verticesExistente.length + ' vértices) · Diferencia: ' +
+                (diferencia >= 0 ? '+' : '') + diferencia.toFixed(2) + ' ha (' + (porcentaje >= 0 ? '+' : '') + porcentaje.toFixed(1) + '%).';
+        }
+
+        document.getElementById('btnGuardarPoligonoNuevo').addEventListener('click', async function () {
+            registroActual.vertices = poligonoPropuestoTemp;
+            poligonoPropuestoTemp = null;
             await guardarVerticesLocal(registroActual.id, registroActual.vertices);
             recalcularAreaYComparacion();
-            renderizarListaVertices();
-            redibujarPoligono();
-            actualizarAvisoPoligonoExistente();
-            document.getElementById('estadoVertices').textContent = 'Se copiaron ' + registroActual.vertices.length + ' vértices del polígono ya mapeado.';
+            document.getElementById('vistaComparacionPoligono').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'flex';
+            actualizarPanelPoligono();
+            redibujarPoligonoPreview();
             intentarSincronizarPendientes();
         });
 
-        // "No coincide — capturar el mío": no borra nada, solo oculta el
-        // aviso para dejar paso libre a la captura por GPS/manual — el
-        // polígono KML sigue dibujado como referencia en el mapa.
-        document.getElementById('btnCapturarPropio').addEventListener('click', function () {
-            document.getElementById('avisoPoligonoExistente').style.display = 'none';
-            document.getElementById('accionesPoligonoExistente').style.display = 'none';
+        document.getElementById('btnSeguirEditandoPoligono').addEventListener('click', function () {
+            document.getElementById('vistaComparacionPoligono').style.display = 'none';
+            abrirEditorPoligono(poligonoPropuestoTemp);
         });
 
         // ── Fotos ──
