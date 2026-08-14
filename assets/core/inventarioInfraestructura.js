@@ -68,3 +68,41 @@ function resolverTomaPorCanal(filas) {
         return canalATomaMap[_normCanal(nombreCanal)] || null;
     };
 }
+
+// ══ Fase 2 — los 12 tipos de obra restantes (Acueductos, Sifón Invertido,
+// Caídas, Rápidas, Repartidor, Pase Vehicular, Pase Peatonal, Alcantarilla,
+// Medidores, Canales Laterales, Dren Principal, Drenes Secundarios) ══
+//
+// A diferencia de Tomas/Compuertas (una tabla por tipo), estos 12 comparten
+// una sola tabla genérica `inventario_estructuras` (columna `campos` jsonb
+// con lo propio de cada tipo) — sus columnas cambian demasiado entre sí
+// (17 a 40, con distintos sub-grupos de dimensiones) para justificar 12
+// tablas/formularios casi idénticos. `TIPOS_ESTRUCTURA_GENERICOS` describe,
+// por tipo: dónde está cada columna en el Excel (para el parser de
+// escritorio) y cómo mostrarla en el móvil (etiqueta + diccionario, si
+// tiene) — de solo lectura salvo Estado/Observación, que sí edita el
+// sectorista en campo.
+
+const MATERIAL_PASE = { C: 'Concreto', M: 'Mampostería', Ma: 'Madera', O: 'Otros' };
+const TIPO_PASE = { Pe: 'Permanente', Sr: 'Semi-Rústico', R: 'Rústico' };
+
+const TIPOS_ESTRUCTURA_GENERICOS = {
+    pase_vehicular: {
+        etiqueta: 'Pase Vehicular', etiquetaPlural: 'Pases Vehiculares',
+        hojaExcel: 'Formato B.2.10-PASE VEHICULAR',
+        filaInicioDatos: 13,
+        colIndice: {
+            numeroOrden: 1, nombreObra: 2, canalFuente: 3, nombreCanal: 4, progresivaKm: 5,
+            zonaUtm: 6, este: 7, norte: 8, bloqueRiego: 16, observacion: 17,
+        },
+        colEstado: 12,
+        camposReferencia: [
+            { indice: 9, clave: 'elevacion', etiqueta: 'Elevación (m)' },
+            { indice: 10, clave: 'tipo', etiqueta: 'Tipo', diccionario: TIPO_PASE },
+            { indice: 11, clave: 'material', etiqueta: 'Material', diccionario: MATERIAL_PASE },
+            { indice: 13, clave: 'longitud', etiqueta: 'Longitud (m)' },
+            { indice: 14, clave: 'ancho', etiqueta: 'Ancho (m)' },
+            { indice: 15, clave: 'altura', etiqueta: 'Altura (m)' },
+        ],
+    },
+};

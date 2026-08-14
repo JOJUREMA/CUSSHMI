@@ -1425,6 +1425,18 @@
             </button>
             <input type="file" id="inputInventario" accept=".xlsx" style="display:none;" onchange="importarInventarioInfraestructura(event)">
 
+            <hr style="margin: 18px 0; border-color: #ddd;">
+            <p class="info-text" style="text-align:left;">
+                Otros tipos de obra del mismo archivo (Acueductos, Sifón
+                Invertido, Caídas, etc.) — elige el tipo y sube el mismo
+                Excel; solo se lee la hoja correspondiente.
+            </p>
+            <select id="selectTipoEstructuraGenerica" style="width: 100%; padding: 8px; margin-bottom: 10px;"></select>
+            <button class="btn btn-primary" id="btnSincronizarEstructuraGenerica" onclick="document.getElementById('inputEstructuraGenerica').click()" style="width: 100%;">
+                📡 Sincronizar tipo seleccionado
+            </button>
+            <input type="file" id="inputEstructuraGenerica" accept=".xlsx" style="display:none;" onchange="importarInventarioEstructuraGenerica(event)">
+
             <button class="btn btn-secondary" onclick="cerrarModalInventario()" style="width: 100%; margin-top: 12px;">
                 ❌ Cerrar
             </button>
@@ -3030,6 +3042,99 @@ const COMISIONES = {
                 });
             }
             return filas;
+        }
+
+        // Fase 2 — genérico para los 12 tipos de obra restantes (ver
+        // assets/core/inventarioInfraestructura.js: TIPOS_ESTRUCTURA_GENERICOS).
+        // Una sola función de extracción para los 12, en vez de una por tipo
+        // como Tomas/Compuertas — la `definicion` de cada tipo dice en qué
+        // columna está cada dato.
+        function _extraerFilasEstructuraGenerica(sheet, definicion) {
+            const filas = [];
+            for (let r = definicion.filaInicioDatos; r <= sheet.rowCount; r++) {
+                const val = _leerFilaInventarioComun(sheet.getRow(r));
+                const numeroOrden = val(definicion.colIndice.numeroOrden);
+                if (typeof numeroOrden !== 'number' || numeroOrden <= 0) continue;
+                const canalFuente = val(definicion.colIndice.canalFuente).toString().trim();
+                const nombreCanal = val(definicion.colIndice.nombreCanal).toString().trim();
+                if (!canalFuente || !nombreCanal) continue;
+
+                const campos = {};
+                (definicion.camposReferencia || []).forEach((c) => {
+                    const v = val(c.indice);
+                    const texto = (v === null || v === undefined) ? '' : v.toString().trim();
+                    if (texto && texto !== '-') campos[c.clave] = v;
+                });
+
+                filas.push({
+                    nombreObra: definicion.colIndice.nombreObra ? (val(definicion.colIndice.nombreObra).toString().trim() || null) : null,
+                    canalFuente, nombreCanal,
+                    progresivaKm: definicion.colIndice.progresivaKm ? (val(definicion.colIndice.progresivaKm).toString().trim() || null) : null,
+                    zonaUtm: definicion.colIndice.zonaUtm ? (val(definicion.colIndice.zonaUtm).toString().trim() || null) : null,
+                    este: definicion.colIndice.este ? val(definicion.colIndice.este) : null,
+                    norte: definicion.colIndice.norte ? val(definicion.colIndice.norte) : null,
+                    estado: definicion.colEstado ? (val(definicion.colEstado).toString().trim() || null) : null,
+                    bloqueRiego: definicion.colIndice.bloqueRiego ? (val(definicion.colIndice.bloqueRiego).toString().trim() || null) : null,
+                    observacion: definicion.colIndice.observacion ? (val(definicion.colIndice.observacion).toString().trim() || null) : null,
+                    campos,
+                });
+            }
+            return filas;
+        }
+
+        async function importarInventarioEstructuraGenerica(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            const tipoEstructura = document.getElementById('selectTipoEstructuraGenerica').value;
+            const definicion = (typeof TIPOS_ESTRUCTURA_GENERICOS === 'object') ? TIPOS_ESTRUCTURA_GENERICOS[tipoEstructura] : null;
+            if (!definicion) { alert('Elige un tipo de obra antes de subir el archivo.'); event.target.value = ''; return; }
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); event.target.value = ''; return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); event.target.value = ''; return; }
+
+            const btn = document.getElementById('btnSincronizarEstructuraGenerica');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📡 Leyendo archivo…'; }
+
+            try {
+                const buffer = await file.arrayBuffer();
+                const wb = new ExcelJS.Workbook();
+                await wb.xlsx.load(buffer);
+
+                const sheet = wb.getWorksheet(definicion.hojaExcel);
+                if (!sheet) {
+                    alert('El archivo no tiene la hoja "' + definicion.hojaExcel + '" — verifica que sea el Inventario de Obras de Arte oficial.');
+                    return;
+                }
+
+                const filas = _extraerFilasEstructuraGenerica(sheet, definicion);
+                if (filas.length === 0) {
+                    alert('No se encontraron registros reconocibles en la hoja "' + definicion.hojaExcel + '".');
+                    return;
+                }
+
+                const obtenerToma = resolverTomaPorCanal(filas);
+                filas.forEach((f) => { f.tomaNombre = obtenerToma(f.nombreCanal); });
+
+                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                if (btn) btn.textContent = '📡 Sincronizando ' + definicion.etiquetaPlural + '…';
+                const resultado = await CusshmiDatos.sincronizarInventarioEstructuras(comisionKey, tipoEstructura, filas);
+                if (!resultado.ok) {
+                    alert('⚠️ No se pudo sincronizar ' + definicion.etiquetaPlural + ': ' + (resultado.error || 'error desconocido') +
+                        (resultado.guardados ? ('\n\n(' + resultado.guardados + ' filas sí se guardaron antes del error.)') : ''));
+                    return;
+                }
+
+                const sinToma = filas.filter((f) => !f.tomaNombre).length;
+                alert('✅ ' + definicion.etiquetaPlural + ' sincronizadas.\n\n' +
+                    resultado.guardados + ' de ' + filas.length + ' filas' +
+                    (sinToma ? ' (' + sinToma + ' sin toma identificada — canal sin raíz conocida)' : '') + '.');
+            } catch (e) {
+                console.error('Error al importar ' + tipoEstructura + ':', e);
+                alert('No se pudo leer el archivo: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+                event.target.value = '';
+            }
         }
 
         async function importarInventarioInfraestructura(event) {
@@ -4776,6 +4881,15 @@ function cerrarModalSiembraDIS() {
 function abrirModalInventario() {
     const modal = document.getElementById('modalInventario');
     if (modal) modal.classList.add('active');
+    const select = document.getElementById('selectTipoEstructuraGenerica');
+    if (select && typeof TIPOS_ESTRUCTURA_GENERICOS === 'object' && select.options.length === 0) {
+        Object.keys(TIPOS_ESTRUCTURA_GENERICOS).forEach((clave) => {
+            const opt = document.createElement('option');
+            opt.value = clave;
+            opt.textContent = TIPOS_ESTRUCTURA_GENERICOS[clave].etiqueta;
+            select.appendChild(opt);
+        });
+    }
 }
 
 function cerrarModalInventario() {

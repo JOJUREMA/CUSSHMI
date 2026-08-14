@@ -129,25 +129,29 @@
         .resumen-fila .etiqueta-resumen { opacity: 0.7; }
         .resumen-fila .valor-resumen { font-weight: 600; text-align: right; }
 
-        .toggle-tipo {
+        .chips-tipo {
             display: flex;
+            gap: 8px;
             width: 100%;
             max-width: 420px;
-            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 4px;
             margin-bottom: 12px;
+            -webkit-overflow-scrolling: touch;
         }
-        .toggle-tipo button {
-            flex: 1;
-            padding: 10px;
-            border-radius: 8px;
+        .chips-tipo button {
+            flex: 0 0 auto;
+            padding: 8px 14px;
+            border-radius: 999px;
             border: 1px solid rgba(255, 255, 255, 0.25);
             background: rgba(255, 255, 255, 0.06);
             color: #ffffff;
             font-weight: 700;
-            font-size: 13px;
+            font-size: 12.5px;
+            white-space: nowrap;
             cursor: pointer;
         }
-        .toggle-tipo button.activo {
+        .chips-tipo button.activo {
             background: #c8a84b;
             color: #002555;
             border-color: #c8a84b;
@@ -173,10 +177,7 @@
             <button class="boton-secundario" id="btnVolverATomas" style="max-width:420px;">← Volver a las tomas</button>
             <h1 id="tituloTomaLista" style="margin-top:14px; font-size:16px;"></h1>
 
-            <div class="toggle-tipo" style="margin-top:10px;">
-                <button type="button" id="btnTipoTomas">Tomas</button>
-                <button type="button" id="btnTipoCompuertas">Compuertas</button>
-            </div>
+            <div class="chips-tipo" id="chipsTipo" style="margin-top:10px;"></div>
 
             <div class="buscador campo" style="width:100%; max-width:420px;">
                 <label for="inputBusquedaCanal">Buscar por canal</label>
@@ -296,6 +297,14 @@
                 </div>
             </div>
 
+            <!-- Campos genéricos (Fase 2: los 12 tipos de obra restantes) —
+                 solo lectura, vienen del levantamiento de ingeniería del
+                 Excel; el sectorista en campo solo confirma Estado/Observación. -->
+            <div id="camposGenericos" style="width:100%; display:none; flex-direction:column; align-items:center;">
+                <div class="seccion-titulo">Datos de referencia (ingeniería)</div>
+                <div class="tarjeta" style="max-width:420px; width:100%;" id="listaCamposGenericos"></div>
+            </div>
+
             <div class="seccion-titulo">Estado</div>
             <div class="campo" style="width:100%; max-width:420px;">
                 <label for="selectEstado">Estado actual</label>
@@ -348,6 +357,10 @@
             <div class="seccion-titulo">Compuertas</div>
             <div class="estado-busqueda" id="estadoSolicitudesCompuertas"></div>
             <div class="resultados" id="listaSolicitudesCompuertas"></div>
+
+            <div class="seccion-titulo">Otras estructuras</div>
+            <div class="estado-busqueda" id="estadoSolicitudesGenericas"></div>
+            <div class="resultados" id="listaSolicitudesGenericas"></div>
         </div>
     </div>
 
@@ -357,18 +370,20 @@
         var esAdmin = false;
 
         var tomaSeleccionada = null;
-        var tipoActual = 'toma'; // 'toma' | 'compuerta' — cuál tabla se está mirando/editando
-        var registrosTomaTomas = [];
-        var registrosTomaCompuertas = [];
+        var tipoActual = 'toma'; // 'toma' | 'compuerta' | uno de TIPOS_ESTRUCTURA_GENERICOS
+        var registrosPorTipo = {}; // tipo → registros de la toma abierta
         var registroActual = null;
 
         // Despacha a las funciones de datos.js correctas según el tipo — evita
-        // duplicar toda la lógica de pantallas dos veces (Tomas/Compuertas son
-        // dos tablas distintas pero con exactamente el mismo patrón de
-        // candado/solicitud de edición).
+        // duplicar toda la lógica de pantallas para cada tipo. Tomas/
+        // Compuertas tienen tabla y formulario propios (Fase 1); los 12
+        // tipos de TIPOS_ESTRUCTURA_GENERICOS (Fase 2) comparten una sola
+        // tabla `inventario_estructuras` — sus entradas se agregan más abajo,
+        // curried con su propio `tipoEstructura`.
         var FUNCIONES_POR_TIPO = {
             toma: {
                 etiqueta: 'Toma', etiquetaPlural: 'Tomas',
+                avance: function (comisionKey) { return CusshmiDatos.obtenerAvanceInventarioTomasPorToma(comisionKey); },
                 listar: CusshmiDatos.listarRegistrosInventarioTomasDeToma,
                 cargar: CusshmiDatos.cargarRegistroInventarioToma,
                 guardar: CusshmiDatos.guardarRegistroInventarioToma,
@@ -379,6 +394,7 @@
             },
             compuerta: {
                 etiqueta: 'Compuerta', etiquetaPlural: 'Compuertas',
+                avance: function (comisionKey) { return CusshmiDatos.obtenerAvanceInventarioCompuertasPorToma(comisionKey); },
                 listar: CusshmiDatos.listarRegistrosInventarioCompuertasDeToma,
                 cargar: CusshmiDatos.cargarRegistroInventarioCompuerta,
                 guardar: CusshmiDatos.guardarRegistroInventarioCompuerta,
@@ -388,6 +404,43 @@
                 rechazarSolicitud: CusshmiDatos.rechazarSolicitudEdicionInventarioCompuerta,
             },
         };
+
+        // Fase 2 — una entrada por tipo genérico, todas apuntando a las
+        // mismas funciones de `inventario_estructuras`, curried con su
+        // propio `tipoEstructura` donde hace falta.
+        function construirFuncionesTipoGenerico(tipoEstructura, definicion) {
+            return {
+                etiqueta: definicion.etiqueta, etiquetaPlural: definicion.etiquetaPlural,
+                generico: true, definicion: definicion,
+                avance: function (comisionKey) { return CusshmiDatos.obtenerAvanceInventarioEstructurasPorToma(comisionKey, tipoEstructura); },
+                listar: function (comisionKey, tomaNombre) { return CusshmiDatos.listarRegistrosInventarioEstructurasDeToma(comisionKey, tomaNombre, tipoEstructura); },
+                cargar: CusshmiDatos.cargarRegistroInventarioEstructura,
+                guardar: CusshmiDatos.guardarRegistroInventarioEstructura,
+                confirmar: CusshmiDatos.confirmarRegistroInventarioEstructura,
+                desbloquear: CusshmiDatos.desbloquearRegistroInventarioEstructura,
+                solicitarEdicion: CusshmiDatos.solicitarEdicionInventarioEstructura,
+                rechazarSolicitud: CusshmiDatos.rechazarSolicitudEdicionInventarioEstructura,
+            };
+        }
+        Object.keys(TIPOS_ESTRUCTURA_GENERICOS).forEach(function (clave) {
+            FUNCIONES_POR_TIPO[clave] = construirFuncionesTipoGenerico(clave, TIPOS_ESTRUCTURA_GENERICOS[clave]);
+        });
+
+        var TODOS_LOS_TIPOS = ['toma', 'compuerta'].concat(Object.keys(TIPOS_ESTRUCTURA_GENERICOS));
+
+        function construirChipsTipo() {
+            var cont = document.getElementById('chipsTipo');
+            cont.innerHTML = '';
+            TODOS_LOS_TIPOS.forEach(function (tipo) {
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.textContent = FUNCIONES_POR_TIPO[tipo].etiquetaPlural;
+                btn.dataset.tipo = tipo;
+                btn.addEventListener('click', function () { seleccionarTipo(tipo); });
+                cont.appendChild(btn);
+            });
+        }
+        construirChipsTipo();
 
         function poblarSelect(elId, diccionario, incluirVacio) {
             var el = document.getElementById(elId);
@@ -433,17 +486,16 @@
             elEstadoTomas.textContent = 'Cargando inventario…';
             elListaTomas.innerHTML = '';
 
-            var [avanceTomas, avanceCompuertas] = await Promise.all([
-                CusshmiDatos.obtenerAvanceInventarioTomasPorToma(comisionKeyActual),
-                CusshmiDatos.obtenerAvanceInventarioCompuertasPorToma(comisionKeyActual),
-            ]);
-            var mapaTomas = (avanceTomas.ok && avanceTomas.avance) ? avanceTomas.avance : {};
-            var mapaCompuertas = (avanceCompuertas.ok && avanceCompuertas.avance) ? avanceCompuertas.avance : {};
+            var resultadosAvance = await Promise.all(TODOS_LOS_TIPOS.map(function (tipo) { return FUNCIONES_POR_TIPO[tipo].avance(comisionKeyActual); }));
+            var mapas = {};
+            TODOS_LOS_TIPOS.forEach(function (tipo, i) { mapas[tipo] = (resultadosAvance[i].ok && resultadosAvance[i].avance) ? resultadosAvance[i].avance : {}; });
 
-            var tomasSet = new Set(Object.keys(mapaTomas).concat(Object.keys(mapaCompuertas)));
+            var tomasSet = new Set();
+            TODOS_LOS_TIPOS.forEach(function (tipo) { Object.keys(mapas[tipo]).forEach(function (t) { tomasSet.add(t); }); });
             tomasSet.delete('Sin toma asignada');
             var tomas = Array.from(tomasSet).sort(function (a, b) { return compararOrdenTomas(a, b); });
-            if (mapaTomas['Sin toma asignada'] || mapaCompuertas['Sin toma asignada']) tomas.push('Sin toma asignada');
+            var hayTomaSinAsignar = TODOS_LOS_TIPOS.some(function (tipo) { return mapas[tipo]['Sin toma asignada']; });
+            if (hayTomaSinAsignar) tomas.push('Sin toma asignada');
 
             if (tomas.length === 0) {
                 elEstadoTomas.textContent = 'No hay inventario sincronizado todavía. Pide a un administrador que lo sincronice desde el sistema de escritorio.';
@@ -452,10 +504,13 @@
 
             elEstadoTomas.textContent = '';
             tomas.forEach(function (toma) {
-                var t = mapaTomas[toma] || { revisados: 0, total: 0 };
-                var c = mapaCompuertas[toma] || { revisados: 0, total: 0 };
+                var totalRevisados = 0, totalGeneral = 0;
+                TODOS_LOS_TIPOS.forEach(function (tipo) {
+                    var m = mapas[tipo][toma];
+                    if (m) { totalRevisados += m.revisados; totalGeneral += m.total; }
+                });
                 var bloque = toma === 'Sin toma asignada' ? '—' : obtenerBloqueDeToma(toma);
-                var detalle = 'Tomas: ' + t.revisados + '/' + t.total + ' · Compuertas: ' + c.revisados + '/' + c.total;
+                var detalle = totalGeneral + ' estructuras · ' + totalRevisados + '/' + totalGeneral + ' revisadas';
 
                 var fila = document.createElement('button');
                 fila.className = 'fila-toma';
@@ -471,12 +526,14 @@
         // ═══ Pantalla admin — solicitudes de edición pendientes ═══
         async function actualizarBotonSolicitudes() {
             var btn = document.getElementById('btnVerSolicitudes');
-            var [rTomas, rCompuertas] = await Promise.all([
+            var [rTomas, rCompuertas, rGenericas] = await Promise.all([
                 CusshmiDatos.listarSolicitudesEdicionInventarioToma(comisionKeyActual),
                 CusshmiDatos.listarSolicitudesEdicionInventarioCompuerta(comisionKeyActual),
+                CusshmiDatos.listarSolicitudesEdicionInventarioEstructura(comisionKeyActual),
             ]);
             var n = ((rTomas.ok && rTomas.solicitudes) ? rTomas.solicitudes.length : 0) +
-                ((rCompuertas.ok && rCompuertas.solicitudes) ? rCompuertas.solicitudes.length : 0);
+                ((rCompuertas.ok && rCompuertas.solicitudes) ? rCompuertas.solicitudes.length : 0) +
+                ((rGenericas.ok && rGenericas.solicitudes) ? rGenericas.solicitudes.length : 0);
             if (n > 0) {
                 btn.textContent = '🔔 Solicitudes de edición pendientes (' + n + ')';
                 btn.style.display = 'block';
@@ -490,6 +547,76 @@
             document.getElementById('vistaSolicitudes').style.display = 'flex';
             await renderizarListaSolicitudes('toma', 'estadoSolicitudesTomas', 'listaSolicitudesTomas');
             await renderizarListaSolicitudes('compuerta', 'estadoSolicitudesCompuertas', 'listaSolicitudesCompuertas');
+            await renderizarListaSolicitudesGenericas('estadoSolicitudesGenericas', 'listaSolicitudesGenericas');
+        }
+
+        // Fase 2 — una sola lista combinada para los 12 tipos genéricos (en
+        // vez de 12 secciones): cada fila trae su propio `tipo_estructura`,
+        // las acciones de habilitar/rechazar son las mismas para los 12
+        // (operan sobre `inventario_estructuras` por id, el tipo no importa).
+        async function renderizarListaSolicitudesGenericas(idEstado, idLista) {
+            var elEstado = document.getElementById(idEstado);
+            var elLista = document.getElementById(idLista);
+            elEstado.textContent = 'Cargando solicitudes…';
+            elLista.innerHTML = '';
+
+            var resultado = await CusshmiDatos.listarSolicitudesEdicionInventarioEstructura(comisionKeyActual);
+            if (!resultado.ok) { elEstado.textContent = resultado.error || 'No se pudo cargar las solicitudes.'; return; }
+            var solicitudes = resultado.solicitudes || [];
+            if (solicitudes.length === 0) {
+                elEstado.textContent = 'No hay solicitudes pendientes.';
+                return;
+            }
+            elEstado.textContent = '';
+
+            solicitudes.forEach(function (s) {
+                var def = TIPOS_ESTRUCTURA_GENERICOS[s.tipo_estructura];
+                var etiquetaTipo = def ? def.etiqueta : s.tipo_estructura;
+                var fila = document.createElement('div');
+                fila.className = 'fila-resultado';
+                var fecha = s.solicitud_edicion_en ? new Date(s.solicitud_edicion_en).toLocaleString('es-PE') : '-';
+                fila.innerHTML =
+                    '<div class="nombre-resultado">' + escapeHtml(s.nombre_obra || s.nombre_canal || '-') +
+                    '<span class="badge-estado">' + escapeHtml(etiquetaTipo) + '</span></div>' +
+                    '<div class="detalle-resultado">' + escapeHtml(s.canal_fuente || '-') + ' → ' + escapeHtml(s.nombre_canal || '-') + ' · Toma ' + escapeHtml(s.toma_nombre || 'Sin toma asignada') + '</div>' +
+                    '<div class="detalle-resultado">Solicitado por ' + escapeHtml(s.solicitud_edicion_por_nombre || 'un programador') + ' — ' + escapeHtml(fecha) + '</div>';
+
+                var acciones = document.createElement('div');
+                acciones.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
+
+                var btnHabilitar = document.createElement('button');
+                btnHabilitar.className = 'boton';
+                btnHabilitar.type = 'button';
+                btnHabilitar.style.cssText = 'max-width:none; flex:1; padding:8px; font-size:12px;';
+                btnHabilitar.textContent = '✅ Habilitar';
+                btnHabilitar.addEventListener('click', async function (ev) {
+                    ev.stopPropagation();
+                    btnHabilitar.disabled = true;
+                    var r = await CusshmiDatos.desbloquearRegistroInventarioEstructura(s.id);
+                    if (!r.ok) { alert(r.error); btnHabilitar.disabled = false; return; }
+                    renderizarListaSolicitudesGenericas(idEstado, idLista);
+                    actualizarBotonSolicitudes();
+                });
+
+                var btnRechazar = document.createElement('button');
+                btnRechazar.className = 'boton-secundario';
+                btnRechazar.type = 'button';
+                btnRechazar.style.cssText = 'max-width:none; flex:1; padding:8px; font-size:12px;';
+                btnRechazar.textContent = '❌ Rechazar';
+                btnRechazar.addEventListener('click', async function (ev) {
+                    ev.stopPropagation();
+                    btnRechazar.disabled = true;
+                    var r = await CusshmiDatos.rechazarSolicitudEdicionInventarioEstructura(s.id);
+                    if (!r.ok) { alert(r.error); btnRechazar.disabled = false; return; }
+                    renderizarListaSolicitudesGenericas(idEstado, idLista);
+                    actualizarBotonSolicitudes();
+                });
+
+                acciones.appendChild(btnHabilitar);
+                acciones.appendChild(btnRechazar);
+                fila.appendChild(acciones);
+                elLista.appendChild(fila);
+            });
         }
 
         async function renderizarListaSolicitudes(tipo, idEstado, idLista) {
@@ -567,34 +694,39 @@
             document.getElementById('inputBusquedaCanal').value = '';
 
             elEstadoLista.textContent = 'Cargando estructuras…';
-            var [rTomas, rCompuertas] = await Promise.all([
-                CusshmiDatos.listarRegistrosInventarioTomasDeToma(comisionKeyActual, tomaNombre),
-                CusshmiDatos.listarRegistrosInventarioCompuertasDeToma(comisionKeyActual, tomaNombre),
-            ]);
-            registrosTomaTomas = (rTomas.ok && rTomas.registros) ? rTomas.registros : [];
-            registrosTomaCompuertas = (rCompuertas.ok && rCompuertas.registros) ? rCompuertas.registros : [];
+            var resultados = await Promise.all(TODOS_LOS_TIPOS.map(function (tipo) {
+                return FUNCIONES_POR_TIPO[tipo].listar(comisionKeyActual, tomaNombre);
+            }));
+            registrosPorTipo = {};
+            TODOS_LOS_TIPOS.forEach(function (tipo, i) {
+                registrosPorTipo[tipo] = (resultados[i].ok && resultados[i].registros) ? resultados[i].registros : [];
+            });
             elEstadoLista.textContent = '';
 
-            seleccionarTipo('toma');
+            seleccionarTipo(TODOS_LOS_TIPOS.indexOf(tipoActual) !== -1 ? tipoActual : 'toma');
         }
 
         function seleccionarTipo(tipo) {
             tipoActual = tipo;
-            document.getElementById('btnTipoTomas').classList.toggle('activo', tipo === 'toma');
-            document.getElementById('btnTipoCompuertas').classList.toggle('activo', tipo === 'compuerta');
+            Array.prototype.forEach.call(document.getElementById('chipsTipo').children, function (btn) {
+                btn.classList.toggle('activo', btn.dataset.tipo === tipo);
+            });
+            // "+ Agregar estructura nueva" solo tiene sentido para Tomas/
+            // Compuertas — los 12 tipos genéricos son de solo lectura salvo
+            // Estado/Observación, no hay forma de cargar su identidad a mano.
+            document.getElementById('btnAgregarNuevo').style.display = (tipo === 'toma' || tipo === 'compuerta') ? 'block' : 'none';
             renderizarListaEstructuras('');
         }
-        document.getElementById('btnTipoTomas').addEventListener('click', function () { seleccionarTipo('toma'); });
-        document.getElementById('btnTipoCompuertas').addEventListener('click', function () { seleccionarTipo('compuerta'); });
 
         function renderizarListaEstructuras(textoFiltro) {
             elListaEstructuras.innerHTML = '';
-            var registros = tipoActual === 'toma' ? registrosTomaTomas : registrosTomaCompuertas;
+            var registros = registrosPorTipo[tipoActual] || [];
             var filtro = (textoFiltro || '').trim().toUpperCase();
             var filas = filtro
                 ? registros.filter(function (r) {
                     return (r.canal_fuente || '').toUpperCase().indexOf(filtro) !== -1 ||
-                        (r.nombre_canal || '').toUpperCase().indexOf(filtro) !== -1;
+                        (r.nombre_canal || '').toUpperCase().indexOf(filtro) !== -1 ||
+                        (r.nombre_obra || '').toUpperCase().indexOf(filtro) !== -1;
                 })
                 : registros;
 
@@ -610,12 +742,13 @@
                 var fila = document.createElement('div');
                 fila.className = 'fila-resultado';
                 var estadoTexto = r.estado ? (ESTADO_INVENTARIO[r.estado] || r.estado) : 'sin revisar';
+                var tituloFila = r.nombre_obra || r.nombre_canal || '-';
                 fila.innerHTML =
-                    '<div class="nombre-resultado">' + escapeHtml(r.nombre_canal || '-') +
+                    '<div class="nombre-resultado">' + escapeHtml(tituloFila) +
                     '<span class="badge-registrado">' + (r.confirmado ? '✅ confirmado' : '📝 pendiente') + '</span>' +
                     '<span class="badge-estado">' + escapeHtml(estadoTexto) + '</span>' +
                     '</div>' +
-                    '<div class="detalle-resultado">Desde: ' + escapeHtml(r.canal_fuente || '-') + (r.progresiva_km ? ' · Prog. ' + escapeHtml(r.progresiva_km) : '') + '</div>';
+                    '<div class="detalle-resultado">Desde: ' + escapeHtml(r.canal_fuente || '-') + ' → ' + escapeHtml(r.nombre_canal || '-') + (r.progresiva_km ? ' · Prog. ' + escapeHtml(r.progresiva_km) : '') + '</div>';
                 fila.addEventListener('click', function () { abrirFormularioDesdeRegistro(r); });
                 elListaEstructuras.appendChild(fila);
             });
@@ -654,13 +787,14 @@
                 margen: r.margen || '', estado: r.estado || '', observacion: r.observacion || '',
                 confirmado: !!r.confirmado, solicitudEdicion: !!r.solicitud_edicion,
                 solicitudEdicionPorNombre: r.solicitud_edicion_por_nombre || '', solicitudEdicionEn: r.solicitud_edicion_en || null,
+                nombreObra: r.nombre_obra || '', bloqueRiego: r.bloque_riego || '', campos: r.campos || {},
             };
             if (tipo === 'toma') {
                 base.material = r.material || ''; base.tipo_ = r.tipo || '';
                 base.dimensionA = r.dimension_a != null ? r.dimension_a : '';
                 base.dimensionH = r.dimension_h != null ? r.dimension_h : '';
                 base.dimensionD = r.dimension_d != null ? r.dimension_d : '';
-            } else {
+            } else if (tipo === 'compuerta') {
                 base.tipo_ = r.tipo || ''; base.material = r.material || ''; base.operacion = r.operacion || '';
                 base.hojaA = r.hoja_a != null ? r.hoja_a : ''; base.hojaH = r.hoja_h != null ? r.hoja_h : '';
                 base.marcoA = r.marco_a != null ? r.marco_a : ''; base.marcoH = r.marco_h != null ? r.marco_h : '';
@@ -685,13 +819,15 @@
 
         function pintarFormularioDesdeRegistro() {
             var r = registroActual;
-            var esToma = r.tipo === 'toma';
+            var def = FUNCIONES_POR_TIPO[r.tipo];
+            var esGenerico = !!(def && def.generico);
 
-            document.getElementById('tituloSeccionIdentidad').textContent = 'Datos de la ' + (esToma ? 'toma' : 'compuerta');
+            document.getElementById('tituloSeccionIdentidad').textContent = 'Datos de la ' +
+                (r.tipo === 'toma' ? 'toma' : r.tipo === 'compuerta' ? 'compuerta' : ('obra (' + def.etiqueta + ')'));
             document.getElementById('inputCanalFuente').value = r.canalFuente;
             document.getElementById('inputNombreCanal').value = r.nombreCanal;
             document.getElementById('inputProgresivaKm').value = r.progresivaKm;
-            document.getElementById('campoOrdenCompuerta').style.display = esToma ? 'none' : 'block';
+            document.getElementById('campoOrdenCompuerta').style.display = (r.tipo === 'compuerta') ? 'block' : 'none';
             document.getElementById('inputOrdenCompuerta').value = r.ordenCompuerta;
             document.getElementById('textoTomaAsignada').textContent = r.tomaNombre ? ('Toma asignada: ' + r.tomaNombre) : 'Sin toma asignada — no se pudo resolver el canal fuente al sincronizar.';
 
@@ -700,15 +836,17 @@
             document.getElementById('inputEste').value = r.este;
             document.getElementById('inputNorte').value = r.norte;
 
-            document.getElementById('camposToma').style.display = esToma ? 'flex' : 'none';
-            document.getElementById('camposCompuerta').style.display = esToma ? 'none' : 'flex';
-            if (esToma) {
+            document.getElementById('camposToma').style.display = (r.tipo === 'toma') ? 'flex' : 'none';
+            document.getElementById('camposCompuerta').style.display = (r.tipo === 'compuerta') ? 'flex' : 'none';
+            document.getElementById('camposGenericos').style.display = esGenerico ? 'flex' : 'none';
+
+            if (r.tipo === 'toma') {
                 document.getElementById('selectMaterialToma').value = r.material;
                 document.getElementById('selectTipoToma').value = r.tipo_;
                 document.getElementById('inputDimensionA').value = r.dimensionA;
                 document.getElementById('inputDimensionH').value = r.dimensionH;
                 document.getElementById('inputDimensionD').value = r.dimensionD;
-            } else {
+            } else if (r.tipo === 'compuerta') {
                 document.getElementById('inputTipoCompuerta').value = r.tipo_;
                 document.getElementById('selectMaterialCompuerta').value = r.material;
                 document.getElementById('selectOperacion').value = r.operacion;
@@ -717,6 +855,19 @@
                 document.getElementById('inputMarcoA').value = r.marcoA;
                 document.getElementById('inputMarcoH').value = r.marcoH;
                 document.getElementById('inputBloqueRiego').value = r.bloqueRiego;
+            } else if (esGenerico) {
+                var cont = document.getElementById('listaCamposGenericos');
+                cont.innerHTML = '';
+                if (r.nombreObra) cont.innerHTML += filaResumen('Nombre', r.nombreObra);
+                if (r.bloqueRiego) cont.innerHTML += filaResumen('Bloque de Riego', r.bloqueRiego);
+                (def.definicion.camposReferencia || []).forEach(function (c) {
+                    var valorCrudo = (r.campos || {})[c.clave];
+                    if (valorCrudo === undefined || valorCrudo === null || valorCrudo === '') return;
+                    var valorMostrado = valorCrudo;
+                    if (c.diccionario && c.diccionario[valorCrudo]) valorMostrado = valorCrudo + ' — ' + c.diccionario[valorCrudo];
+                    cont.innerHTML += filaResumen(c.etiqueta, valorMostrado);
+                });
+                if (!cont.innerHTML) cont.innerHTML = '<div class="estado-busqueda">Sin datos de referencia — vuelve a sincronizar desde escritorio.</div>';
             }
 
             document.getElementById('selectEstado').value = r.estado;
@@ -726,11 +877,16 @@
             document.getElementById('avisoBloqueadoFormulario').style.display = bloqueado ? 'block' : 'none';
             document.getElementById('estadoGuardadoFormulario').textContent = '';
             document.getElementById('btnContinuarConfirmacion').textContent = bloqueado ? 'Ver confirmación →' : 'Continuar →';
-            var idsCampos = ['inputCanalFuente', 'inputNombreCanal', 'inputProgresivaKm', 'inputOrdenCompuerta', 'inputZonaUtm', 'selectMargen',
+
+            // Los 12 tipos genéricos (Fase 2) son de solo lectura salvo
+            // Estado/Observación, siempre — no solo cuando está confirmado.
+            var idsCamposEditables = ['selectEstado', 'inputObservacion'];
+            var idsCamposIdentidadYTipo = ['inputCanalFuente', 'inputNombreCanal', 'inputProgresivaKm', 'inputOrdenCompuerta', 'inputZonaUtm', 'selectMargen',
                 'inputEste', 'inputNorte', 'selectMaterialToma', 'selectTipoToma', 'inputDimensionA', 'inputDimensionH', 'inputDimensionD',
                 'inputTipoCompuerta', 'selectMaterialCompuerta', 'selectOperacion', 'inputHojaA', 'inputHojaH', 'inputMarcoA', 'inputMarcoH',
-                'inputBloqueRiego', 'selectEstado', 'inputObservacion'];
-            idsCampos.forEach(function (id) { document.getElementById(id).disabled = bloqueado; });
+                'inputBloqueRiego'];
+            idsCamposEditables.forEach(function (id) { document.getElementById(id).disabled = bloqueado; });
+            idsCamposIdentidadYTipo.forEach(function (id) { document.getElementById(id).disabled = bloqueado || esGenerico; });
         }
 
         // Lee todos los campos del formulario hacia registroActual — se llama
@@ -739,29 +895,33 @@
         // antes de guardar de una sola vez).
         function leerFormularioARegistro() {
             var r = registroActual;
-            r.canalFuente = document.getElementById('inputCanalFuente').value;
-            r.nombreCanal = document.getElementById('inputNombreCanal').value;
-            r.progresivaKm = document.getElementById('inputProgresivaKm').value;
-            r.ordenCompuerta = document.getElementById('inputOrdenCompuerta').value;
-            r.zonaUtm = document.getElementById('inputZonaUtm').value;
-            r.margen = document.getElementById('selectMargen').value;
-            r.este = document.getElementById('inputEste').value;
-            r.norte = document.getElementById('inputNorte').value;
-            if (r.tipo === 'toma') {
-                r.material = document.getElementById('selectMaterialToma').value;
-                r.tipo_ = document.getElementById('selectTipoToma').value;
-                r.dimensionA = document.getElementById('inputDimensionA').value;
-                r.dimensionH = document.getElementById('inputDimensionH').value;
-                r.dimensionD = document.getElementById('inputDimensionD').value;
-            } else {
-                r.tipo_ = document.getElementById('inputTipoCompuerta').value;
-                r.material = document.getElementById('selectMaterialCompuerta').value;
-                r.operacion = document.getElementById('selectOperacion').value;
-                r.hojaA = document.getElementById('inputHojaA').value;
-                r.hojaH = document.getElementById('inputHojaH').value;
-                r.marcoA = document.getElementById('inputMarcoA').value;
-                r.marcoH = document.getElementById('inputMarcoH').value;
-                r.bloqueRiego = document.getElementById('inputBloqueRiego').value;
+            var def = FUNCIONES_POR_TIPO[r.tipo];
+            var esGenerico = !!(def && def.generico);
+            if (!esGenerico) {
+                r.canalFuente = document.getElementById('inputCanalFuente').value;
+                r.nombreCanal = document.getElementById('inputNombreCanal').value;
+                r.progresivaKm = document.getElementById('inputProgresivaKm').value;
+                r.ordenCompuerta = document.getElementById('inputOrdenCompuerta').value;
+                r.zonaUtm = document.getElementById('inputZonaUtm').value;
+                r.margen = document.getElementById('selectMargen').value;
+                r.este = document.getElementById('inputEste').value;
+                r.norte = document.getElementById('inputNorte').value;
+                if (r.tipo === 'toma') {
+                    r.material = document.getElementById('selectMaterialToma').value;
+                    r.tipo_ = document.getElementById('selectTipoToma').value;
+                    r.dimensionA = document.getElementById('inputDimensionA').value;
+                    r.dimensionH = document.getElementById('inputDimensionH').value;
+                    r.dimensionD = document.getElementById('inputDimensionD').value;
+                } else {
+                    r.tipo_ = document.getElementById('inputTipoCompuerta').value;
+                    r.material = document.getElementById('selectMaterialCompuerta').value;
+                    r.operacion = document.getElementById('selectOperacion').value;
+                    r.hojaA = document.getElementById('inputHojaA').value;
+                    r.hojaH = document.getElementById('inputHojaH').value;
+                    r.marcoA = document.getElementById('inputMarcoA').value;
+                    r.marcoH = document.getElementById('inputMarcoH').value;
+                    r.bloqueRiego = document.getElementById('inputBloqueRiego').value;
+                }
             }
             r.estado = document.getElementById('selectEstado').value;
             r.observacion = document.getElementById('inputObservacion').value;
@@ -773,6 +933,12 @@
         // que indica Toma/Compuerta) que se traduce de vuelta a `tipo`.
         function datosParaGuardar() {
             var r = registroActual;
+            var def = FUNCIONES_POR_TIPO[r.tipo];
+            if (def && def.generico) {
+                // Los 12 tipos genéricos solo guardan Estado/Observación —
+                // el resto lo pone la sincronización desde el Excel.
+                return { id: r.id, estado: r.estado, observacion: r.observacion };
+            }
             var datos = {
                 id: r.id, comisionKey: r.comisionKey, tomaNombre: r.tomaNombre,
                 canalFuente: r.canalFuente, nombreCanal: r.nombreCanal, progresivaKm: r.progresivaKm,
@@ -826,7 +992,7 @@
 
             var r = registroActual;
             var html = '';
-            html += filaResumen(FUNCIONES_POR_TIPO[r.tipo].etiqueta, r.nombreCanal);
+            html += filaResumen(FUNCIONES_POR_TIPO[r.tipo].etiqueta, r.nombreObra || r.nombreCanal);
             html += filaResumen('Canal Fuente', r.canalFuente);
             html += filaResumen('Toma', r.tomaNombre || 'Sin toma asignada');
             html += filaResumen('Progresiva', r.progresivaKm);

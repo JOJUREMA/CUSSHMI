@@ -1787,6 +1787,179 @@
         }));
     }
 
+    // ── Inventario de Infraestructura — Fase 2: los 12 tipos restantes ──────
+    // A diferencia de Tomas/Compuertas (una tabla por tipo), estos 12 tipos
+    // (Acueductos, Sifón Invertido, Caídas, Rápidas, Repartidor, Pase
+    // Vehicular, Pase Peatonal, Alcantarilla, Medidores, Canales Laterales,
+    // Dren Principal, Drenes Secundarios) comparten UNA sola tabla
+    // `inventario_estructuras` (`tipo_estructura` + `campos` jsonb con lo
+    // propio de cada tipo — ver assets/core/inventarioInfraestructura.js,
+    // TIPOS_ESTRUCTURA_GENERICOS). El móvil solo edita `estado`/
+    // `observacion`; el resto de `campos` es de solo lectura (viene del
+    // levantamiento de ingeniería, no algo que un sectorista re-mida en
+    // cada visita). Se reutilizan los helpers genéricos ya escritos para
+    // Tomas/Compuertas (`_confirmarRegistroInventario`,
+    // `_desbloquearRegistroInventario`, `_solicitarEdicionInventario`,
+    // `_rechazarSolicitudEdicionInventario` — ya parametrizados por tabla/
+    // RPC) en vez de duplicarlos.
+
+    async function _contarInventarioEstructurasPorToma(comisionId, tipoEstructura) {
+        const TAMANO_PAGINA = 1000;
+        const conteos = {};
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from('inventario_estructuras').select('toma_nombre, confirmado')
+                    .eq('comision_id', comisionId).eq('tipo_estructura', tipoEstructura)
+                    .range(desde, desde + TAMANO_PAGINA - 1),
+                'contar inventario_estructuras por toma'
+            );
+            if (error || !data) return null;
+            data.forEach((fila) => {
+                const clave = fila.toma_nombre || 'Sin toma asignada';
+                if (!conteos[clave]) conteos[clave] = { total: 0, confirmados: 0 };
+                conteos[clave].total += 1;
+                if (fila.confirmado) conteos[clave].confirmados += 1;
+            });
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return conteos;
+    }
+
+    async function obtenerAvanceInventarioEstructurasPorToma(comisionKey, tipoEstructura) {
+        if (!comisionKey || !tipoEstructura) return { ok: true, avance: {} };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, avance: {}, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        const conteos = await _contarInventarioEstructurasPorToma(comisionId, tipoEstructura);
+        if (!conteos) return { ok: false, avance: {}, error: 'No se pudo calcular el avance del inventario.' };
+        const avance = {};
+        Object.keys(conteos).forEach((toma) => {
+            const c = conteos[toma];
+            avance[toma] = { revisados: c.confirmados, total: c.total, porcentaje: c.total > 0 ? Math.round((c.confirmados / c.total) * 100) : null };
+        });
+        return { ok: true, avance };
+    }
+
+    async function listarRegistrosInventarioEstructurasDeToma(comisionKey, tomaNombre, tipoEstructura) {
+        if (!comisionKey || !tomaNombre || !tipoEstructura) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('inventario_estructuras')
+                .select('id, nombre_obra, canal_fuente, nombre_canal, progresiva_km, estado, confirmado')
+                .eq('comision_id', comisionId).eq('toma_nombre', tomaNombre).eq('tipo_estructura', tipoEstructura),
+            'listar registros de inventario_estructuras de la toma'
+        );
+        if (error) return { ok: false, registros: [], error: error.mensaje || 'No se pudo listar los registros.' };
+        return { ok: true, registros: data || [] };
+    }
+
+    async function cargarRegistroInventarioEstructura(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('inventario_estructuras').select('*').eq('id', id).maybeSingle(),
+            'cargar registro de inventario_estructuras'
+        );
+        if (error) return { ok: false, error: error.mensaje };
+        if (!data) return { ok: false, error: 'Registro no encontrado.' };
+        return { ok: true, registro: data };
+    }
+
+    // Solo `estado`/`observacion` — el resto de columnas (identidad,
+    // ubicación, `campos` de referencia) las pone la sincronización desde
+    // el Excel, nunca el celular.
+    async function guardarRegistroInventarioEstructura(datos) {
+        if (!datos || !datos.id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const { error } = await client.from('inventario_estructuras')
+            .update({ estado: datos.estado || null, observacion: datos.observacion || null, actualizado_en: new Date().toISOString() })
+            .eq('id', datos.id);
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, id: datos.id };
+    }
+
+    function confirmarRegistroInventarioEstructura(id) { return _confirmarRegistroInventario('inventario_estructuras', id); }
+    function desbloquearRegistroInventarioEstructura(id) { return _desbloquearRegistroInventario('inventario_estructuras', id); }
+    function solicitarEdicionInventarioEstructura(id, nombreSolicitante) { return _solicitarEdicionInventario('solicitar_edicion_inventario_estructura', id, nombreSolicitante); }
+    function rechazarSolicitudEdicionInventarioEstructura(id) { return _rechazarSolicitudEdicionInventario('inventario_estructuras', id); }
+
+    // `tipoEstructura` opcional — si se omite, trae las solicitudes de los
+    // 12 tipos juntas (la pantalla admin del móvil las agrupa por tipo con
+    // el campo `tipo_estructura` que se incluye en el select).
+    async function listarSolicitudesEdicionInventarioEstructura(comisionKey, tipoEstructura) {
+        if (!comisionKey) return { ok: true, solicitudes: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, solicitudes: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => {
+                let q = client.from('inventario_estructuras')
+                    .select('id, tipo_estructura, toma_nombre, nombre_obra, canal_fuente, nombre_canal, solicitud_edicion_por_nombre, solicitud_edicion_en')
+                    .eq('comision_id', comisionId).eq('solicitud_edicion', true);
+                if (tipoEstructura) q = q.eq('tipo_estructura', tipoEstructura);
+                return q.order('solicitud_edicion_en', { ascending: true });
+            },
+            'listar solicitudes de edición de inventario_estructuras'
+        );
+        if (error) return { ok: false, solicitudes: [], error: error.mensaje || 'No se pudo listar las solicitudes.' };
+        return { ok: true, solicitudes: data || [] };
+    }
+
+    // `filasEntrada`: [{nombreObra, canalFuente, nombreCanal, progresivaKm,
+    //   zonaUtm, este, norte, estado, bloqueRiego, observacion, tomaNombre,
+    //   campos: {...}}, ...] — ya armadas por
+    //   _extraerFilasEstructuraGenerica (Sistema_Riego_CUSSHMI_14.html).
+    // Distinto de `_sincronizarInventario` (Tomas/Compuertas) porque la
+    // clave de conflicto acá incluye `tipo_estructura` (una sola tabla para
+    // los 12 tipos, la clave natural por sí sola no alcanza para distinguir
+    // "un Acueducto en el canal X" de "una Alcantarilla en el canal X").
+    async function sincronizarInventarioEstructuras(comisionKey, tipoEstructura, filasEntrada) {
+        if (!comisionKey) return { ok: false, error: 'Falta comisión.' };
+        if (!tipoEstructura) return { ok: false, error: 'Falta el tipo de estructura.' };
+        if (!Array.isArray(filasEntrada) || filasEntrada.length === 0) return { ok: true, guardados: 0 };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        let client;
+        try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const filas = filasEntrada.map((f) => ({
+            comision_id: comisionId,
+            tipo_estructura: tipoEstructura,
+            toma_nombre: f.tomaNombre || null,
+            canal_fuente: f.canalFuente,
+            nombre_canal: f.nombreCanal,
+            progresiva_km: f.progresivaKm || null,
+            nombre_obra: f.nombreObra || null,
+            zona_utm: f.zonaUtm || null,
+            este: Number.isFinite(parseFloat(f.este)) ? parseFloat(f.este) : null,
+            norte: Number.isFinite(parseFloat(f.norte)) ? parseFloat(f.norte) : null,
+            estado: f.estado || null,
+            bloque_riego: f.bloqueRiego || null,
+            observacion: f.observacion || null,
+            campos: f.campos || {},
+            creado_por: usuarioId,
+        }));
+
+        const filasPorClave = new Map();
+        filas.forEach((fila) => {
+            filasPorClave.set(fila.canal_fuente + '|' + fila.nombre_canal + '|' + (fila.progresiva_km || ''), fila);
+        });
+        const filasSinDuplicados = Array.from(filasPorClave.values());
+
+        const TAMANO_LOTE = 500;
+        let guardados = 0;
+        for (let i = 0; i < filasSinDuplicados.length; i += TAMANO_LOTE) {
+            const lote = filasSinDuplicados.slice(i, i + TAMANO_LOTE);
+            const { error } = await client.from('inventario_estructuras').upsert(lote, { onConflict: 'comision_id,tipo_estructura,canal_fuente,nombre_canal,progresiva_km' });
+            if (error) return { ok: false, error: error.message, guardados };
+            guardados += lote.length;
+        }
+        return { ok: true, guardados };
+    }
+
     // ── Padrón oficial A-1 (R.J. N° 0155-2022-ANA) ──────────────────────────
     // Carga masiva desde escritorio (parser del Excel oficial de ANA, formato
     // de encabezados fusionados). `filasEntrada`: [{numeroOrden,
@@ -2085,6 +2258,16 @@
         rechazarSolicitudEdicionInventarioCompuerta,
         sincronizarInventarioTomas,
         sincronizarInventarioCompuertas,
+        obtenerAvanceInventarioEstructurasPorToma,
+        listarRegistrosInventarioEstructurasDeToma,
+        cargarRegistroInventarioEstructura,
+        guardarRegistroInventarioEstructura,
+        confirmarRegistroInventarioEstructura,
+        desbloquearRegistroInventarioEstructura,
+        solicitarEdicionInventarioEstructura,
+        listarSolicitudesEdicionInventarioEstructura,
+        rechazarSolicitudEdicionInventarioEstructura,
+        sincronizarInventarioEstructuras,
         cargarRegistrosIdentificacionParaExportar,
         guardarPadronOficialA1,
         cargarPadronOficialA1,
