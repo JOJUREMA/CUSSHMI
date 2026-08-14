@@ -105,4 +105,24 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 15, clave: 'altura', etiqueta: 'Altura (m)' },
         ],
     },
+    // Mismas 17 columnas y misma leyenda que Pase Vehicular (verificado
+    // contra la hoja real: Tipo Pe/Sr/R, Material C/M/Ma/O, Estado B/R/M).
+    pase_peatonal: {
+        etiqueta: 'Pase Peatonal', etiquetaPlural: 'Pases Peatonales',
+        hojaExcel: 'Formato B.2.11-PASE PEATONAL',
+        filaInicioDatos: 13,
+        colIndice: {
+            numeroOrden: 1, nombreObra: 2, canalFuente: 3, nombreCanal: 4, progresivaKm: 5,
+            zonaUtm: 6, este: 7, norte: 8, bloqueRiego: 16, observacion: 17,
+        },
+        colEstado: 12,
+        camposReferencia: [
+            { indice: 9, clave: 'elevacion', etiqueta: 'Elevación (m)' },
+            { indice: 10, clave: 'tipo', etiqueta: 'Tipo', diccionario: TIPO_PASE },
+            { indice: 11, clave: 'material', etiqueta: 'Material', diccionario: MATERIAL_PASE },
+            { indice: 13, clave: 'longitud', etiqueta: 'Longitud (m)' },
+            { indice: 14, clave: 'ancho', etiqueta: 'Ancho (m)' },
+            { indice: 15, clave: 'altura', etiqueta: 'Altura (m)' },
+        ],
+    },
 };
