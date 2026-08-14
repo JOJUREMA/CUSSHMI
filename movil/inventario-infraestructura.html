@@ -129,32 +129,18 @@
         .resumen-fila .etiqueta-resumen { opacity: 0.7; }
         .resumen-fila .valor-resumen { font-weight: 600; text-align: right; }
 
-        .chips-tipo {
-            display: flex;
-            gap: 8px;
+        .select-tipo {
             width: 100%;
             max-width: 420px;
-            overflow-x: auto;
-            padding-bottom: 4px;
-            margin-bottom: 12px;
-            -webkit-overflow-scrolling: touch;
-        }
-        .chips-tipo button {
-            flex: 0 0 auto;
-            padding: 8px 14px;
-            border-radius: 999px;
+            padding: 11px 12px;
+            border-radius: 8px;
             border: 1px solid rgba(255, 255, 255, 0.25);
-            background: rgba(255, 255, 255, 0.06);
-            color: #ffffff;
-            font-weight: 700;
-            font-size: 12.5px;
-            white-space: nowrap;
-            cursor: pointer;
-        }
-        .chips-tipo button.activo {
-            background: #c8a84b;
+            background: rgba(255, 255, 255, 0.95);
             color: #002555;
-            border-color: #c8a84b;
+            font-size: 14px;
+            font-family: inherit;
+            font-weight: 700;
+            margin-bottom: 12px;
         }
     </style>
 </head>
@@ -177,7 +163,7 @@
             <button class="boton-secundario" id="btnVolverATomas" style="max-width:420px;">← Volver a las tomas</button>
             <h1 id="tituloTomaLista" style="margin-top:14px; font-size:16px;"></h1>
 
-            <div class="chips-tipo" id="chipsTipo" style="margin-top:10px;"></div>
+            <select class="select-tipo" id="selectTipoEstructura" style="margin-top:10px;"></select>
 
             <div class="buscador campo" style="width:100%; max-width:420px;">
                 <label for="inputBusquedaCanal">Buscar por canal</label>
@@ -428,19 +414,18 @@
 
         var TODOS_LOS_TIPOS = ['toma', 'compuerta'].concat(Object.keys(TIPOS_ESTRUCTURA_GENERICOS));
 
-        function construirChipsTipo() {
-            var cont = document.getElementById('chipsTipo');
-            cont.innerHTML = '';
+        function construirSelectTipo() {
+            var sel = document.getElementById('selectTipoEstructura');
+            sel.innerHTML = '';
             TODOS_LOS_TIPOS.forEach(function (tipo) {
-                var btn = document.createElement('button');
-                btn.type = 'button';
-                btn.textContent = FUNCIONES_POR_TIPO[tipo].etiquetaPlural;
-                btn.dataset.tipo = tipo;
-                btn.addEventListener('click', function () { seleccionarTipo(tipo); });
-                cont.appendChild(btn);
+                var opt = document.createElement('option');
+                opt.value = tipo;
+                opt.textContent = FUNCIONES_POR_TIPO[tipo].etiquetaPlural;
+                sel.appendChild(opt);
             });
+            sel.addEventListener('change', function () { seleccionarTipo(sel.value); });
         }
-        construirChipsTipo();
+        construirSelectTipo();
 
         function poblarSelect(elId, diccionario, incluirVacio) {
             var el = document.getElementById(elId);
@@ -708,9 +693,7 @@
 
         function seleccionarTipo(tipo) {
             tipoActual = tipo;
-            Array.prototype.forEach.call(document.getElementById('chipsTipo').children, function (btn) {
-                btn.classList.toggle('activo', btn.dataset.tipo === tipo);
-            });
+            document.getElementById('selectTipoEstructura').value = tipo;
             // "+ Agregar estructura nueva" solo tiene sentido para Tomas/
             // Compuertas — los 12 tipos genéricos son de solo lectura salvo
             // Estado/Observación, no hay forma de cargar su identidad a mano.
