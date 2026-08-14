@@ -200,4 +200,29 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 28, clave: 'numeroEscalones', etiqueta: 'N° Escalones' },
         ],
     },
+    // Mismo Tipo (Pe/Sr/R) y Material (C/M/Ma/O) que Pase Vehicular/Peatonal
+    // — reutiliza los mismos diccionarios. La hoja real también trae 'Fe' y
+    // 'PVC' como material en algunas filas, códigos que no están en la
+    // leyenda de ESTA hoja (solo documenta C/M/Ma/O) — se muestran tal
+    // cual, sin traducir, para no inventar un significado no confirmado
+    // acá (aunque coincidan con MATERIAL_TOMA, esa leyenda es de otra hoja).
+    alcantarilla: {
+        etiqueta: 'Alcantarilla', etiquetaPlural: 'Alcantarillas',
+        hojaExcel: 'Formato B-2.12-ALCANTARILLA ',
+        filaInicioDatos: 14,
+        colIndice: {
+            numeroOrden: 1, nombreObra: 2, canalFuente: 3, nombreCanal: 4, progresivaKm: 5,
+            zonaUtm: 6, este: 7, norte: 8, bloqueRiego: 21, observacion: 22,
+        },
+        colEstado: 12,
+        camposReferencia: [
+            { indice: 9, clave: 'elevacion', etiqueta: 'Elevación (m)' },
+            { indice: 10, clave: 'tipo', etiqueta: 'Tipo', diccionario: TIPO_PASE },
+            { indice: 11, clave: 'material', etiqueta: 'Material', diccionario: MATERIAL_PASE },
+            { indice: 13, clave: 'longitud', etiqueta: 'Longitud (m)' },
+            { indice: 14, clave: 'ancho', etiqueta: 'Ancho (m)' },
+            { indice: 19, clave: 'diametro', etiqueta: 'Diámetro (m)' },
+            { indice: 20, clave: 'altura', etiqueta: 'Altura (m)' },
+        ],
+    },
 };
