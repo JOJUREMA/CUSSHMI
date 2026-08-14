@@ -11,6 +11,9 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="stylesheet" href="estilos.css">
+    <!-- Leaflet vendorizado (movil/vendor/), mismo patrón que Sinceramiento
+         de Áreas — evita depender de un CDN cross-origin desde el celular. -->
+    <link rel="stylesheet" href="vendor/leaflet.css">
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script src="../assets/supabase/supabase-config.js"></script>
@@ -25,9 +28,18 @@
     <script src="../assets/core/utilidades.js"></script>
     <script src="../assets/core/anexoG2.js"></script>
     <script src="../assets/core/mapa.js"></script>
+    <script src="../assets/core/coordenadasUtm.js"></script>
     <script src="../assets/core/inventarioInfraestructura.js"></script>
+    <script src="vendor/leaflet.js"></script>
 
     <style>
+        #mapaInventario {
+            width: 100%;
+            max-width: 420px;
+            height: 60vh;
+            border-radius: 10px;
+            margin: 10px 0;
+        }
         .campo textarea {
             width: 100%;
             padding: 11px 12px;
@@ -170,10 +182,19 @@
                 <input type="text" id="inputBusquedaCanal" placeholder="ej. Principal SD3" autocomplete="off">
             </div>
 
+            <button class="boton-secundario" id="btnVerMapaInventario" style="max-width:420px; margin-bottom:10px;">🗺️ Ver en mapa</button>
             <button class="boton" id="btnAgregarNuevo" style="max-width:420px; margin-bottom:14px;">+ Agregar estructura nueva</button>
 
             <div class="estado-busqueda" id="estadoLista"></div>
             <div class="resultados" id="listaEstructuras"></div>
+        </div>
+
+        <!-- ── Pantalla: mapa satelital de la infraestructura ── -->
+        <div id="vistaMapaInventario" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverAListaDesdeMapa" style="max-width:420px;">← Volver a la lista</button>
+            <h1 id="tituloMapaInventario" style="margin-top:14px; font-size:16px;"></h1>
+            <div class="estado-busqueda" id="estadoMapaInventario"></div>
+            <div id="mapaInventario"></div>
         </div>
 
         <!-- ── Pantalla 4: formulario ── -->
@@ -369,6 +390,8 @@
         var tipoActual = 'toma'; // 'toma' | 'compuerta' | uno de TIPOS_ESTRUCTURA_GENERICOS
         var registrosPorTipo = {}; // tipo → registros de la toma abierta
         var registroActual = null;
+        var mapaInventarioLeaflet = null;
+        var marcadoresInventario = [];
 
         // Despacha a las funciones de datos.js correctas según el tipo — evita
         // duplicar toda la lógica de pantallas para cada tipo. Tomas/
@@ -755,6 +778,90 @@
 
         document.getElementById('btnAgregarNuevo').addEventListener('click', function () {
             abrirFormularioDesdeRegistro(null);
+        });
+
+        // ═══ Mapa satelital de la infraestructura (tipo + toma actuales) ═══
+        function _colorPorEstadoInventario(estado) {
+            if (estado === 'B') return '#1e7e34';
+            if (estado === 'R') return '#c8a84b';
+            if (estado === 'M') return '#c0392b';
+            return '#888888';
+        }
+
+        function inicializarMapaInventarioSiHaceFalta() {
+            if (mapaInventarioLeaflet) {
+                setTimeout(function () { mapaInventarioLeaflet.invalidateSize(); }, 50);
+                return;
+            }
+            mapaInventarioLeaflet = L.map('mapaInventario', { preferCanvas: true }).setView([-4.9, -80.6], 12);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            }).addTo(mapaInventarioLeaflet);
+            setTimeout(function () { mapaInventarioLeaflet.invalidateSize(); }, 50);
+        }
+
+        function pintarMarcadoresInventario() {
+            marcadoresInventario.forEach(function (m) { mapaInventarioLeaflet.removeLayer(m); });
+            marcadoresInventario = [];
+
+            var registros = registrosPorTipo[tipoActual] || [];
+            var conCoordenadas = registros.filter(function (r) { return r.este != null && r.norte != null && r.este !== '' && r.norte !== ''; });
+            var sinCoordenadas = registros.length - conCoordenadas.length;
+
+            if (!registros.length) {
+                document.getElementById('estadoMapaInventario').textContent = 'No hay ' + FUNCIONES_POR_TIPO[tipoActual].etiquetaPlural.toLowerCase() + ' sincronizadas para esta toma todavía.';
+            } else if (!conCoordenadas.length) {
+                document.getElementById('estadoMapaInventario').textContent = 'Ninguna estructura de este tipo tiene coordenadas UTM registradas.';
+            } else {
+                document.getElementById('estadoMapaInventario').textContent = sinCoordenadas ? '(' + sinCoordenadas + ' sin coordenadas, no se muestran en el mapa)' : '';
+            }
+
+            conCoordenadas.forEach(function (r) {
+                var latlon = utm17SALatLon(Number(r.este), Number(r.norte));
+                var titulo = r.nombre_obra || r.nombre_canal || '-';
+                var estadoTexto = r.estado ? (ESTADO_INVENTARIO[r.estado] || r.estado) : 'sin revisar';
+                var marcador = L.circleMarker([latlon.lat, latlon.lon], {
+                    radius: 8, color: '#002555', weight: 1.5, fillColor: _colorPorEstadoInventario(r.estado), fillOpacity: 0.9
+                }).addTo(mapaInventarioLeaflet);
+
+                var popupDiv = document.createElement('div');
+                popupDiv.innerHTML = '<b>' + escapeHtml(titulo) + '</b><br>Estado: ' + escapeHtml(estadoTexto) + '<br>';
+                var btnVerFicha = document.createElement('button');
+                btnVerFicha.type = 'button';
+                btnVerFicha.textContent = 'Ver ficha';
+                btnVerFicha.style.cssText = 'margin-top:6px; padding:6px 10px; border:none; border-radius:6px; background:#003876; color:#fff; font-weight:600; cursor:pointer;';
+                btnVerFicha.addEventListener('click', function () {
+                    mapaInventarioLeaflet.closePopup();
+                    document.getElementById('vistaMapaInventario').style.display = 'none';
+                    abrirFormularioDesdeRegistro(r);
+                });
+                popupDiv.appendChild(btnVerFicha);
+                marcador.bindPopup(popupDiv);
+                marcadoresInventario.push(marcador);
+            });
+
+            if (marcadoresInventario.length) {
+                var grupo = L.featureGroup(marcadoresInventario);
+                mapaInventarioLeaflet.fitBounds(grupo.getBounds(), { padding: [30, 30], maxZoom: 17 });
+            } else {
+                mapaInventarioLeaflet.setView([-4.9, -80.6], 12);
+            }
+        }
+
+        function mostrarVistaMapaInventario() {
+            document.getElementById('vistaLista').style.display = 'none';
+            document.getElementById('vistaMapaInventario').style.display = 'flex';
+            var nombreToma = tomaSeleccionada === 'Sin toma asignada' ? tomaSeleccionada : ('Toma ' + tomaSeleccionada);
+            document.getElementById('tituloMapaInventario').textContent = nombreToma + ' — ' + FUNCIONES_POR_TIPO[tipoActual].etiquetaPlural;
+            inicializarMapaInventarioSiHaceFalta();
+            pintarMarcadoresInventario();
+        }
+
+        document.getElementById('btnVerMapaInventario').addEventListener('click', mostrarVistaMapaInventario);
+        document.getElementById('btnVolverAListaDesdeMapa').addEventListener('click', function () {
+            document.getElementById('vistaMapaInventario').style.display = 'none';
+            document.getElementById('vistaLista').style.display = 'flex';
         });
 
         // ═══ Pantalla 4 — formulario ═══

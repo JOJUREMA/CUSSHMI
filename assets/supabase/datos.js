@@ -1512,10 +1512,10 @@
     }
 
     function listarRegistrosInventarioTomasDeToma(comisionKey, tomaNombre) {
-        return _listarRegistrosInventarioDeToma('inventario_tomas', 'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado', comisionKey, tomaNombre);
+        return _listarRegistrosInventarioDeToma('inventario_tomas', 'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte', comisionKey, tomaNombre);
     }
     function listarRegistrosInventarioCompuertasDeToma(comisionKey, tomaNombre) {
-        return _listarRegistrosInventarioDeToma('inventario_compuertas', 'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado', comisionKey, tomaNombre);
+        return _listarRegistrosInventarioDeToma('inventario_compuertas', 'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte', comisionKey, tomaNombre);
     }
 
     async function _cargarRegistroInventario(tabla, id) {
@@ -1847,7 +1847,7 @@
         if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
         const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
             (client) => client.from('inventario_estructuras')
-                .select('id, nombre_obra, canal_fuente, nombre_canal, progresiva_km, estado, confirmado')
+                .select('id, nombre_obra, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte')
                 .eq('comision_id', comisionId).eq('toma_nombre', tomaNombre).eq('tipo_estructura', tipoEstructura),
             'listar registros de inventario_estructuras de la toma'
         );
