@@ -1869,12 +1869,19 @@
     // Solo `estado`/`observacion` — el resto de columnas (identidad,
     // ubicación, `campos` de referencia) las pone la sincronización desde
     // el Excel, nunca el celular.
+    // `datos.campos`, si viene, reemplaza por completo la columna `campos`
+    // (jsonb) — el móvil siempre manda el objeto completo ya cargado del
+    // servidor con los campos `editable` corregidos encima (ver
+    // TIPOS_ESTRUCTURA_GENERICOS), nunca un parche parcial, así que un
+    // reemplazo total es seguro y no pierde el resto de la referencia.
     async function guardarRegistroInventarioEstructura(datos) {
         if (!datos || !datos.id) return { ok: false, error: 'Falta el identificador del registro.' };
         let client;
         try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const cambios = { estado: datos.estado || null, observacion: datos.observacion || null, actualizado_en: new Date().toISOString() };
+        if (datos.campos && typeof datos.campos === 'object') cambios.campos = datos.campos;
         const { error } = await client.from('inventario_estructuras')
-            .update({ estado: datos.estado || null, observacion: datos.observacion || null, actualizado_en: new Date().toISOString() })
+            .update(cambios)
             .eq('id', datos.id);
         if (error) return { ok: false, error: error.message };
         return { ok: true, id: datos.id };

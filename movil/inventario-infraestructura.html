@@ -285,10 +285,20 @@
 
             <!-- Campos genéricos (Fase 2: los 12 tipos de obra restantes) —
                  solo lectura, vienen del levantamiento de ingeniería del
-                 Excel; el sectorista en campo solo confirma Estado/Observación. -->
+                 Excel; el sectorista en campo solo confirma Estado/Observación,
+                 salvo los campos marcados `editable` en TIPOS_ESTRUCTURA_GENERICOS
+                 (ej. Tipo/Longitud de un Canal Lateral que se revistió). -->
             <div id="camposGenericos" style="width:100%; display:none; flex-direction:column; align-items:center;">
                 <div class="seccion-titulo">Datos de referencia (ingeniería)</div>
                 <div class="tarjeta" style="max-width:420px; width:100%;" id="listaCamposGenericos"></div>
+            </div>
+
+            <div id="seccionCamposGenericosEditables" style="width:100%; display:none; flex-direction:column; align-items:center;">
+                <div class="seccion-titulo">Corregir tipo / longitud (obra)</div>
+                <div class="estado-busqueda" style="max-width:420px; opacity:0.75;">
+                    Corrige acá si la obra cambió físicamente (ej. se revistió un tramo) — la corrección actualiza el inventario.
+                </div>
+                <div id="listaCamposGenericosEditables" style="width:100%; display:flex; flex-direction:column; align-items:center;"></div>
             </div>
 
             <div class="seccion-titulo">Estado</div>
@@ -844,6 +854,7 @@
                 if (r.nombreObra) cont.innerHTML += filaResumen('Nombre', r.nombreObra);
                 if (r.bloqueRiego) cont.innerHTML += filaResumen('Bloque de Riego', r.bloqueRiego);
                 (def.definicion.camposReferencia || []).forEach(function (c) {
+                    if (c.editable) return; // se pinta aparte, como campo editable
                     var valorCrudo = (r.campos || {})[c.clave];
                     if (valorCrudo === undefined || valorCrudo === null || valorCrudo === '') return;
                     var valorMostrado = valorCrudo;
@@ -851,6 +862,49 @@
                     cont.innerHTML += filaResumen(c.etiqueta, valorMostrado);
                 });
                 if (!cont.innerHTML) cont.innerHTML = '<div class="estado-busqueda">Sin datos de referencia — vuelve a sincronizar desde escritorio.</div>';
+
+                // Campos editables (ej. Tipo/Longitud de un Canal Lateral que
+                // se revistió) — a diferencia del resto, se guardan de vuelta
+                // en `campos` (ver guardarRegistroInventarioEstructura).
+                var contEditables = document.getElementById('listaCamposGenericosEditables');
+                contEditables.innerHTML = '';
+                var camposEditables = (def.definicion.camposReferencia || []).filter(function (c) { return c.editable; });
+                document.getElementById('seccionCamposGenericosEditables').style.display = camposEditables.length ? 'flex' : 'none';
+                camposEditables.forEach(function (c) {
+                    var valorActual = (r.campos || {})[c.clave];
+                    var divCampo = document.createElement('div');
+                    divCampo.className = 'campo';
+                    divCampo.style.cssText = 'width:100%; max-width:420px;';
+                    var label = document.createElement('label');
+                    label.textContent = c.etiqueta;
+                    label.setAttribute('for', 'campoGenerico_' + c.clave);
+                    divCampo.appendChild(label);
+                    var input;
+                    if (c.diccionario) {
+                        input = document.createElement('select');
+                        var optVacio = document.createElement('option');
+                        optVacio.value = ''; optVacio.textContent = '—';
+                        input.appendChild(optVacio);
+                        Object.keys(c.diccionario).forEach(function (codigo) {
+                            var opt = document.createElement('option');
+                            opt.value = codigo;
+                            opt.textContent = codigo + ' — ' + c.diccionario[codigo];
+                            input.appendChild(opt);
+                        });
+                        input.value = valorActual || '';
+                    } else {
+                        input = document.createElement('input');
+                        input.type = 'number';
+                        input.step = '0.01';
+                        input.value = valorActual != null ? valorActual : '';
+                    }
+                    input.id = 'campoGenerico_' + c.clave;
+                    input.disabled = r.confirmado;
+                    divCampo.appendChild(input);
+                    contEditables.appendChild(divCampo);
+                });
+            } else {
+                document.getElementById('seccionCamposGenericosEditables').style.display = 'none';
             }
 
             document.getElementById('selectEstado').value = r.estado;
@@ -905,6 +959,21 @@
                     r.marcoH = document.getElementById('inputMarcoH').value;
                     r.bloqueRiego = document.getElementById('inputBloqueRiego').value;
                 }
+            } else {
+                // Campos genéricos editables (ej. Tipo/Longitud de un Canal
+                // Lateral) — el resto de `r.campos` queda intacto, tal como
+                // se cargó del servidor.
+                r.campos = r.campos || {};
+                (def.definicion.camposReferencia || []).forEach(function (c) {
+                    if (!c.editable) return;
+                    var el = document.getElementById('campoGenerico_' + c.clave);
+                    if (!el) return;
+                    if (el.tagName === 'SELECT') {
+                        r.campos[c.clave] = el.value || null;
+                    } else {
+                        r.campos[c.clave] = el.value === '' ? null : parseFloat(el.value);
+                    }
+                });
             }
             r.estado = document.getElementById('selectEstado').value;
             r.observacion = document.getElementById('inputObservacion').value;
@@ -918,9 +987,10 @@
             var r = registroActual;
             var def = FUNCIONES_POR_TIPO[r.tipo];
             if (def && def.generico) {
-                // Los 12 tipos genéricos solo guardan Estado/Observación —
-                // el resto lo pone la sincronización desde el Excel.
-                return { id: r.id, estado: r.estado, observacion: r.observacion };
+                // Los 12 tipos genéricos solo guardan Estado/Observación y los
+                // campos marcados `editable` (dentro de `campos`) — el resto
+                // de `campos` lo pone la sincronización desde el Excel.
+                return { id: r.id, estado: r.estado, observacion: r.observacion, campos: r.campos || {} };
             }
             var datos = {
                 id: r.id, comisionKey: r.comisionKey, tomaNombre: r.tomaNombre,

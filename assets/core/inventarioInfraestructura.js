@@ -196,6 +196,8 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
         },
         colEstado: 14,
         camposReferencia: [
+            { indice: 7, clave: 'esteInicio', etiqueta: 'Este inicio' },
+            { indice: 8, clave: 'norteInicio', etiqueta: 'Norte inicio' },
             { indice: 9, clave: 'elevacionInicio', etiqueta: 'Elevación inicio (m)' },
             { indice: 10, clave: 'esteFinal', etiqueta: 'Este final' },
             { indice: 11, clave: 'norteFinal', etiqueta: 'Norte final' },
@@ -360,6 +362,8 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
         },
         colEstado: 15,
         camposReferencia: [
+            { indice: 7, clave: 'esteInicio', etiqueta: 'Este inicio' },
+            { indice: 8, clave: 'norteInicio', etiqueta: 'Norte inicio' },
             { indice: 9, clave: 'elevacionInicio', etiqueta: 'Elevación inicio (m)' },
             { indice: 10, clave: 'esteFinal', etiqueta: 'Este final' },
             { indice: 11, clave: 'norteFinal', etiqueta: 'Norte final' },
@@ -407,6 +411,8 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
         colEstado: 10,
         camposReferencia: [
             { indice: 4, clave: 'margen', etiqueta: 'Margen (respecto al río)', diccionario: MARGEN_INVENTARIO },
+            { indice: 6, clave: 'esteInicio', etiqueta: 'Este inicio' },
+            { indice: 7, clave: 'norteInicio', etiqueta: 'Norte inicio' },
             { indice: 8, clave: 'esteFinal', etiqueta: 'Este final' },
             { indice: 9, clave: 'norteFinal', etiqueta: 'Norte final' },
             { indice: 11, clave: 'caudalM3s', etiqueta: 'Caudal Q (m³/s)' },
@@ -447,6 +453,8 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
         colEstado: 10,
         camposReferencia: [
             { indice: 4, clave: 'margen', etiqueta: 'Margen (respecto al dren/fuente)', diccionario: MARGEN_INVENTARIO },
+            { indice: 6, clave: 'esteInicio', etiqueta: 'Este inicio' },
+            { indice: 7, clave: 'norteInicio', etiqueta: 'Norte inicio' },
             { indice: 8, clave: 'esteFinal', etiqueta: 'Este final' },
             { indice: 9, clave: 'norteFinal', etiqueta: 'Norte final' },
             { indice: 11, clave: 'caudalM3s', etiqueta: 'Caudal Q (m³/s)' },
@@ -489,6 +497,8 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
         colEstado: 18,
         camposReferencia: [
             { indice: 5, clave: 'ordenLateral', etiqueta: 'Orden del Lateral' },
+            { indice: 7, clave: 'esteInicio', etiqueta: 'Este inicio' },
+            { indice: 8, clave: 'norteInicio', etiqueta: 'Norte inicio' },
             { indice: 9, clave: 'esteFinal', etiqueta: 'Este final' },
             { indice: 10, clave: 'norteFinal', etiqueta: 'Norte final' },
             { indice: 11, clave: 'margen', etiqueta: 'Margen', diccionario: MARGEN_INVENTARIO },
@@ -496,7 +506,11 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 13, clave: 'numeroUsuarios', etiqueta: 'Número Total de Usuarios' },
             { indice: 14, clave: 'areaBajoRiego', etiqueta: 'Área Total Bajo Riego (ha)' },
             { indice: 15, clave: 'volumenOtorgado', etiqueta: 'Volumen Otorgado (Hm³)' },
-            { indice: 16, clave: 'tipo', etiqueta: 'Tipo de Canal', diccionario: TIPO_CANAL_LATERAL },
+            // Editables: cuando se revierte/reviste un tramo de canal, el
+            // sectorista corrige acá el Tipo y las longitudes — la
+            // corrección queda guardada en el inventario (no solo
+            // Estado/Observación como el resto de tipos genéricos).
+            { indice: 16, clave: 'tipo', etiqueta: 'Tipo de Canal', diccionario: TIPO_CANAL_LATERAL, editable: true },
             { indice: 17, clave: 'material', etiqueta: 'Material', diccionario: MATERIAL_CANAL_LATERAL },
             { indice: 19, clave: 'caudalDiseno', etiqueta: 'Caudal de Diseño (m³/s)' },
             { indice: 20, clave: 'caudalOperacionM3s', etiqueta: 'Caudal de Operación (m³/s)' },
@@ -516,9 +530,9 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 34, clave: 'perimetroMojado', etiqueta: 'Perímetro Mojado P (m)' },
             { indice: 35, clave: 'areaHidraulica', etiqueta: 'Área Hidráulica A (m²)' },
             { indice: 36, clave: 'radioHidraulico', etiqueta: 'Radio Hidráulico R (m)' },
-            { indice: 37, clave: 'longitudRevestida', etiqueta: 'Longitud Revestida (m)' },
-            { indice: 38, clave: 'longitudSinRevestir', etiqueta: 'Longitud Sin Revestir (m)' },
-            { indice: 39, clave: 'longitudTotal', etiqueta: 'Longitud Total (m)' },
+            { indice: 37, clave: 'longitudRevestida', etiqueta: 'Longitud Revestida (m)', editable: true },
+            { indice: 38, clave: 'longitudSinRevestir', etiqueta: 'Longitud Sin Revestir (m)', editable: true },
+            { indice: 39, clave: 'longitudTotal', etiqueta: 'Longitud Total (m)', editable: true },
             { indice: 43, clave: 'numeroMedidores', etiqueta: 'N° Total de Medidores' },
             { indice: 44, clave: 'tipoMedidor', etiqueta: 'Tipo — Medidor', diccionario: TIPO_MEDIDOR_LATERAL },
             { indice: 45, clave: 'estadoMedidor', etiqueta: 'Estado — Medidor', diccionario: ESTADO_INVENTARIO },
