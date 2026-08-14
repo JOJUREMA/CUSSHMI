@@ -85,11 +85,10 @@
                     <span class="icono">📐</span>
                     <span class="texto">Sinceramiento de Áreas</span>
                 </a>
-                <div class="tile deshabilitado">
+                <a class="tile" href="inventario-infraestructura.html" id="tileInventario" style="display:none;">
                     <span class="icono">📦</span>
-                    <span class="texto">Actualización del inventario</span>
-                    <span class="proximamente">Próximamente</span>
-                </div>
+                    <span class="texto">Actualización del Inventario</span>
+                </a>
             </div>
             <div style="width:100%; max-width:420px;">
                 <button class="boton-secundario" id="btnCerrarSesion">Cerrar sesión</button>
@@ -159,6 +158,12 @@
             var tileSinceramiento = document.getElementById('tileSinceramiento');
             if (tileSinceramiento) {
                 tileSinceramiento.style.display = (perfil.rol === 'admin' || perfil.rol === 'programador') ? 'flex' : 'none';
+            }
+
+            // "Actualización del Inventario" — mismo criterio que los anteriores.
+            var tileInventario = document.getElementById('tileInventario');
+            if (tileInventario) {
+                tileInventario.style.display = (perfil.rol === 'admin' || perfil.rol === 'programador') ? 'flex' : 'none';
             }
 
             elLogin.style.display = 'none';

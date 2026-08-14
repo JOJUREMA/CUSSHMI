@@ -1096,6 +1096,7 @@
 <script src="assets/core/ordenRiego.js"></script>
 <script src="assets/core/mapa.js"></script>
 <script src="assets/core/modulosRiego.js"></script>
+<script src="assets/core/inventarioInfraestructura.js"></script>
 </head>
 <body>
     
@@ -1247,6 +1248,9 @@
                 <button class="btn btn-primary" id="btnAbrirSiembraDIS" onclick="abrirModalSiembraDIS()" title="Exportar el Formato E-4.1 (Declaración de Intención de Siembra) — el módulo móvil 'Declaración de Intención de Siembra'">
                     🌱 Declaración de Intención de Siembra
                 </button>
+                <button class="btn btn-primary" id="btnAbrirInventario" onclick="abrirModalInventario()" title="Sincronizar el Formato oficial de ANA 'Inventario de Obras de Arte' (Tomas y Compuertas) — el módulo móvil 'Actualización del Inventario'">
+                    📦 Actualización del Inventario
+                </button>
 
                 <button class="btn btn-secondary" id="btnLimpiar">
                     🔄 Limpiar Datos
@@ -1397,6 +1401,31 @@
             </button>
 
             <button class="btn btn-secondary" onclick="cerrarModalSiembraDIS()" style="width: 100%; margin-top: 12px;">
+                ❌ Cerrar
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL ACTUALIZACIÓN DEL INVENTARIO (TOMAS Y COMPUERTAS) -->
+    <div id="modalInventario" class="modal-overlay">
+        <div class="modal-container" style="text-align: center; padding: 30px; max-width: 480px;">
+            <h3>📦 Actualización del Inventario</h3>
+            <p class="info-text" style="text-align:left;">
+                Sube el Formato oficial de ANA "Inventario de Obras de Arte"
+                (el mismo archivo que ya usa la comisión) para sincronizar las
+                hojas <strong>Tomas</strong> y <strong>Compuertas</strong> —
+                el módulo móvil "Actualización del Inventario" permite luego
+                revisar y corregir el estado de cada estructura en campo.
+                Es un archivo grande (~1300 y ~800 filas reales); sincronizar
+                puede tardar unos segundos.
+            </p>
+
+            <button class="btn btn-primary" id="btnSincronizarInventario" onclick="document.getElementById('inputInventario').click()" style="width: 100%;" title="Sube el Excel de Inventario de Obras de Arte para sincronizar Tomas y Compuertas">
+                📡 Sincronizar Inventario (ANA)
+            </button>
+            <input type="file" id="inputInventario" accept=".xlsx" style="display:none;" onchange="importarInventarioInfraestructura(event)">
+
+            <button class="btn btn-secondary" onclick="cerrarModalInventario()" style="width: 100%; margin-top: 12px;">
                 ❌ Cerrar
             </button>
         </div>
@@ -2925,6 +2954,149 @@ const COMISIONES = {
                     'Los demás no coincidieron por unidad catastral ni nombre — probablemente aún no están en ese padrón.');
             } catch (e) {
                 console.error('Error al importar padrón oficial A-1:', e);
+                alert('No se pudo leer el archivo: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+                event.target.value = '';
+            }
+        }
+
+        // ══ Inventario de Infraestructura — Fase 1 (Tomas y Compuertas) ══
+        // Formato oficial de ANA "Inventario de Obras de Arte". A diferencia
+        // del Formato A-1 (que ExcelJS no logra abrir, ver
+        // importarPadronOficialA1 arriba), este archivo SÍ lo lee ExcelJS sin
+        // problema — verificado contra el archivo real completo (16 hojas).
+        // Cada hoja usa 4 filas de encabezado fusionado; los datos reales
+        // empiezan donde la columna N° trae un número positivo — el mismo
+        // criterio ya usado para el Padrón A-1, para saltar tanto los
+        // encabezados como las filas de leyenda al pie de cada hoja (ej.
+        // "ESTADO -> : B (BUENO), R (REGULAR), M (MALO)").
+        function _leerFilaInventarioComun(row) {
+            const val = (c) => {
+                let v = row.getCell(c).value;
+                if (v && typeof v === 'object' && v.richText) v = v.richText.map((rt) => rt.text).join('');
+                if (v && typeof v === 'object' && v.result !== undefined) v = v.result;
+                return (v === null || v === undefined) ? '' : v;
+            };
+            return val;
+        }
+
+        function _extraerFilasTomas(sheet) {
+            const filas = [];
+            for (let r = 1; r <= sheet.rowCount; r++) {
+                const val = _leerFilaInventarioComun(sheet.getRow(r));
+                const numeroOrden = val(1);
+                if (typeof numeroOrden !== 'number' || numeroOrden <= 0) continue;
+                const canalFuente = val(2).toString().trim();
+                const nombreCanal = val(3).toString().trim();
+                if (!canalFuente || !nombreCanal) continue;
+                filas.push({
+                    canalFuente, nombreCanal,
+                    progresivaKm: val(4).toString().trim() || null,
+                    zonaUtm: val(5).toString().trim() || null,
+                    este: val(6), norte: val(7),
+                    margen: val(8).toString().trim() || null,
+                    material: val(9).toString().trim() || null,
+                    tipo: val(10).toString().trim() || null,
+                    estado: val(11).toString().trim() || null,
+                    dimensionA: val(12), dimensionH: val(13), dimensionD: val(14),
+                });
+            }
+            return filas;
+        }
+
+        function _extraerFilasCompuertas(sheet) {
+            const filas = [];
+            for (let r = 1; r <= sheet.rowCount; r++) {
+                const val = _leerFilaInventarioComun(sheet.getRow(r));
+                const numeroOrden = val(1);
+                if (typeof numeroOrden !== 'number' || numeroOrden <= 0) continue;
+                const canalFuente = val(2).toString().trim();
+                const nombreCanal = val(3).toString().trim();
+                if (!canalFuente || !nombreCanal) continue;
+                filas.push({
+                    canalFuente, nombreCanal,
+                    ordenCompuerta: val(4).toString().trim() || null,
+                    progresivaKm: val(5).toString().trim() || null,
+                    zonaUtm: val(6).toString().trim() || null,
+                    este: val(7), norte: val(8),
+                    margen: val(9).toString().trim() || null,
+                    tipo: val(10).toString().trim() || null,
+                    material: val(11).toString().trim() || null,
+                    estado: val(12).toString().trim() || null,
+                    operacion: val(13).toString().trim() || null,
+                    hojaA: val(14), hojaH: val(15), marcoA: val(16), marcoH: val(17),
+                    bloqueRiego: val(18).toString().trim() || null,
+                });
+            }
+            return filas;
+        }
+
+        async function importarInventarioInfraestructura(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); event.target.value = ''; return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); event.target.value = ''; return; }
+            if (typeof resolverTomaPorCanal !== 'function') { alert('No se pudo cargar la lógica de inventario (assets/core/inventarioInfraestructura.js).'); event.target.value = ''; return; }
+
+            const btn = document.getElementById('btnSincronizarInventario');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📡 Leyendo archivo…'; }
+
+            try {
+                const buffer = await file.arrayBuffer();
+                const wb = new ExcelJS.Workbook();
+                await wb.xlsx.load(buffer);
+
+                const wsTomas = wb.getWorksheet('Formato de TOMAS');
+                const wsCompuertas = wb.getWorksheet('Formato de COMPUERTAS ');
+                if (!wsTomas || !wsCompuertas) {
+                    alert('El archivo no tiene las hojas "Formato de TOMAS" y "Formato de COMPUERTAS " — verifica que sea el Inventario de Obras de Arte oficial (mismo diseño de hojas).');
+                    return;
+                }
+
+                const filasTomas = _extraerFilasTomas(wsTomas);
+                const filasCompuertas = _extraerFilasCompuertas(wsCompuertas);
+                if (filasTomas.length === 0 && filasCompuertas.length === 0) {
+                    alert('No se encontraron registros reconocibles en el archivo.');
+                    return;
+                }
+
+                // La toma (SD3, SI4...) de cada fila se resuelve subiendo la
+                // cadena canalFuente→nombreCanal — cada hoja tiene su propia
+                // resolución, no se mezclan entre sí (ver
+                // assets/core/inventarioInfraestructura.js).
+                const obtenerTomaTomas = resolverTomaPorCanal(filasTomas);
+                filasTomas.forEach((f) => { f.tomaNombre = obtenerTomaTomas(f.nombreCanal); });
+                const obtenerTomaCompuertas = resolverTomaPorCanal(filasCompuertas);
+                filasCompuertas.forEach((f) => { f.tomaNombre = obtenerTomaCompuertas(f.nombreCanal); });
+
+                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                if (btn) btn.textContent = '📡 Sincronizando Tomas…';
+                const resultadoTomas = await CusshmiDatos.sincronizarInventarioTomas(comisionKey, filasTomas);
+                if (!resultadoTomas.ok) {
+                    alert('⚠️ No se pudo sincronizar Tomas: ' + (resultadoTomas.error || 'error desconocido') +
+                        (resultadoTomas.guardados ? ('\n\n(' + resultadoTomas.guardados + ' filas sí se guardaron antes del error.)') : ''));
+                    return;
+                }
+
+                if (btn) btn.textContent = '📡 Sincronizando Compuertas…';
+                const resultadoCompuertas = await CusshmiDatos.sincronizarInventarioCompuertas(comisionKey, filasCompuertas);
+                if (!resultadoCompuertas.ok) {
+                    alert('⚠️ Tomas sí se sincronizaron (' + resultadoTomas.guardados + '), pero Compuertas falló: ' +
+                        (resultadoCompuertas.error || 'error desconocido'));
+                    return;
+                }
+
+                const sinTomaTomas = filasTomas.filter((f) => !f.tomaNombre).length;
+                const sinTomaCompuertas = filasCompuertas.filter((f) => !f.tomaNombre).length;
+                alert('✅ Inventario sincronizado.\n\n' +
+                    'Tomas: ' + resultadoTomas.guardados + ' de ' + filasTomas.length + ' filas' +
+                    (sinTomaTomas ? ' (' + sinTomaTomas + ' sin toma identificada — canal sin raíz conocida)' : '') + '.\n' +
+                    'Compuertas: ' + resultadoCompuertas.guardados + ' de ' + filasCompuertas.length + ' filas' +
+                    (sinTomaCompuertas ? ' (' + sinTomaCompuertas + ' sin toma identificada)' : '') + '.');
+            } catch (e) {
+                console.error('Error al importar inventario de infraestructura:', e);
                 alert('No se pudo leer el archivo: ' + (e.message || e));
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
@@ -4598,6 +4770,16 @@ function abrirModalSiembraDIS() {
 
 function cerrarModalSiembraDIS() {
     const modal = document.getElementById('modalSiembraDIS');
+    if (modal) modal.classList.remove('active');
+}
+
+function abrirModalInventario() {
+    const modal = document.getElementById('modalInventario');
+    if (modal) modal.classList.add('active');
+}
+
+function cerrarModalInventario() {
+    const modal = document.getElementById('modalInventario');
     if (modal) modal.classList.remove('active');
 }
 

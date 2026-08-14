@@ -1453,6 +1453,340 @@
         return { ok: true, url: data.signedUrl };
     }
 
+    // ── Inventario de Infraestructura — Fase 1: Tomas y Compuertas ──────────
+    // Formato oficial de ANA "Inventario de Obras de Arte". A diferencia de
+    // los módulos anteriores, el "avance" no se mide contra el padrón de
+    // usuarios (no aplica: son estructuras, no personas) sino contra el
+    // propio inventario ya sincronizado desde el Excel — cuántas de las
+    // filas ya sincronizadas para esa toma fueron revisadas/confirmadas en
+    // campo por un sectorista.
+    async function _contarInventarioPorToma(tabla, comisionId) {
+        const TAMANO_PAGINA = 1000;
+        const conteos = {};
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from(tabla).select('toma_nombre, confirmado').eq('comision_id', comisionId).range(desde, desde + TAMANO_PAGINA - 1),
+                'contar ' + tabla + ' por toma'
+            );
+            if (error || !data) return null;
+            data.forEach((fila) => {
+                const clave = fila.toma_nombre || 'Sin toma asignada';
+                if (!conteos[clave]) conteos[clave] = { total: 0, confirmados: 0 };
+                conteos[clave].total += 1;
+                if (fila.confirmado) conteos[clave].confirmados += 1;
+            });
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return conteos;
+    }
+
+    async function _obtenerAvanceInventarioPorToma(tabla, comisionKey) {
+        if (!comisionKey) return { ok: true, avance: {} };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, avance: {}, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        const conteos = await _contarInventarioPorToma(tabla, comisionId);
+        if (!conteos) return { ok: false, avance: {}, error: 'No se pudo calcular el avance del inventario.' };
+        const avance = {};
+        Object.keys(conteos).forEach((toma) => {
+            const c = conteos[toma];
+            avance[toma] = { revisados: c.confirmados, total: c.total, porcentaje: c.total > 0 ? Math.round((c.confirmados / c.total) * 100) : null };
+        });
+        return { ok: true, avance };
+    }
+
+    function obtenerAvanceInventarioTomasPorToma(comisionKey) { return _obtenerAvanceInventarioPorToma('inventario_tomas', comisionKey); }
+    function obtenerAvanceInventarioCompuertasPorToma(comisionKey) { return _obtenerAvanceInventarioPorToma('inventario_compuertas', comisionKey); }
+
+    async function _listarRegistrosInventarioDeToma(tabla, columnas, comisionKey, tomaNombre) {
+        if (!comisionKey || !tomaNombre) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from(tabla).select(columnas).eq('comision_id', comisionId).eq('toma_nombre', tomaNombre),
+            'listar registros de ' + tabla + ' de la toma'
+        );
+        if (error) return { ok: false, registros: [], error: error.mensaje || 'No se pudo listar los registros.' };
+        return { ok: true, registros: data || [] };
+    }
+
+    function listarRegistrosInventarioTomasDeToma(comisionKey, tomaNombre) {
+        return _listarRegistrosInventarioDeToma('inventario_tomas', 'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado', comisionKey, tomaNombre);
+    }
+    function listarRegistrosInventarioCompuertasDeToma(comisionKey, tomaNombre) {
+        return _listarRegistrosInventarioDeToma('inventario_compuertas', 'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado', comisionKey, tomaNombre);
+    }
+
+    async function _cargarRegistroInventario(tabla, id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from(tabla).select('*').eq('id', id).maybeSingle(),
+            'cargar registro de ' + tabla
+        );
+        if (error) return { ok: false, error: error.mensaje };
+        if (!data) return { ok: false, error: 'Registro no encontrado.' };
+        return { ok: true, registro: data };
+    }
+    function cargarRegistroInventarioToma(id) { return _cargarRegistroInventario('inventario_tomas', id); }
+    function cargarRegistroInventarioCompuerta(id) { return _cargarRegistroInventario('inventario_compuertas', id); }
+
+    // `datos`: {id?, comisionKey, tomaNombre, canalFuente, nombreCanal,
+    //   progresivaKm, zonaUtm, este, norte, margen, estado, observacion,
+    //   + campos propios de cada tipo (material/tipo/dimensionA/H/D para
+    //   tomas; tipo/material/operacion/hojaA/H/marcoA/H/bloqueRiego para
+    //   compuertas)}. Mismo patrón insert-si-no-hay-id/update-si-hay-id que
+    //   guardarRegistroSiembra — a diferencia de Sinceramiento, acá el id
+    //   siempre lo genera el servidor (la fila ya existe desde la
+    //   sincronización del Excel; el celular casi siempre actualiza, rara
+    //   vez inserta una estructura nueva no presente en el inventario base).
+    async function guardarRegistroInventarioToma(datos) {
+        if (!datos || !datos.comisionKey || !datos.canalFuente || !datos.nombreCanal) {
+            return { ok: false, error: 'Faltan datos obligatorios (comisión, canal fuente o nombre del canal).' };
+        }
+        const comisionId = await resolverComisionId(datos.comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + datos.comisionKey + '" no existe en Supabase.' };
+        let client;
+        try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const fila = {
+            comision_id: comisionId,
+            toma_nombre: datos.tomaNombre || null,
+            canal_fuente: datos.canalFuente,
+            nombre_canal: datos.nombreCanal,
+            progresiva_km: datos.progresivaKm || null,
+            zona_utm: datos.zonaUtm || null,
+            este: Number.isFinite(parseFloat(datos.este)) ? parseFloat(datos.este) : null,
+            norte: Number.isFinite(parseFloat(datos.norte)) ? parseFloat(datos.norte) : null,
+            margen: datos.margen || null,
+            material: datos.material || null,
+            tipo: datos.tipo || null,
+            estado: datos.estado || null,
+            dimension_a: Number.isFinite(parseFloat(datos.dimensionA)) ? parseFloat(datos.dimensionA) : null,
+            dimension_h: Number.isFinite(parseFloat(datos.dimensionH)) ? parseFloat(datos.dimensionH) : null,
+            dimension_d: Number.isFinite(parseFloat(datos.dimensionD)) ? parseFloat(datos.dimensionD) : null,
+            observacion: datos.observacion || null,
+            creado_por: usuarioId,
+            actualizado_en: new Date().toISOString(),
+        };
+        if (datos.id) {
+            const { error } = await client.from('inventario_tomas').update(fila).eq('id', datos.id);
+            if (error) return { ok: false, error: error.message };
+            return { ok: true, id: datos.id };
+        }
+        const { data: creado, error } = await client.from('inventario_tomas').insert(fila).select('id').single();
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, id: creado.id };
+    }
+
+    async function guardarRegistroInventarioCompuerta(datos) {
+        if (!datos || !datos.comisionKey || !datos.canalFuente || !datos.nombreCanal) {
+            return { ok: false, error: 'Faltan datos obligatorios (comisión, canal fuente o nombre del canal).' };
+        }
+        const comisionId = await resolverComisionId(datos.comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + datos.comisionKey + '" no existe en Supabase.' };
+        let client;
+        try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const fila = {
+            comision_id: comisionId,
+            toma_nombre: datos.tomaNombre || null,
+            canal_fuente: datos.canalFuente,
+            nombre_canal: datos.nombreCanal,
+            orden_compuerta: datos.ordenCompuerta || null,
+            progresiva_km: datos.progresivaKm || null,
+            zona_utm: datos.zonaUtm || null,
+            este: Number.isFinite(parseFloat(datos.este)) ? parseFloat(datos.este) : null,
+            norte: Number.isFinite(parseFloat(datos.norte)) ? parseFloat(datos.norte) : null,
+            margen: datos.margen || null,
+            tipo: datos.tipo || null,
+            material: datos.material || null,
+            estado: datos.estado || null,
+            operacion: datos.operacion || null,
+            hoja_a: Number.isFinite(parseFloat(datos.hojaA)) ? parseFloat(datos.hojaA) : null,
+            hoja_h: Number.isFinite(parseFloat(datos.hojaH)) ? parseFloat(datos.hojaH) : null,
+            marco_a: Number.isFinite(parseFloat(datos.marcoA)) ? parseFloat(datos.marcoA) : null,
+            marco_h: Number.isFinite(parseFloat(datos.marcoH)) ? parseFloat(datos.marcoH) : null,
+            bloque_riego: datos.bloqueRiego || null,
+            observacion: datos.observacion || null,
+            creado_por: usuarioId,
+            actualizado_en: new Date().toISOString(),
+        };
+        if (datos.id) {
+            const { error } = await client.from('inventario_compuertas').update(fila).eq('id', datos.id);
+            if (error) return { ok: false, error: error.message };
+            return { ok: true, id: datos.id };
+        }
+        const { data: creado, error } = await client.from('inventario_compuertas').insert(fila).select('id').single();
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, id: creado.id };
+    }
+
+    async function _confirmarRegistroInventario(tabla, id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const { data, error } = await client.from(tabla)
+            .update({ confirmado: true, confirmado_en: new Date().toISOString() })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo confirmar: el registro no existe o ya no se puede editar.' };
+        return { ok: true };
+    }
+    function confirmarRegistroInventarioToma(id) { return _confirmarRegistroInventario('inventario_tomas', id); }
+    function confirmarRegistroInventarioCompuerta(id) { return _confirmarRegistroInventario('inventario_compuertas', id); }
+
+    async function _desbloquearRegistroInventario(tabla, id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const { data, error } = await client.from(tabla)
+            .update({ confirmado: false, solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo desbloquear: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+    function desbloquearRegistroInventarioToma(id) { return _desbloquearRegistroInventario('inventario_tomas', id); }
+    function desbloquearRegistroInventarioCompuerta(id) { return _desbloquearRegistroInventario('inventario_compuertas', id); }
+
+    async function _solicitarEdicionInventario(rpc, id, nombreSolicitante) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.rpc(rpc, { registro_id: id, nombre_solicitante: nombreSolicitante || null }),
+            'solicitar edición de ' + rpc
+        );
+        if (error) return { ok: false, error: error.mensaje || 'No se pudo enviar la solicitud.' };
+        return { ok: true };
+    }
+    function solicitarEdicionInventarioToma(id, nombreSolicitante) { return _solicitarEdicionInventario('solicitar_edicion_inventario_toma', id, nombreSolicitante); }
+    function solicitarEdicionInventarioCompuerta(id, nombreSolicitante) { return _solicitarEdicionInventario('solicitar_edicion_inventario_compuerta', id, nombreSolicitante); }
+
+    async function _listarSolicitudesEdicionInventario(tabla, comisionKey) {
+        if (!comisionKey) return { ok: true, solicitudes: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, solicitudes: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from(tabla)
+                .select('id, toma_nombre, canal_fuente, nombre_canal, solicitud_edicion_por_nombre, solicitud_edicion_en')
+                .eq('comision_id', comisionId)
+                .eq('solicitud_edicion', true)
+                .order('solicitud_edicion_en', { ascending: true }),
+            'listar solicitudes de edición de ' + tabla
+        );
+        if (error) return { ok: false, solicitudes: [], error: error.mensaje || 'No se pudo listar las solicitudes.' };
+        return { ok: true, solicitudes: data || [] };
+    }
+    function listarSolicitudesEdicionInventarioToma(comisionKey) { return _listarSolicitudesEdicionInventario('inventario_tomas', comisionKey); }
+    function listarSolicitudesEdicionInventarioCompuerta(comisionKey) { return _listarSolicitudesEdicionInventario('inventario_compuertas', comisionKey); }
+
+    async function _rechazarSolicitudEdicionInventario(tabla, id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const { data, error } = await client.from(tabla)
+            .update({ solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo rechazar: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+    function rechazarSolicitudEdicionInventarioToma(id) { return _rechazarSolicitudEdicionInventario('inventario_tomas', id); }
+    function rechazarSolicitudEdicionInventarioCompuerta(id) { return _rechazarSolicitudEdicionInventario('inventario_compuertas', id); }
+
+    // Sincronización masiva desde escritorio (parser del Excel de ANA,
+    // ver Sistema_Riego_CUSSHMI_14.html). `filasEntrada` ya viene con
+    // `tomaNombre` resuelto (assets/core/inventarioInfraestructura.js,
+    // resolverTomaPorCanal) — acá solo se traduce a snake_case y se hace
+    // upsert por lotes sobre la clave natural (canal_fuente + nombre_canal +
+    // progresiva_km), igual que guardarPadronOficialA1. Si dos filas del
+    // Excel comparten esa clave (no debería pasar, pero el archivo es
+    // enorme y editado a mano durante años) se queda con la última —
+    // mismo criterio ya usado para el Padrón A-1.
+    async function _sincronizarInventario(tabla, comisionKey, filasEntrada, mapearFila) {
+        if (!comisionKey) return { ok: false, error: 'Falta comisión.' };
+        if (!Array.isArray(filasEntrada) || filasEntrada.length === 0) return { ok: true, guardados: 0 };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        let client;
+        try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const filas = filasEntrada.map((f) => mapearFila(f, comisionId, usuarioId));
+        const filasPorClave = new Map();
+        filas.forEach((fila) => {
+            filasPorClave.set(fila.canal_fuente + '|' + fila.nombre_canal + '|' + (fila.progresiva_km || ''), fila);
+        });
+        const filasSinDuplicados = Array.from(filasPorClave.values());
+
+        const TAMANO_LOTE = 500;
+        let guardados = 0;
+        for (let i = 0; i < filasSinDuplicados.length; i += TAMANO_LOTE) {
+            const lote = filasSinDuplicados.slice(i, i + TAMANO_LOTE);
+            const { error } = await client.from(tabla).upsert(lote, { onConflict: 'comision_id,canal_fuente,nombre_canal,progresiva_km' });
+            if (error) return { ok: false, error: error.message, guardados };
+            guardados += lote.length;
+        }
+        return { ok: true, guardados };
+    }
+
+    // `filasEntrada`: [{tomaNombre, canalFuente, nombreCanal, progresivaKm,
+    //   zonaUtm, este, norte, margen, material, tipo, estado, dimensionA,
+    //   dimensionH, dimensionD}, ...].
+    function sincronizarInventarioTomas(comisionKey, filasEntrada) {
+        return _sincronizarInventario('inventario_tomas', comisionKey, filasEntrada, (f, comisionId, usuarioId) => ({
+            comision_id: comisionId,
+            toma_nombre: f.tomaNombre || null,
+            canal_fuente: f.canalFuente,
+            nombre_canal: f.nombreCanal,
+            progresiva_km: f.progresivaKm || null,
+            zona_utm: f.zonaUtm || null,
+            este: Number.isFinite(parseFloat(f.este)) ? parseFloat(f.este) : null,
+            norte: Number.isFinite(parseFloat(f.norte)) ? parseFloat(f.norte) : null,
+            margen: f.margen || null,
+            material: f.material || null,
+            tipo: f.tipo || null,
+            estado: f.estado || null,
+            dimension_a: Number.isFinite(parseFloat(f.dimensionA)) ? parseFloat(f.dimensionA) : null,
+            dimension_h: Number.isFinite(parseFloat(f.dimensionH)) ? parseFloat(f.dimensionH) : null,
+            dimension_d: Number.isFinite(parseFloat(f.dimensionD)) ? parseFloat(f.dimensionD) : null,
+            actualizado_por: usuarioId,
+        }));
+    }
+
+    // `filasEntrada`: [{tomaNombre, canalFuente, nombreCanal, ordenCompuerta,
+    //   progresivaKm, zonaUtm, este, norte, margen, tipo, material, estado,
+    //   operacion, hojaA, hojaH, marcoA, marcoH, bloqueRiego}, ...].
+    function sincronizarInventarioCompuertas(comisionKey, filasEntrada) {
+        return _sincronizarInventario('inventario_compuertas', comisionKey, filasEntrada, (f, comisionId, usuarioId) => ({
+            comision_id: comisionId,
+            toma_nombre: f.tomaNombre || null,
+            canal_fuente: f.canalFuente,
+            nombre_canal: f.nombreCanal,
+            orden_compuerta: f.ordenCompuerta || null,
+            progresiva_km: f.progresivaKm || null,
+            zona_utm: f.zonaUtm || null,
+            este: Number.isFinite(parseFloat(f.este)) ? parseFloat(f.este) : null,
+            norte: Number.isFinite(parseFloat(f.norte)) ? parseFloat(f.norte) : null,
+            margen: f.margen || null,
+            tipo: f.tipo || null,
+            material: f.material || null,
+            estado: f.estado || null,
+            operacion: f.operacion || null,
+            hoja_a: Number.isFinite(parseFloat(f.hojaA)) ? parseFloat(f.hojaA) : null,
+            hoja_h: Number.isFinite(parseFloat(f.hojaH)) ? parseFloat(f.hojaH) : null,
+            marco_a: Number.isFinite(parseFloat(f.marcoA)) ? parseFloat(f.marcoA) : null,
+            marco_h: Number.isFinite(parseFloat(f.marcoH)) ? parseFloat(f.marcoH) : null,
+            bloque_riego: f.bloqueRiego || null,
+            actualizado_por: usuarioId,
+        }));
+    }
+
     // ── Padrón oficial A-1 (R.J. N° 0155-2022-ANA) ──────────────────────────
     // Carga masiva desde escritorio (parser del Excel oficial de ANA, formato
     // de encabezados fusionados). `filasEntrada`: [{numeroOrden,
@@ -1731,6 +2065,26 @@
         rechazarSolicitudEdicionSinceramiento,
         subirFotoSinceramiento,
         obtenerUrlFirmadaFotoSinceramiento,
+        obtenerAvanceInventarioTomasPorToma,
+        obtenerAvanceInventarioCompuertasPorToma,
+        listarRegistrosInventarioTomasDeToma,
+        listarRegistrosInventarioCompuertasDeToma,
+        cargarRegistroInventarioToma,
+        cargarRegistroInventarioCompuerta,
+        guardarRegistroInventarioToma,
+        guardarRegistroInventarioCompuerta,
+        confirmarRegistroInventarioToma,
+        confirmarRegistroInventarioCompuerta,
+        desbloquearRegistroInventarioToma,
+        desbloquearRegistroInventarioCompuerta,
+        solicitarEdicionInventarioToma,
+        solicitarEdicionInventarioCompuerta,
+        listarSolicitudesEdicionInventarioToma,
+        listarSolicitudesEdicionInventarioCompuerta,
+        rechazarSolicitudEdicionInventarioToma,
+        rechazarSolicitudEdicionInventarioCompuerta,
+        sincronizarInventarioTomas,
+        sincronizarInventarioCompuertas,
         cargarRegistrosIdentificacionParaExportar,
         guardarPadronOficialA1,
         cargarPadronOficialA1,

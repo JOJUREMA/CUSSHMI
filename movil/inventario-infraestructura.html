@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Actualización del Inventario — CUSSHMI Móvil</title>
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#003876">
+    <link rel="icon" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="stylesheet" href="estilos.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <script src="../assets/supabase/supabase-config.js"></script>
+    <script src="../assets/supabase/supabase-client.js"></script>
+    <script src="../assets/supabase/auth.js"></script>
+    <script src="../assets/supabase/migracion.js"></script>
+    <script src="../assets/supabase/datos.js"></script>
+    <script src="../assets/supabase/bloqueo.js"></script>
+    <script src="../assets/supabase/auditoria.js"></script>
+    <script src="../assets/supabase/presencia.js"></script>
+    <script src="../assets/core/clasificacion.js"></script>
+    <script src="../assets/core/utilidades.js"></script>
+    <script src="../assets/core/anexoG2.js"></script>
+    <script src="../assets/core/mapa.js"></script>
+    <script src="../assets/core/inventarioInfraestructura.js"></script>
+
+    <style>
+        .campo textarea {
+            width: 100%;
+            padding: 11px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.95);
+            color: #002555;
+            font-size: 14px;
+            font-family: inherit;
+            min-height: 60px;
+            resize: vertical;
+        }
+        .campo select {
+            width: 100%;
+            padding: 11px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.95);
+            color: #002555;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        .campo input:disabled, .campo select:disabled, .campo textarea:disabled { opacity: 0.7; }
+        .seccion-titulo {
+            width: 100%;
+            max-width: 420px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.75;
+            margin: 18px 0 10px;
+        }
+        .seccion-titulo:first-of-type { margin-top: 4px; }
+        .fila-doble {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            max-width: 420px;
+        }
+        .fila-doble .campo { flex: 1; }
+        .fila-toma {
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 12px 14px;
+            text-align: left;
+            color: #ffffff;
+            cursor: pointer;
+            width: 100%;
+        }
+        .fila-toma .nombre-toma { font-size: 14px; font-weight: 600; }
+        .fila-toma .detalle-toma { font-size: 11.5px; opacity: 0.75; margin-top: 2px; }
+        .badge-registrado {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 9.5px;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            margin-left: 8px;
+            vertical-align: middle;
+            background: #1e7e34;
+            color: #ffffff;
+        }
+        .badge-estado {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 9.5px;
+            letter-spacing: 0.3px;
+            margin-left: 8px;
+            vertical-align: middle;
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+        }
+        .aviso-bloqueado {
+            width: 100%;
+            max-width: 420px;
+            background: rgba(200, 168, 75, 0.15);
+            border: 1px solid rgba(200, 168, 75, 0.5);
+            border-radius: 8px;
+            padding: 12px 14px;
+            font-size: 13px;
+            margin-bottom: 14px;
+            text-align: center;
+        }
+        .resumen-fila {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 0;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .resumen-fila:last-child { border-bottom: none; }
+        .resumen-fila .etiqueta-resumen { opacity: 0.7; }
+        .resumen-fila .valor-resumen { font-weight: 600; text-align: right; }
+
+        .toggle-tipo {
+            display: flex;
+            width: 100%;
+            max-width: 420px;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .toggle-tipo button {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.06);
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .toggle-tipo button.activo {
+            background: #c8a84b;
+            color: #002555;
+            border-color: #c8a84b;
+        }
+    </style>
+</head>
+<body>
+    <div class="pantalla">
+        <div class="encabezado-modulo">
+            <a class="volver" href="index.html" title="Volver al menú">←</a>
+            <h2>📦 Actualización del Inventario</h2>
+        </div>
+
+        <!-- ── Pantalla 2: selección de toma ── -->
+        <div id="vistaTomas" style="width:100%; display:flex; flex-direction:column; align-items:center;">
+            <button class="boton" id="btnVerSolicitudes" style="max-width:420px; display:none; margin-bottom:14px; background:#c0392b;">🔔 Solicitudes de edición pendientes</button>
+            <div class="estado-busqueda" id="estadoTomas">Cargando tomas…</div>
+            <div class="resultados" id="listaTomas"></div>
+        </div>
+
+        <!-- ── Pantalla 3: estructuras de la toma (Tomas / Compuertas) ── -->
+        <div id="vistaLista" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverATomas" style="max-width:420px;">← Volver a las tomas</button>
+            <h1 id="tituloTomaLista" style="margin-top:14px; font-size:16px;"></h1>
+
+            <div class="toggle-tipo" style="margin-top:10px;">
+                <button type="button" id="btnTipoTomas">Tomas</button>
+                <button type="button" id="btnTipoCompuertas">Compuertas</button>
+            </div>
+
+            <div class="buscador campo" style="width:100%; max-width:420px;">
+                <label for="inputBusquedaCanal">Buscar por canal</label>
+                <input type="text" id="inputBusquedaCanal" placeholder="ej. Principal SD3" autocomplete="off">
+            </div>
+
+            <button class="boton" id="btnAgregarNuevo" style="max-width:420px; margin-bottom:14px;">+ Agregar estructura nueva</button>
+
+            <div class="estado-busqueda" id="estadoLista"></div>
+            <div class="resultados" id="listaEstructuras"></div>
+        </div>
+
+        <!-- ── Pantalla 4: formulario ── -->
+        <div id="vistaFormulario" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverALista" style="max-width:420px;">← Volver a la lista</button>
+
+            <div class="aviso-bloqueado" id="avisoBloqueadoFormulario" style="display:none; margin-top:14px;">
+                🔒 Registro confirmado. Para editar solicite habilitación al administrador.
+            </div>
+
+            <div class="seccion-titulo" style="margin-top:14px;" id="tituloSeccionIdentidad">Datos de la estructura</div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputCanalFuente">Canal Fuente</label>
+                <input type="text" id="inputCanalFuente" autocomplete="off">
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputNombreCanal">Nombre del Canal</label>
+                <input type="text" id="inputNombreCanal" autocomplete="off">
+            </div>
+            <div class="fila-doble">
+                <div class="campo">
+                    <label for="inputProgresivaKm">Progresiva (km)</label>
+                    <input type="text" id="inputProgresivaKm" placeholder="ej. 0+035.00" autocomplete="off">
+                </div>
+                <div class="campo" id="campoOrdenCompuerta" style="display:none;">
+                    <label for="inputOrdenCompuerta">Orden</label>
+                    <input type="text" id="inputOrdenCompuerta" autocomplete="off">
+                </div>
+            </div>
+            <div class="estado-busqueda" id="textoTomaAsignada" style="max-width:420px;"></div>
+
+            <div class="seccion-titulo">Ubicación (UTM WGS84)</div>
+            <div class="fila-doble">
+                <div class="campo">
+                    <label for="inputZonaUtm">Zona</label>
+                    <input type="text" id="inputZonaUtm" autocomplete="off">
+                </div>
+                <div class="campo">
+                    <label for="selectMargen">Margen</label>
+                    <select id="selectMargen"></select>
+                </div>
+            </div>
+            <div class="fila-doble">
+                <div class="campo">
+                    <label for="inputEste">Este</label>
+                    <input type="number" step="0.01" id="inputEste">
+                </div>
+                <div class="campo">
+                    <label for="inputNorte">Norte</label>
+                    <input type="number" step="0.01" id="inputNorte">
+                </div>
+            </div>
+
+            <!-- Campos específicos de Tomas -->
+            <div id="camposToma" style="width:100%; display:flex; flex-direction:column; align-items:center;">
+                <div class="seccion-titulo">Características de la Toma</div>
+                <div class="fila-doble">
+                    <div class="campo">
+                        <label for="selectMaterialToma">Material</label>
+                        <select id="selectMaterialToma"></select>
+                    </div>
+                    <div class="campo">
+                        <label for="selectTipoToma">Tipo de captación</label>
+                        <select id="selectTipoToma"></select>
+                    </div>
+                </div>
+                <div class="seccion-titulo">Dimensiones</div>
+                <div class="fila-doble">
+                    <div class="campo"><label for="inputDimensionA">A (m)</label><input type="number" step="0.01" id="inputDimensionA"></div>
+                    <div class="campo"><label for="inputDimensionH">H (m)</label><input type="number" step="0.01" id="inputDimensionH"></div>
+                    <div class="campo"><label for="inputDimensionD">D (pulg.)</label><input type="number" step="0.01" id="inputDimensionD"></div>
+                </div>
+            </div>
+
+            <!-- Campos específicos de Compuertas -->
+            <div id="camposCompuerta" style="width:100%; display:none; flex-direction:column; align-items:center;">
+                <div class="seccion-titulo">Características de la Compuerta</div>
+                <div class="estado-busqueda" style="max-width:420px; opacity:0.75;">
+                    "Tipo" no tiene una leyenda oficial en el Excel de origen (F/G/T) — se deja como texto libre para no inventar un significado.
+                </div>
+                <div class="fila-doble">
+                    <div class="campo">
+                        <label for="inputTipoCompuerta">Tipo</label>
+                        <input type="text" id="inputTipoCompuerta" autocomplete="off">
+                    </div>
+                    <div class="campo">
+                        <label for="selectMaterialCompuerta">Material</label>
+                        <select id="selectMaterialCompuerta"></select>
+                    </div>
+                </div>
+                <div class="campo" style="width:100%; max-width:420px;">
+                    <label for="selectOperacion">Operación</label>
+                    <select id="selectOperacion"></select>
+                </div>
+                <div class="seccion-titulo">Componentes</div>
+                <div class="fila-doble">
+                    <div class="campo"><label for="inputHojaA">Hoja — A (m)</label><input type="number" step="0.01" id="inputHojaA"></div>
+                    <div class="campo"><label for="inputHojaH">Hoja — H (Alto)</label><input type="number" step="0.01" id="inputHojaH"></div>
+                </div>
+                <div class="fila-doble">
+                    <div class="campo"><label for="inputMarcoA">Marco — A (m)</label><input type="number" step="0.01" id="inputMarcoA"></div>
+                    <div class="campo"><label for="inputMarcoH">Marco — H (Alto)</label><input type="number" step="0.01" id="inputMarcoH"></div>
+                </div>
+                <div class="campo" style="width:100%; max-width:420px;">
+                    <label for="inputBloqueRiego">Bloque de Riego</label>
+                    <input type="text" id="inputBloqueRiego" autocomplete="off">
+                </div>
+            </div>
+
+            <div class="seccion-titulo">Estado</div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="selectEstado">Estado actual</label>
+                <select id="selectEstado"></select>
+            </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="inputObservacion">Observación</label>
+                <textarea id="inputObservacion"></textarea>
+            </div>
+
+            <div class="estado-busqueda" id="estadoGuardadoFormulario"></div>
+            <button class="boton-secundario" id="btnVolverAListaAbajo" style="max-width:420px; margin-top:6px;">← Volver a la lista</button>
+            <button class="boton" id="btnContinuarConfirmacion" style="max-width:420px; margin-top:10px;">Continuar →</button>
+        </div>
+
+        <!-- ── Pantalla 5: confirmación ── -->
+        <div id="vistaConfirmacion" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverAFormulario" style="max-width:420px;">← Volver al formulario</button>
+            <h1 style="margin-top:14px; font-size:16px;">Confirmación del registro</h1>
+
+            <div class="tarjeta" style="max-width:420px; margin-top:14px;">
+                <div id="resumenRegistro"></div>
+            </div>
+
+            <div class="aviso-bloqueado" id="avisoBloqueadoConfirmacion" style="display:none; margin-top:16px;">
+                🔒 Registro confirmado. Para editar solicite habilitación al administrador.
+            </div>
+            <div class="aviso-bloqueado" id="avisoSolicitudEnviada" style="display:none; margin-top:10px; background: rgba(200,168,75,0.2);">
+                🕓 Solicitud de edición enviada — esperando aprobación del administrador.
+            </div>
+            <div class="aviso-bloqueado" id="avisoSolicitudPendienteAdmin" style="display:none; margin-top:10px; background: rgba(200,168,75,0.2);"></div>
+
+            <div class="estado-busqueda" id="estadoConfirmacion"></div>
+            <button class="boton" id="btnConfirmarGuardar" style="max-width:420px; margin-top:10px;">✔ Confirmar y guardar</button>
+            <button class="boton-secundario" id="btnSolicitarEdicion" style="max-width:420px; display:none;">🔓 Solicitar habilitación de edición</button>
+            <button class="boton-secundario" id="btnDesbloquear" style="max-width:420px; display:none;">✅ Habilitar edición (admin)</button>
+            <button class="boton-secundario" id="btnRechazarSolicitud" style="max-width:420px; display:none; margin-top:10px;">❌ Rechazar solicitud (admin)</button>
+            <button class="boton-secundario" id="btnVolverAFormularioAbajo" style="max-width:420px; margin-top:10px;">← Volver al formulario</button>
+        </div>
+
+        <!-- ── Pantalla admin: solicitudes de edición pendientes ── -->
+        <div id="vistaSolicitudes" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverATomasDesdeSolicitudes" style="max-width:420px;">← Volver a las tomas</button>
+            <h1 style="margin-top:14px; font-size:16px;">Solicitudes de edición pendientes</h1>
+
+            <div class="seccion-titulo">Tomas</div>
+            <div class="estado-busqueda" id="estadoSolicitudesTomas"></div>
+            <div class="resultados" id="listaSolicitudesTomas"></div>
+
+            <div class="seccion-titulo">Compuertas</div>
+            <div class="estado-busqueda" id="estadoSolicitudesCompuertas"></div>
+            <div class="resultados" id="listaSolicitudesCompuertas"></div>
+        </div>
+    </div>
+
+    <script>
+        var perfilActual = null;
+        var comisionKeyActual = null;
+        var esAdmin = false;
+
+        var tomaSeleccionada = null;
+        var tipoActual = 'toma'; // 'toma' | 'compuerta' — cuál tabla se está mirando/editando
+        var registrosTomaTomas = [];
+        var registrosTomaCompuertas = [];
+        var registroActual = null;
+
+        // Despacha a las funciones de datos.js correctas según el tipo — evita
+        // duplicar toda la lógica de pantallas dos veces (Tomas/Compuertas son
+        // dos tablas distintas pero con exactamente el mismo patrón de
+        // candado/solicitud de edición).
+        var FUNCIONES_POR_TIPO = {
+            toma: {
+                etiqueta: 'Toma', etiquetaPlural: 'Tomas',
+                listar: CusshmiDatos.listarRegistrosInventarioTomasDeToma,
+                cargar: CusshmiDatos.cargarRegistroInventarioToma,
+                guardar: CusshmiDatos.guardarRegistroInventarioToma,
+                confirmar: CusshmiDatos.confirmarRegistroInventarioToma,
+                desbloquear: CusshmiDatos.desbloquearRegistroInventarioToma,
+                solicitarEdicion: CusshmiDatos.solicitarEdicionInventarioToma,
+                rechazarSolicitud: CusshmiDatos.rechazarSolicitudEdicionInventarioToma,
+            },
+            compuerta: {
+                etiqueta: 'Compuerta', etiquetaPlural: 'Compuertas',
+                listar: CusshmiDatos.listarRegistrosInventarioCompuertasDeToma,
+                cargar: CusshmiDatos.cargarRegistroInventarioCompuerta,
+                guardar: CusshmiDatos.guardarRegistroInventarioCompuerta,
+                confirmar: CusshmiDatos.confirmarRegistroInventarioCompuerta,
+                desbloquear: CusshmiDatos.desbloquearRegistroInventarioCompuerta,
+                solicitarEdicion: CusshmiDatos.solicitarEdicionInventarioCompuerta,
+                rechazarSolicitud: CusshmiDatos.rechazarSolicitudEdicionInventarioCompuerta,
+            },
+        };
+
+        function poblarSelect(elId, diccionario, incluirVacio) {
+            var el = document.getElementById(elId);
+            el.innerHTML = '';
+            if (incluirVacio) {
+                var optVacio = document.createElement('option');
+                optVacio.value = '';
+                optVacio.textContent = '—';
+                el.appendChild(optVacio);
+            }
+            Object.keys(diccionario).forEach(function (codigo) {
+                var opt = document.createElement('option');
+                opt.value = codigo;
+                opt.textContent = codigo + ' — ' + diccionario[codigo];
+                el.appendChild(opt);
+            });
+        }
+        poblarSelect('selectMargen', MARGEN_INVENTARIO, true);
+        poblarSelect('selectMaterialToma', MATERIAL_TOMA, true);
+        poblarSelect('selectTipoToma', TIPO_CAPTACION_TOMA, true);
+        poblarSelect('selectMaterialCompuerta', MATERIAL_COMPUERTA, true);
+        poblarSelect('selectOperacion', OPERACION_COMPUERTA, true);
+        poblarSelect('selectEstado', ESTADO_INVENTARIO, true);
+
+        var elEstadoTomas = document.getElementById('estadoTomas');
+        var elListaTomas = document.getElementById('listaTomas');
+        var elEstadoLista = document.getElementById('estadoLista');
+        var elListaEstructuras = document.getElementById('listaEstructuras');
+
+        // ═══ Pantalla 2 — selección de toma ═══
+        // La lista de tomas sale de lo que YA está sincronizado en el
+        // inventario (no hay "padrón" que comparar acá, son estructuras, no
+        // personas) — unión de las tomas presentes en Tomas y en Compuertas.
+        async function mostrarVistaTomas() {
+            document.getElementById('vistaTomas').style.display = 'flex';
+            document.getElementById('vistaLista').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'none';
+            document.getElementById('vistaConfirmacion').style.display = 'none';
+            document.getElementById('vistaSolicitudes').style.display = 'none';
+
+            if (esAdmin) actualizarBotonSolicitudes();
+
+            elEstadoTomas.textContent = 'Cargando inventario…';
+            elListaTomas.innerHTML = '';
+
+            var [avanceTomas, avanceCompuertas] = await Promise.all([
+                CusshmiDatos.obtenerAvanceInventarioTomasPorToma(comisionKeyActual),
+                CusshmiDatos.obtenerAvanceInventarioCompuertasPorToma(comisionKeyActual),
+            ]);
+            var mapaTomas = (avanceTomas.ok && avanceTomas.avance) ? avanceTomas.avance : {};
+            var mapaCompuertas = (avanceCompuertas.ok && avanceCompuertas.avance) ? avanceCompuertas.avance : {};
+
+            var tomasSet = new Set(Object.keys(mapaTomas).concat(Object.keys(mapaCompuertas)));
+            tomasSet.delete('Sin toma asignada');
+            var tomas = Array.from(tomasSet).sort(function (a, b) { return compararOrdenTomas(a, b); });
+            if (mapaTomas['Sin toma asignada'] || mapaCompuertas['Sin toma asignada']) tomas.push('Sin toma asignada');
+
+            if (tomas.length === 0) {
+                elEstadoTomas.textContent = 'No hay inventario sincronizado todavía. Pide a un administrador que lo sincronice desde el sistema de escritorio.';
+                return;
+            }
+
+            elEstadoTomas.textContent = '';
+            tomas.forEach(function (toma) {
+                var t = mapaTomas[toma] || { revisados: 0, total: 0 };
+                var c = mapaCompuertas[toma] || { revisados: 0, total: 0 };
+                var bloque = toma === 'Sin toma asignada' ? '—' : obtenerBloqueDeToma(toma);
+                var detalle = 'Tomas: ' + t.revisados + '/' + t.total + ' · Compuertas: ' + c.revisados + '/' + c.total;
+
+                var fila = document.createElement('button');
+                fila.className = 'fila-toma';
+                fila.type = 'button';
+                fila.innerHTML =
+                    '<div class="nombre-toma">' + escapeHtml(toma) + '</div>' +
+                    '<div class="detalle-toma">Bloque: ' + escapeHtml(bloque) + ' · ' + escapeHtml(detalle) + '</div>';
+                fila.addEventListener('click', function () { abrirToma(toma); });
+                elListaTomas.appendChild(fila);
+            });
+        }
+
+        // ═══ Pantalla admin — solicitudes de edición pendientes ═══
+        async function actualizarBotonSolicitudes() {
+            var btn = document.getElementById('btnVerSolicitudes');
+            var [rTomas, rCompuertas] = await Promise.all([
+                CusshmiDatos.listarSolicitudesEdicionInventarioToma(comisionKeyActual),
+                CusshmiDatos.listarSolicitudesEdicionInventarioCompuerta(comisionKeyActual),
+            ]);
+            var n = ((rTomas.ok && rTomas.solicitudes) ? rTomas.solicitudes.length : 0) +
+                ((rCompuertas.ok && rCompuertas.solicitudes) ? rCompuertas.solicitudes.length : 0);
+            if (n > 0) {
+                btn.textContent = '🔔 Solicitudes de edición pendientes (' + n + ')';
+                btn.style.display = 'block';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        async function mostrarVistaSolicitudes() {
+            document.getElementById('vistaTomas').style.display = 'none';
+            document.getElementById('vistaSolicitudes').style.display = 'flex';
+            await renderizarListaSolicitudes('toma', 'estadoSolicitudesTomas', 'listaSolicitudesTomas');
+            await renderizarListaSolicitudes('compuerta', 'estadoSolicitudesCompuertas', 'listaSolicitudesCompuertas');
+        }
+
+        async function renderizarListaSolicitudes(tipo, idEstado, idLista) {
+            var elEstado = document.getElementById(idEstado);
+            var elLista = document.getElementById(idLista);
+            elEstado.textContent = 'Cargando solicitudes…';
+            elLista.innerHTML = '';
+
+            var listarFn = tipo === 'toma' ? CusshmiDatos.listarSolicitudesEdicionInventarioToma : CusshmiDatos.listarSolicitudesEdicionInventarioCompuerta;
+            var resultado = await listarFn(comisionKeyActual);
+            if (!resultado.ok) { elEstado.textContent = resultado.error || 'No se pudo cargar las solicitudes.'; return; }
+            var solicitudes = resultado.solicitudes || [];
+            if (solicitudes.length === 0) {
+                elEstado.textContent = 'No hay solicitudes pendientes.';
+                return;
+            }
+            elEstado.textContent = '';
+
+            solicitudes.forEach(function (s) {
+                var fila = document.createElement('div');
+                fila.className = 'fila-resultado';
+                var fecha = s.solicitud_edicion_en ? new Date(s.solicitud_edicion_en).toLocaleString('es-PE') : '-';
+                fila.innerHTML =
+                    '<div class="nombre-resultado">' + escapeHtml(s.canal_fuente || '-') + ' → ' + escapeHtml(s.nombre_canal || '-') + '</div>' +
+                    '<div class="detalle-resultado">Toma ' + escapeHtml(s.toma_nombre || 'Sin toma asignada') + '</div>' +
+                    '<div class="detalle-resultado">Solicitado por ' + escapeHtml(s.solicitud_edicion_por_nombre || 'un programador') + ' — ' + escapeHtml(fecha) + '</div>';
+
+                var acciones = document.createElement('div');
+                acciones.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
+
+                var btnHabilitar = document.createElement('button');
+                btnHabilitar.className = 'boton';
+                btnHabilitar.type = 'button';
+                btnHabilitar.style.cssText = 'max-width:none; flex:1; padding:8px; font-size:12px;';
+                btnHabilitar.textContent = '✅ Habilitar';
+                btnHabilitar.addEventListener('click', async function (ev) {
+                    ev.stopPropagation();
+                    btnHabilitar.disabled = true;
+                    var r = await FUNCIONES_POR_TIPO[tipo].desbloquear(s.id);
+                    if (!r.ok) { alert(r.error); btnHabilitar.disabled = false; return; }
+                    renderizarListaSolicitudes(tipo, idEstado, idLista);
+                    actualizarBotonSolicitudes();
+                });
+
+                var btnRechazar = document.createElement('button');
+                btnRechazar.className = 'boton-secundario';
+                btnRechazar.type = 'button';
+                btnRechazar.style.cssText = 'max-width:none; flex:1; padding:8px; font-size:12px;';
+                btnRechazar.textContent = '❌ Rechazar';
+                btnRechazar.addEventListener('click', async function (ev) {
+                    ev.stopPropagation();
+                    btnRechazar.disabled = true;
+                    var r = await FUNCIONES_POR_TIPO[tipo].rechazarSolicitud(s.id);
+                    if (!r.ok) { alert(r.error); btnRechazar.disabled = false; return; }
+                    renderizarListaSolicitudes(tipo, idEstado, idLista);
+                    actualizarBotonSolicitudes();
+                });
+
+                acciones.appendChild(btnHabilitar);
+                acciones.appendChild(btnRechazar);
+                fila.appendChild(acciones);
+                elLista.appendChild(fila);
+            });
+        }
+
+        document.getElementById('btnVerSolicitudes').addEventListener('click', mostrarVistaSolicitudes);
+        document.getElementById('btnVolverATomasDesdeSolicitudes').addEventListener('click', mostrarVistaTomas);
+
+        // ═══ Pantalla 3 — lista de estructuras de la toma ═══
+        async function abrirToma(tomaNombre) {
+            tomaSeleccionada = tomaNombre;
+            document.getElementById('vistaTomas').style.display = 'none';
+            document.getElementById('vistaLista').style.display = 'flex';
+            document.getElementById('tituloTomaLista').textContent = tomaNombre === 'Sin toma asignada' ? tomaNombre : ('Toma ' + tomaNombre);
+            document.getElementById('inputBusquedaCanal').value = '';
+
+            elEstadoLista.textContent = 'Cargando estructuras…';
+            var [rTomas, rCompuertas] = await Promise.all([
+                CusshmiDatos.listarRegistrosInventarioTomasDeToma(comisionKeyActual, tomaNombre),
+                CusshmiDatos.listarRegistrosInventarioCompuertasDeToma(comisionKeyActual, tomaNombre),
+            ]);
+            registrosTomaTomas = (rTomas.ok && rTomas.registros) ? rTomas.registros : [];
+            registrosTomaCompuertas = (rCompuertas.ok && rCompuertas.registros) ? rCompuertas.registros : [];
+            elEstadoLista.textContent = '';
+
+            seleccionarTipo('toma');
+        }
+
+        function seleccionarTipo(tipo) {
+            tipoActual = tipo;
+            document.getElementById('btnTipoTomas').classList.toggle('activo', tipo === 'toma');
+            document.getElementById('btnTipoCompuertas').classList.toggle('activo', tipo === 'compuerta');
+            renderizarListaEstructuras('');
+        }
+        document.getElementById('btnTipoTomas').addEventListener('click', function () { seleccionarTipo('toma'); });
+        document.getElementById('btnTipoCompuertas').addEventListener('click', function () { seleccionarTipo('compuerta'); });
+
+        function renderizarListaEstructuras(textoFiltro) {
+            elListaEstructuras.innerHTML = '';
+            var registros = tipoActual === 'toma' ? registrosTomaTomas : registrosTomaCompuertas;
+            var filtro = (textoFiltro || '').trim().toUpperCase();
+            var filas = filtro
+                ? registros.filter(function (r) {
+                    return (r.canal_fuente || '').toUpperCase().indexOf(filtro) !== -1 ||
+                        (r.nombre_canal || '').toUpperCase().indexOf(filtro) !== -1;
+                })
+                : registros;
+
+            if (registros.length === 0) {
+                elEstadoLista.textContent = 'No hay ' + FUNCIONES_POR_TIPO[tipoActual].etiquetaPlural.toLowerCase() + ' sincronizadas para esta toma todavía.';
+            } else if (filas.length === 0) {
+                elEstadoLista.textContent = 'Sin coincidencias.';
+            } else {
+                elEstadoLista.textContent = '';
+            }
+
+            filas.forEach(function (r) {
+                var fila = document.createElement('div');
+                fila.className = 'fila-resultado';
+                var estadoTexto = r.estado ? (ESTADO_INVENTARIO[r.estado] || r.estado) : 'sin revisar';
+                fila.innerHTML =
+                    '<div class="nombre-resultado">' + escapeHtml(r.nombre_canal || '-') +
+                    '<span class="badge-registrado">' + (r.confirmado ? '✅ confirmado' : '📝 pendiente') + '</span>' +
+                    '<span class="badge-estado">' + escapeHtml(estadoTexto) + '</span>' +
+                    '</div>' +
+                    '<div class="detalle-resultado">Desde: ' + escapeHtml(r.canal_fuente || '-') + (r.progresiva_km ? ' · Prog. ' + escapeHtml(r.progresiva_km) : '') + '</div>';
+                fila.addEventListener('click', function () { abrirFormularioDesdeRegistro(r); });
+                elListaEstructuras.appendChild(fila);
+            });
+        }
+
+        document.getElementById('inputBusquedaCanal').addEventListener('input', function (e) {
+            renderizarListaEstructuras(e.target.value);
+        });
+
+        document.getElementById('btnVolverATomas').addEventListener('click', mostrarVistaTomas);
+
+        document.getElementById('btnAgregarNuevo').addEventListener('click', function () {
+            abrirFormularioDesdeRegistro(null);
+        });
+
+        // ═══ Pantalla 4 — formulario ═══
+        function nuevoRegistroBase() {
+            var base = {
+                id: null, tipo: tipoActual, comisionKey: comisionKeyActual, tomaNombre: tomaSeleccionada === 'Sin toma asignada' ? null : tomaSeleccionada,
+                canalFuente: '', nombreCanal: '', progresivaKm: '', ordenCompuerta: '',
+                zonaUtm: '17', este: '', norte: '', margen: '',
+                material: '', tipo_: '', estado: '', dimensionA: '', dimensionH: '', dimensionD: '',
+                operacion: '', hojaA: '', hojaH: '', marcoA: '', marcoH: '', bloqueRiego: '',
+                observacion: '',
+                confirmado: false, solicitudEdicion: false, solicitudEdicionPorNombre: '', solicitudEdicionEn: null,
+            };
+            return base;
+        }
+
+        function registroDesdeFilaServidor(r, tipo) {
+            var base = {
+                id: r.id, tipo: tipo, comisionKey: comisionKeyActual, tomaNombre: r.toma_nombre,
+                canalFuente: r.canal_fuente || '', nombreCanal: r.nombre_canal || '',
+                progresivaKm: r.progresiva_km || '', ordenCompuerta: r.orden_compuerta || '',
+                zonaUtm: r.zona_utm || '', este: r.este != null ? r.este : '', norte: r.norte != null ? r.norte : '',
+                margen: r.margen || '', estado: r.estado || '', observacion: r.observacion || '',
+                confirmado: !!r.confirmado, solicitudEdicion: !!r.solicitud_edicion,
+                solicitudEdicionPorNombre: r.solicitud_edicion_por_nombre || '', solicitudEdicionEn: r.solicitud_edicion_en || null,
+            };
+            if (tipo === 'toma') {
+                base.material = r.material || ''; base.tipo_ = r.tipo || '';
+                base.dimensionA = r.dimension_a != null ? r.dimension_a : '';
+                base.dimensionH = r.dimension_h != null ? r.dimension_h : '';
+                base.dimensionD = r.dimension_d != null ? r.dimension_d : '';
+            } else {
+                base.tipo_ = r.tipo || ''; base.material = r.material || ''; base.operacion = r.operacion || '';
+                base.hojaA = r.hoja_a != null ? r.hoja_a : ''; base.hojaH = r.hoja_h != null ? r.hoja_h : '';
+                base.marcoA = r.marco_a != null ? r.marco_a : ''; base.marcoH = r.marco_h != null ? r.marco_h : '';
+                base.bloqueRiego = r.bloque_riego || '';
+            }
+            return base;
+        }
+
+        async function abrirFormularioDesdeRegistro(registroExistente) {
+            document.getElementById('vistaLista').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'flex';
+
+            if (registroExistente) {
+                var resultado = await FUNCIONES_POR_TIPO[tipoActual].cargar(registroExistente.id);
+                if (!resultado.ok) { alert(resultado.error || 'No se pudo abrir el registro.'); return; }
+                registroActual = registroDesdeFilaServidor(resultado.registro, tipoActual);
+            } else {
+                registroActual = nuevoRegistroBase();
+            }
+            pintarFormularioDesdeRegistro();
+        }
+
+        function pintarFormularioDesdeRegistro() {
+            var r = registroActual;
+            var esToma = r.tipo === 'toma';
+
+            document.getElementById('tituloSeccionIdentidad').textContent = 'Datos de la ' + (esToma ? 'toma' : 'compuerta');
+            document.getElementById('inputCanalFuente').value = r.canalFuente;
+            document.getElementById('inputNombreCanal').value = r.nombreCanal;
+            document.getElementById('inputProgresivaKm').value = r.progresivaKm;
+            document.getElementById('campoOrdenCompuerta').style.display = esToma ? 'none' : 'block';
+            document.getElementById('inputOrdenCompuerta').value = r.ordenCompuerta;
+            document.getElementById('textoTomaAsignada').textContent = r.tomaNombre ? ('Toma asignada: ' + r.tomaNombre) : 'Sin toma asignada — no se pudo resolver el canal fuente al sincronizar.';
+
+            document.getElementById('inputZonaUtm').value = r.zonaUtm;
+            document.getElementById('selectMargen').value = r.margen;
+            document.getElementById('inputEste').value = r.este;
+            document.getElementById('inputNorte').value = r.norte;
+
+            document.getElementById('camposToma').style.display = esToma ? 'flex' : 'none';
+            document.getElementById('camposCompuerta').style.display = esToma ? 'none' : 'flex';
+            if (esToma) {
+                document.getElementById('selectMaterialToma').value = r.material;
+                document.getElementById('selectTipoToma').value = r.tipo_;
+                document.getElementById('inputDimensionA').value = r.dimensionA;
+                document.getElementById('inputDimensionH').value = r.dimensionH;
+                document.getElementById('inputDimensionD').value = r.dimensionD;
+            } else {
+                document.getElementById('inputTipoCompuerta').value = r.tipo_;
+                document.getElementById('selectMaterialCompuerta').value = r.material;
+                document.getElementById('selectOperacion').value = r.operacion;
+                document.getElementById('inputHojaA').value = r.hojaA;
+                document.getElementById('inputHojaH').value = r.hojaH;
+                document.getElementById('inputMarcoA').value = r.marcoA;
+                document.getElementById('inputMarcoH').value = r.marcoH;
+                document.getElementById('inputBloqueRiego').value = r.bloqueRiego;
+            }
+
+            document.getElementById('selectEstado').value = r.estado;
+            document.getElementById('inputObservacion').value = r.observacion;
+
+            var bloqueado = r.confirmado;
+            document.getElementById('avisoBloqueadoFormulario').style.display = bloqueado ? 'block' : 'none';
+            document.getElementById('estadoGuardadoFormulario').textContent = '';
+            document.getElementById('btnContinuarConfirmacion').textContent = bloqueado ? 'Ver confirmación →' : 'Continuar →';
+            var idsCampos = ['inputCanalFuente', 'inputNombreCanal', 'inputProgresivaKm', 'inputOrdenCompuerta', 'inputZonaUtm', 'selectMargen',
+                'inputEste', 'inputNorte', 'selectMaterialToma', 'selectTipoToma', 'inputDimensionA', 'inputDimensionH', 'inputDimensionD',
+                'inputTipoCompuerta', 'selectMaterialCompuerta', 'selectOperacion', 'inputHojaA', 'inputHojaH', 'inputMarcoA', 'inputMarcoH',
+                'inputBloqueRiego', 'selectEstado', 'inputObservacion'];
+            idsCampos.forEach(function (id) { document.getElementById(id).disabled = bloqueado; });
+        }
+
+        // Lee todos los campos del formulario hacia registroActual — se llama
+        // antes de cada guardado (no hay autoguardado por campo, a diferencia
+        // de otros módulos: acá el sectorista revisa varios campos técnicos
+        // antes de guardar de una sola vez).
+        function leerFormularioARegistro() {
+            var r = registroActual;
+            r.canalFuente = document.getElementById('inputCanalFuente').value;
+            r.nombreCanal = document.getElementById('inputNombreCanal').value;
+            r.progresivaKm = document.getElementById('inputProgresivaKm').value;
+            r.ordenCompuerta = document.getElementById('inputOrdenCompuerta').value;
+            r.zonaUtm = document.getElementById('inputZonaUtm').value;
+            r.margen = document.getElementById('selectMargen').value;
+            r.este = document.getElementById('inputEste').value;
+            r.norte = document.getElementById('inputNorte').value;
+            if (r.tipo === 'toma') {
+                r.material = document.getElementById('selectMaterialToma').value;
+                r.tipo_ = document.getElementById('selectTipoToma').value;
+                r.dimensionA = document.getElementById('inputDimensionA').value;
+                r.dimensionH = document.getElementById('inputDimensionH').value;
+                r.dimensionD = document.getElementById('inputDimensionD').value;
+            } else {
+                r.tipo_ = document.getElementById('inputTipoCompuerta').value;
+                r.material = document.getElementById('selectMaterialCompuerta').value;
+                r.operacion = document.getElementById('selectOperacion').value;
+                r.hojaA = document.getElementById('inputHojaA').value;
+                r.hojaH = document.getElementById('inputHojaH').value;
+                r.marcoA = document.getElementById('inputMarcoA').value;
+                r.marcoH = document.getElementById('inputMarcoH').value;
+                r.bloqueRiego = document.getElementById('inputBloqueRiego').value;
+            }
+            r.estado = document.getElementById('selectEstado').value;
+            r.observacion = document.getElementById('inputObservacion').value;
+        }
+
+        // Arma el objeto en el shape que espera guardarRegistroInventarioToma/
+        // Compuerta (assets/supabase/datos.js) — mismo nombre de campos salvo
+        // `tipo_` (evita el choque con la propiedad `tipo` de nivel superior
+        // que indica Toma/Compuerta) que se traduce de vuelta a `tipo`.
+        function datosParaGuardar() {
+            var r = registroActual;
+            var datos = {
+                id: r.id, comisionKey: r.comisionKey, tomaNombre: r.tomaNombre,
+                canalFuente: r.canalFuente, nombreCanal: r.nombreCanal, progresivaKm: r.progresivaKm,
+                zonaUtm: r.zonaUtm, este: r.este, norte: r.norte, margen: r.margen,
+                estado: r.estado, observacion: r.observacion,
+            };
+            if (r.tipo === 'toma') {
+                datos.material = r.material; datos.tipo = r.tipo_;
+                datos.dimensionA = r.dimensionA; datos.dimensionH = r.dimensionH; datos.dimensionD = r.dimensionD;
+            } else {
+                datos.ordenCompuerta = r.ordenCompuerta;
+                datos.tipo = r.tipo_; datos.material = r.material; datos.operacion = r.operacion;
+                datos.hojaA = r.hojaA; datos.hojaH = r.hojaH; datos.marcoA = r.marcoA; datos.marcoH = r.marcoH;
+                datos.bloqueRiego = r.bloqueRiego;
+            }
+            return datos;
+        }
+
+        async function volverALista() {
+            document.getElementById('vistaFormulario').style.display = 'none';
+            abrirToma(tomaSeleccionada); // refresca la lista para que los badges queden al día
+        }
+        document.getElementById('btnVolverALista').addEventListener('click', volverALista);
+        document.getElementById('btnVolverAListaAbajo').addEventListener('click', volverALista);
+
+        document.getElementById('btnContinuarConfirmacion').addEventListener('click', async function () {
+            if (!registroActual.confirmado) {
+                leerFormularioARegistro();
+                if (!registroActual.canalFuente.trim() || !registroActual.nombreCanal.trim()) {
+                    alert('Ingresa el Canal Fuente y el Nombre del Canal antes de continuar.');
+                    return;
+                }
+                document.getElementById('estadoGuardadoFormulario').textContent = 'Guardando…';
+                var resultado = await FUNCIONES_POR_TIPO[registroActual.tipo].guardar(datosParaGuardar());
+                document.getElementById('estadoGuardadoFormulario').textContent = '';
+                if (!resultado.ok) { alert('No se pudo guardar: ' + resultado.error); return; }
+                registroActual.id = resultado.id;
+            }
+            mostrarConfirmacion();
+        });
+
+        // ═══ Pantalla 5 — confirmación ═══
+        function filaResumen(etiqueta, valor) {
+            return '<div class="resumen-fila"><span class="etiqueta-resumen">' + escapeHtml(etiqueta) + '</span>' +
+                '<span class="valor-resumen">' + escapeHtml(valor || '-') + '</span></div>';
+        }
+
+        function mostrarConfirmacion() {
+            document.getElementById('vistaFormulario').style.display = 'none';
+            document.getElementById('vistaConfirmacion').style.display = 'flex';
+
+            var r = registroActual;
+            var html = '';
+            html += filaResumen(FUNCIONES_POR_TIPO[r.tipo].etiqueta, r.nombreCanal);
+            html += filaResumen('Canal Fuente', r.canalFuente);
+            html += filaResumen('Toma', r.tomaNombre || 'Sin toma asignada');
+            html += filaResumen('Progresiva', r.progresivaKm);
+            html += filaResumen('Estado', r.estado ? (ESTADO_INVENTARIO[r.estado] || r.estado) : '-');
+            if (r.observacion) html += filaResumen('Observación', r.observacion);
+            document.getElementById('resumenRegistro').innerHTML = html;
+
+            var bloqueado = r.confirmado;
+            var solicitado = !!r.solicitudEdicion;
+            document.getElementById('avisoBloqueadoConfirmacion').style.display = bloqueado ? 'block' : 'none';
+            document.getElementById('btnConfirmarGuardar').style.display = bloqueado ? 'none' : 'block';
+
+            document.getElementById('btnSolicitarEdicion').style.display = (bloqueado && !esAdmin && !solicitado) ? 'block' : 'none';
+            document.getElementById('avisoSolicitudEnviada').style.display = (bloqueado && !esAdmin && solicitado) ? 'block' : 'none';
+
+            document.getElementById('btnDesbloquear').style.display = (bloqueado && esAdmin) ? 'block' : 'none';
+            document.getElementById('btnDesbloquear').textContent = solicitado ? '✅ Habilitar edición (admin)' : '🔓 Desbloquear (admin)';
+            document.getElementById('btnRechazarSolicitud').style.display = (bloqueado && esAdmin && solicitado) ? 'block' : 'none';
+            var elAvisoAdmin = document.getElementById('avisoSolicitudPendienteAdmin');
+            if (bloqueado && esAdmin && solicitado) {
+                var fecha = r.solicitudEdicionEn ? new Date(r.solicitudEdicionEn).toLocaleString('es-PE') : '';
+                elAvisoAdmin.textContent = '📩 ' + (r.solicitudEdicionPorNombre || 'Un programador') + ' solicitó habilitar la edición' + (fecha ? ' — ' + fecha : '') + '.';
+                elAvisoAdmin.style.display = 'block';
+            } else {
+                elAvisoAdmin.style.display = 'none';
+            }
+
+            document.getElementById('estadoConfirmacion').textContent = '';
+        }
+
+        function volverAFormulario() {
+            document.getElementById('vistaConfirmacion').style.display = 'none';
+            pintarFormularioDesdeRegistro();
+            document.getElementById('vistaFormulario').style.display = 'flex';
+        }
+        document.getElementById('btnVolverAFormulario').addEventListener('click', volverAFormulario);
+        document.getElementById('btnVolverAFormularioAbajo').addEventListener('click', volverAFormulario);
+
+        document.getElementById('btnConfirmarGuardar').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacion');
+            elEstado.textContent = 'Confirmando…';
+            var resultado = await FUNCIONES_POR_TIPO[registroActual.tipo].confirmar(registroActual.id);
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroActual.confirmado = true;
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Confirmación', 'Actualización del Inventario', FUNCIONES_POR_TIPO[registroActual.tipo].etiqueta + ' — ' + registroActual.nombreCanal);
+            }
+            mostrarConfirmacion();
+        });
+
+        document.getElementById('btnDesbloquear').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacion');
+            elEstado.textContent = 'Desbloqueando…';
+            var resultado = await FUNCIONES_POR_TIPO[registroActual.tipo].desbloquear(registroActual.id);
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroActual.confirmado = false;
+            registroActual.solicitudEdicion = false;
+            registroActual.solicitudEdicionPorNombre = '';
+            registroActual.solicitudEdicionEn = null;
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Desbloqueo', 'Actualización del Inventario', FUNCIONES_POR_TIPO[registroActual.tipo].etiqueta + ' — ' + registroActual.nombreCanal);
+            }
+            document.getElementById('vistaConfirmacion').style.display = 'none';
+            pintarFormularioDesdeRegistro();
+            document.getElementById('vistaFormulario').style.display = 'flex';
+        });
+
+        document.getElementById('btnRechazarSolicitud').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacion');
+            elEstado.textContent = 'Rechazando solicitud…';
+            var resultado = await FUNCIONES_POR_TIPO[registroActual.tipo].rechazarSolicitud(registroActual.id);
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroActual.solicitudEdicion = false;
+            registroActual.solicitudEdicionPorNombre = '';
+            registroActual.solicitudEdicionEn = null;
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Rechazo de solicitud de edición', 'Actualización del Inventario', FUNCIONES_POR_TIPO[registroActual.tipo].etiqueta + ' — ' + registroActual.nombreCanal);
+            }
+            mostrarConfirmacion();
+            document.getElementById('estadoConfirmacion').textContent = 'Solicitud rechazada. El registro sigue bloqueado.';
+        });
+
+        document.getElementById('btnSolicitarEdicion').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacion');
+            elEstado.textContent = 'Enviando solicitud…';
+            var resultado = await FUNCIONES_POR_TIPO[registroActual.tipo].solicitarEdicion(registroActual.id, perfilActual ? perfilActual.nombre : '');
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroActual.solicitudEdicion = true;
+            registroActual.solicitudEdicionPorNombre = perfilActual ? perfilActual.nombre : '';
+            registroActual.solicitudEdicionEn = new Date().toISOString();
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Solicitud de edición', 'Actualización del Inventario', FUNCIONES_POR_TIPO[registroActual.tipo].etiqueta + ' — ' + registroActual.nombreCanal);
+            }
+            mostrarConfirmacion();
+        });
+
+        // ═══ Arranque ═══
+        (async function iniciar() {
+            if (typeof CusshmiAuth === 'undefined') {
+                location.href = 'index.html';
+                return;
+            }
+            var resultado = await CusshmiAuth.recuperarSesion();
+            if (!resultado.ok) {
+                location.href = 'index.html';
+                return;
+            }
+            perfilActual = resultado.perfil;
+            comisionKeyActual = perfilActual.comisionClave;
+            esAdmin = perfilActual.rol === 'admin';
+            if (comisionKeyActual) localStorage.setItem('cusshmi_comision', comisionKeyActual);
+            if (perfilActual.rol !== 'admin' && perfilActual.rol !== 'programador') {
+                elEstadoTomas.textContent = 'Tu usuario no tiene permiso para este módulo.';
+                return;
+            }
+            mostrarVistaTomas();
+        })();
+    </script>
+</body>
+</html>
