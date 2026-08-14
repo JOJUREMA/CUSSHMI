@@ -1755,7 +1755,7 @@
             dimension_a: Number.isFinite(parseFloat(f.dimensionA)) ? parseFloat(f.dimensionA) : null,
             dimension_h: Number.isFinite(parseFloat(f.dimensionH)) ? parseFloat(f.dimensionH) : null,
             dimension_d: Number.isFinite(parseFloat(f.dimensionD)) ? parseFloat(f.dimensionD) : null,
-            actualizado_por: usuarioId,
+            creado_por: usuarioId,
         }));
     }
 
@@ -1783,7 +1783,7 @@
             marco_a: Number.isFinite(parseFloat(f.marcoA)) ? parseFloat(f.marcoA) : null,
             marco_h: Number.isFinite(parseFloat(f.marcoH)) ? parseFloat(f.marcoH) : null,
             bloque_riego: f.bloqueRiego || null,
-            actualizado_por: usuarioId,
+            creado_por: usuarioId,
         }));
     }
 
