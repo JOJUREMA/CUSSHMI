@@ -105,6 +105,10 @@ const MATERIAL_REGLA_MEDIDOR = { Ce: 'Cerámica', Me: 'Metal', PVC: 'Polivinilo'
 const TIPO_ACUEDUCTO = { Pe: 'Permanente (concreto armado)', Sr: 'Semi-Rústico (mampostería de piedras)', R: 'Rústico (piedra y tierra)' };
 const MATERIAL_ACUEDUCTO = { C: 'Concreto', M: 'Metálico', HDPE: 'Polietileno (HDPE)', PVC: 'PVC', O: 'Otros' };
 const MATERIAL_REPARTIDOR = { C: 'Concreto', M: 'Mampostería', R: 'Rústico', O: 'Otros' };
+// La leyenda real dice "HDPE (Polipropileno)" — se transcribe tal cual el
+// Excel, aunque HDPE técnicamente sea polietileno; no se corrige el
+// documento oficial.
+const MATERIAL_SIFON = { C: 'Concreto', M: 'Metálico', HDPE: 'Polipropileno', O: 'Otros' };
 
 const TIPOS_ESTRUCTURA_GENERICOS = {
     pase_vehicular: {
@@ -332,6 +336,47 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 29, clave: 'estadoVertedero', etiqueta: 'Estado — Vertedero (Estructura de Control)', diccionario: ESTADO_INVENTARIO },
             { indice: 30, clave: 'estadoCompuertaControl', etiqueta: 'Estado — Compuerta (Estructura de Control)', diccionario: ESTADO_INVENTARIO },
             { indice: 31, clave: 'tipoCompuertaControl', etiqueta: 'Tipo — Compuerta (Estructura de Control)' },
+        ],
+    },
+    // 4 sub-componentes: Ducto, Desarenador, Sistema de Protección (Rejas)
+    // y Cámara de Carga. En el Excel real solo el Ducto viene lleno para
+    // los 4 sifones registrados — los otros 3 quedan como referencia para
+    // cuando el levantamiento los complete. El Estado editable de la tabla
+    // es el del Ducto (col. 15), el componente siempre presente.
+    sifon_invertido: {
+        etiqueta: 'Sifón Invertido', etiquetaPlural: 'Sifones Invertidos',
+        hojaExcel: 'Formato B-2.2-SIFON INVERTIDO',
+        filaInicioDatos: 16,
+        colIndice: {
+            numeroOrden: 1, nombreObra: 2, canalFuente: 3, nombreCanal: 4, progresivaKm: 5,
+            zonaUtm: 6, este: 7, norte: 8, bloqueRiego: 34, observacion: 35,
+        },
+        colEstado: 15,
+        camposReferencia: [
+            { indice: 9, clave: 'elevacionInicio', etiqueta: 'Elevación inicio (m)' },
+            { indice: 10, clave: 'esteFinal', etiqueta: 'Este final' },
+            { indice: 11, clave: 'norteFinal', etiqueta: 'Norte final' },
+            { indice: 12, clave: 'elevacionFinal', etiqueta: 'Elevación final (m)' },
+            { indice: 13, clave: 'tipo', etiqueta: 'Tipo — Ducto', diccionario: TIPO_PASE },
+            { indice: 14, clave: 'materialDucto', etiqueta: 'Material — Ducto', diccionario: MATERIAL_SIFON },
+            { indice: 16, clave: 'anchoDucto', etiqueta: 'Ancho — Ducto (m)' },
+            { indice: 17, clave: 'altoDucto', etiqueta: 'Alto — Ducto (m)' },
+            { indice: 18, clave: 'diametroDucto', etiqueta: 'Diámetro — Ducto (m)' },
+            { indice: 19, clave: 'longitudDucto', etiqueta: 'Longitud — Ducto (m)' },
+            { indice: 20, clave: 'materialDesarenador', etiqueta: 'Material — Desarenador', diccionario: MATERIAL_SIFON },
+            { indice: 21, clave: 'estadoDesarenador', etiqueta: 'Estado — Desarenador', diccionario: ESTADO_INVENTARIO },
+            { indice: 22, clave: 'longitudDesarenador', etiqueta: 'Longitud — Desarenador (m)' },
+            { indice: 23, clave: 'anchoDesarenador', etiqueta: 'Ancho — Desarenador (m)' },
+            { indice: 24, clave: 'altoDesarenador', etiqueta: 'Alto — Desarenador (m)' },
+            { indice: 25, clave: 'materialRejas', etiqueta: 'Material — Sistema de Protección (Rejas)', diccionario: MATERIAL_SIFON },
+            { indice: 26, clave: 'estadoRejas', etiqueta: 'Estado — Sistema de Protección (Rejas)', diccionario: ESTADO_INVENTARIO },
+            { indice: 27, clave: 'longitudRejas', etiqueta: 'Longitud — Rejas (m)' },
+            { indice: 28, clave: 'altoRejas', etiqueta: 'Alto — Rejas (m)' },
+            { indice: 29, clave: 'materialCamara', etiqueta: 'Material — Cámara de Carga', diccionario: MATERIAL_SIFON },
+            { indice: 30, clave: 'estadoCamara', etiqueta: 'Estado — Cámara de Carga', diccionario: ESTADO_INVENTARIO },
+            { indice: 31, clave: 'longitudCamara', etiqueta: 'Longitud — Cámara de Carga (m)' },
+            { indice: 32, clave: 'anchoCamara', etiqueta: 'Ancho — Cámara de Carga (m)' },
+            { indice: 33, clave: 'altoCamara', etiqueta: 'Alto — Cámara de Carga (m)' },
         ],
     },
 };
