@@ -99,6 +99,9 @@ const MATERIAL_PASE = { C: 'Concreto', M: 'Mampostería', Ma: 'Madera', O: 'Otro
 const TIPO_PASE = { Pe: 'Permanente', Sr: 'Semi-Rústico', R: 'Rústico' };
 const MATERIAL_CAIDA = { C: 'Concreto', R: 'Rústico', O: 'Otros' };
 const MATERIAL_RAPIDA = { C: 'Concreto', M: 'Mampostería', O: 'Otros' };
+const TIPO_MEDIDOR = { P: 'Parshall', RBC: 'RBC', AL: 'Aforador Limnímetro', O: 'Otros' };
+const MATERIAL_MEDIDOR = { C: 'Concreto', Ma: 'Mampostería', Me: 'Metal', O: 'Otros' };
+const MATERIAL_REGLA_MEDIDOR = { Ce: 'Cerámica', Me: 'Metal', PVC: 'Polivinilo', O: 'Otros' };
 
 const TIPOS_ESTRUCTURA_GENERICOS = {
     pase_vehicular: {
@@ -223,6 +226,36 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 14, clave: 'ancho', etiqueta: 'Ancho (m)' },
             { indice: 19, clave: 'diametro', etiqueta: 'Diámetro (m)' },
             { indice: 20, clave: 'altura', etiqueta: 'Altura (m)' },
+        ],
+    },
+    // Sin columna "Nombre" propia (a diferencia de los demás tipos) — se
+    // identifica solo por canal + progresiva; el móvil cae al Nombre del
+    // Canal como título de la fila (mismo comportamiento ya usado cuando
+    // nombreObra no existe).
+    medidor: {
+        etiqueta: 'Medidor', etiquetaPlural: 'Medidores',
+        hojaExcel: 'Formato de MEDIDORES',
+        filaInicioDatos: 15,
+        colIndice: {
+            numeroOrden: 1, canalFuente: 2, nombreCanal: 3, progresivaKm: 4,
+            zonaUtm: 5, este: 6, norte: 7, bloqueRiego: 23, observacion: 24,
+        },
+        colEstado: 10,
+        camposReferencia: [
+            { indice: 8, clave: 'tipo', etiqueta: 'Tipo', diccionario: TIPO_MEDIDOR },
+            { indice: 9, clave: 'material', etiqueta: 'Material', diccionario: MATERIAL_MEDIDOR },
+            { indice: 11, clave: 'longitud', etiqueta: 'Longitud (m)' },
+            { indice: 12, clave: 'anchoGarganta', etiqueta: 'Ancho de Garganta (m)' },
+            { indice: 13, clave: 'anchoInicial', etiqueta: 'Ancho Inicial (m)' },
+            { indice: 14, clave: 'anchoFinal', etiqueta: 'Ancho Final (m)' },
+            { indice: 15, clave: 'alturaMuro', etiqueta: 'Altura de Muro (m)' },
+            { indice: 16, clave: 'alturaCresta', etiqueta: 'Altura de Cresta (m)' },
+            { indice: 17, clave: 'reglaAlto', etiqueta: 'Regla Graduada — Alto (m)' },
+            { indice: 18, clave: 'reglaAncho', etiqueta: 'Regla Graduada — Ancho (m)' },
+            { indice: 19, clave: 'reglaMaterial', etiqueta: 'Regla Graduada — Material', diccionario: MATERIAL_REGLA_MEDIDOR },
+            { indice: 20, clave: 'pozaLargo', etiqueta: 'Poza de Medición — Largo (m)' },
+            { indice: 21, clave: 'pozaAncho', etiqueta: 'Poza de Medición — Ancho (m)' },
+            { indice: 22, clave: 'pozaAlto', etiqueta: 'Poza de Medición — Alto (m)' },
         ],
     },
 };
