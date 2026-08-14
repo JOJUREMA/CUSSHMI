@@ -379,4 +379,89 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 33, clave: 'altoCamara', etiqueta: 'Alto — Cámara de Carga (m)' },
         ],
     },
+    // A diferencia de los demás tipos, un dren no está "sobre" un canal —
+    // descarga hacia un río u otro dren. Se reutiliza igual el mismo par
+    // canalFuente/nombreCanal (canalFuente = adónde vierte, ej. "Rio
+    // Chira"; nombreCanal = el nombre propio del dren) — resolverTomaPorCanal
+    // nunca encuentra un "Principal SDx" ahí, así que estos registros
+    // quedan correctamente agrupados como "Sin toma asignada" (no
+    // pertenecen a ninguna toma, es lo esperado, no un error). Sin columna
+    // Zona ni Bloque de Riego en esta hoja. Margen (D/I respecto al río)
+    // va como referencia (no en la columna dedicada `margen` de la tabla,
+    // para no tocar el parser/sync compartido por los 12 tipos).
+    dren_principal: {
+        etiqueta: 'Dren Principal', etiquetaPlural: 'Drenes Principales',
+        hojaExcel: 'Formato B-7. DRENE PRINC. ',
+        filaInicioDatos: 14,
+        colIndice: {
+            numeroOrden: 1, canalFuente: 2, nombreCanal: 5, progresivaKm: 3,
+            este: 6, norte: 7, observacion: 30,
+        },
+        colEstado: 10,
+        camposReferencia: [
+            { indice: 4, clave: 'margen', etiqueta: 'Margen (respecto al río)', diccionario: MARGEN_INVENTARIO },
+            { indice: 8, clave: 'esteFinal', etiqueta: 'Este final' },
+            { indice: 9, clave: 'norteFinal', etiqueta: 'Norte final' },
+            { indice: 11, clave: 'caudalM3s', etiqueta: 'Caudal Q (m³/s)' },
+            { indice: 12, clave: 'caudalLs', etiqueta: 'Caudal Q (l/s)' },
+            { indice: 13, clave: 'baseMayor', etiqueta: 'Base Mayor B (m)' },
+            { indice: 14, clave: 'baseMenor', etiqueta: 'Base Menor b (m)' },
+            { indice: 15, clave: 'altura', etiqueta: 'Altura H (m)' },
+            { indice: 16, clave: 'talud', etiqueta: 'Talud Z' },
+            { indice: 17, clave: 'pendiente', etiqueta: 'Pendiente S (%)' },
+            { indice: 18, clave: 'longitudM', etiqueta: 'Longitud (m)' },
+            { indice: 19, clave: 'longitudKm', etiqueta: 'Longitud (km)' },
+            { indice: 20, clave: 'tirante', etiqueta: 'Tirante y (m)' },
+            { indice: 21, clave: 'perimetroMojado', etiqueta: 'Perímetro Mojado P (m)' },
+            { indice: 22, clave: 'areaHidraulica', etiqueta: 'Área Hidráulica A (m²)' },
+            { indice: 23, clave: 'radioHidraulico', etiqueta: 'Radio Hidráulico R (m)' },
+            { indice: 24, clave: 'longitudCaminoVigilancia', etiqueta: 'Longitud — Camino de Vigilancia (m)' },
+            { indice: 25, clave: 'anchoCaminoVigilancia', etiqueta: 'Ancho — Camino de Vigilancia (m)' },
+            { indice: 26, clave: 'caminoVigilanciaDerecha', etiqueta: 'Camino de Vigilancia — Margen Derecha' },
+            { indice: 27, clave: 'caminoVigilanciaIzquierda', etiqueta: 'Camino de Vigilancia — Margen Izquierda' },
+            { indice: 28, clave: 'areaBeneficiada', etiqueta: 'Área Beneficiada (ha)' },
+            { indice: 29, clave: 'numeroUsuarios', etiqueta: 'Número de Usuarios' },
+        ],
+    },
+    // Mismo patrón que Dren Principal (canalFuente = adónde vierte —
+    // puede ser un Dren Principal u otro Dren Secundario; nombreCanal =
+    // nombre propio de este dren), con una columna extra "D (M)" (col. 24)
+    // que en esta hoja no tiene número de leyenda ni descripción — se
+    // muestra tal cual el encabezado real, sin inventar qué significa;
+    // eso corre el resto de columnas +1 respecto a Dren Principal.
+    dren_secundario: {
+        etiqueta: 'Dren Secundario', etiquetaPlural: 'Drenes Secundarios',
+        hojaExcel: 'Formato B-8. DRENES SECUND.',
+        filaInicioDatos: 14,
+        colIndice: {
+            numeroOrden: 1, canalFuente: 2, nombreCanal: 5, progresivaKm: 3,
+            este: 6, norte: 7, observacion: 31,
+        },
+        colEstado: 10,
+        camposReferencia: [
+            { indice: 4, clave: 'margen', etiqueta: 'Margen (respecto al dren/fuente)', diccionario: MARGEN_INVENTARIO },
+            { indice: 8, clave: 'esteFinal', etiqueta: 'Este final' },
+            { indice: 9, clave: 'norteFinal', etiqueta: 'Norte final' },
+            { indice: 11, clave: 'caudalM3s', etiqueta: 'Caudal Q (m³/s)' },
+            { indice: 12, clave: 'caudalLs', etiqueta: 'Caudal Q (l/s)' },
+            { indice: 13, clave: 'baseMayor', etiqueta: 'Base Mayor B (m)' },
+            { indice: 14, clave: 'baseMenor', etiqueta: 'Base Menor b (m)' },
+            { indice: 15, clave: 'altura', etiqueta: 'Altura H (m)' },
+            { indice: 16, clave: 'talud', etiqueta: 'Talud Z' },
+            { indice: 17, clave: 'pendiente', etiqueta: 'Pendiente S (%)' },
+            { indice: 18, clave: 'longitudM', etiqueta: 'Longitud (m)' },
+            { indice: 19, clave: 'longitudKm', etiqueta: 'Longitud (km)' },
+            { indice: 20, clave: 'tirante', etiqueta: 'Tirante y (m)' },
+            { indice: 21, clave: 'perimetroMojado', etiqueta: 'Perímetro Mojado P (m)' },
+            { indice: 22, clave: 'areaHidraulica', etiqueta: 'Área Hidráulica A (m²)' },
+            { indice: 23, clave: 'radioHidraulico', etiqueta: 'Radio Hidráulico R (m)' },
+            { indice: 24, clave: 'dSinDescripcion', etiqueta: 'D (M) — sin leyenda en el Excel' },
+            { indice: 25, clave: 'longitudCaminoVigilancia', etiqueta: 'Longitud — Camino de Vigilancia (m)' },
+            { indice: 26, clave: 'anchoCaminoVigilancia', etiqueta: 'Ancho — Camino de Vigilancia (m)' },
+            { indice: 27, clave: 'caminoVigilanciaDerecha', etiqueta: 'Camino de Vigilancia — Margen Derecha' },
+            { indice: 28, clave: 'caminoVigilanciaIzquierda', etiqueta: 'Camino de Vigilancia — Margen Izquierda' },
+            { indice: 29, clave: 'areaBeneficiada', etiqueta: 'Área Beneficiada (ha)' },
+            { indice: 30, clave: 'numeroUsuarios', etiqueta: 'Número de Usuarios' },
+        ],
+    },
 };
