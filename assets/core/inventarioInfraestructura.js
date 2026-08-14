@@ -102,6 +102,8 @@ const MATERIAL_RAPIDA = { C: 'Concreto', M: 'Mampostería', O: 'Otros' };
 const TIPO_MEDIDOR = { P: 'Parshall', RBC: 'RBC', AL: 'Aforador Limnímetro', O: 'Otros' };
 const MATERIAL_MEDIDOR = { C: 'Concreto', Ma: 'Mampostería', Me: 'Metal', O: 'Otros' };
 const MATERIAL_REGLA_MEDIDOR = { Ce: 'Cerámica', Me: 'Metal', PVC: 'Polivinilo', O: 'Otros' };
+const TIPO_ACUEDUCTO = { Pe: 'Permanente (concreto armado)', Sr: 'Semi-Rústico (mampostería de piedras)', R: 'Rústico (piedra y tierra)' };
+const MATERIAL_ACUEDUCTO = { C: 'Concreto', M: 'Metálico', HDPE: 'Polietileno (HDPE)', PVC: 'PVC', O: 'Otros' };
 
 const TIPOS_ESTRUCTURA_GENERICOS = {
     pase_vehicular: {
@@ -256,6 +258,40 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 20, clave: 'pozaLargo', etiqueta: 'Poza de Medición — Largo (m)' },
             { indice: 21, clave: 'pozaAncho', etiqueta: 'Poza de Medición — Ancho (m)' },
             { indice: 22, clave: 'pozaAlto', etiqueta: 'Poza de Medición — Alto (m)' },
+        ],
+    },
+    // Las columnas 23-25 no tienen leyenda numerada (la leyenda real llega
+    // solo hasta -20), pero los encabezados de fila 12 ("Estribos" x2 +
+    // "Pilar" x1) y fila 13 ("Ingreso"/"Salida"/"Estado") sí son texto
+    // real del Excel — se etiquetan como el estado de cada componente
+    // (estribo de ingreso, estribo de salida, pilar), sin inventar más
+    // que eso. El Estado editable de la tabla es el general (col. 12).
+    acueducto: {
+        etiqueta: 'Acueducto', etiquetaPlural: 'Acueductos',
+        hojaExcel: 'Formato B-2.1-ACUEDUCTOS',
+        filaInicioDatos: 15,
+        colIndice: {
+            numeroOrden: 1, nombreObra: 2, canalFuente: 3, nombreCanal: 4, progresivaKm: 5,
+            zonaUtm: 6, este: 7, norte: 8, bloqueRiego: 26, observacion: 27,
+        },
+        colEstado: 12,
+        camposReferencia: [
+            { indice: 9, clave: 'elevacion', etiqueta: 'Elevación (m)' },
+            { indice: 10, clave: 'tipo', etiqueta: 'Tipo', diccionario: TIPO_ACUEDUCTO },
+            { indice: 11, clave: 'material', etiqueta: 'Material', diccionario: MATERIAL_ACUEDUCTO },
+            { indice: 13, clave: 'anchoTransicion1', etiqueta: 'Ancho 1 — Canal de Transición (m)' },
+            { indice: 14, clave: 'anchoTransicion2', etiqueta: 'Ancho 2 — Canal de Transición (m)' },
+            { indice: 15, clave: 'alturaTransicion', etiqueta: 'Altura — Canal de Transición (m)' },
+            { indice: 16, clave: 'tiranteTransicion', etiqueta: 'Tirante — Canal de Transición (m)' },
+            { indice: 17, clave: 'anchoAcueducto', etiqueta: 'Ancho Total — Acueducto (m)' },
+            { indice: 18, clave: 'anchoInternoAcueducto', etiqueta: 'Ancho Interno — Acueducto (m)' },
+            { indice: 19, clave: 'alturaAcueducto', etiqueta: 'Altura — Acueducto (m)' },
+            { indice: 20, clave: 'tiranteAcueducto', etiqueta: 'Tirante — Acueducto (m)' },
+            { indice: 21, clave: 'diametro', etiqueta: 'Diámetro (m)' },
+            { indice: 22, clave: 'longitud', etiqueta: 'Longitud (m)' },
+            { indice: 23, clave: 'estadoIngreso', etiqueta: 'Estado — Estribo de Ingreso', diccionario: ESTADO_INVENTARIO },
+            { indice: 24, clave: 'estadoSalida', etiqueta: 'Estado — Estribo de Salida', diccionario: ESTADO_INVENTARIO },
+            { indice: 25, clave: 'estadoPilar', etiqueta: 'Estado — Pilar', diccionario: ESTADO_INVENTARIO },
         ],
     },
 };
