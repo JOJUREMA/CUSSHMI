@@ -89,6 +89,11 @@
                     <span class="icono">📦</span>
                     <span class="texto">Actualización del Inventario</span>
                 </a>
+                <a class="tile" href="notificaciones.html" id="tileNotificaciones" style="display:none; position:relative;">
+                    <span class="icono">🔔</span>
+                    <span class="texto">Notificaciones</span>
+                    <span id="badgeNotificaciones" style="display:none; position:absolute; top:8px; right:8px; background:#c0392b; color:#fff; font-size:10px; font-weight:800; border-radius:999px; min-width:18px; height:18px; padding:0 4px; align-items:center; justify-content:center;"></span>
+                </a>
             </div>
             <div style="width:100%; max-width:420px;">
                 <button class="boton-secundario" id="btnCerrarSesion">Cerrar sesión</button>
@@ -166,8 +171,31 @@
                 tileInventario.style.display = (perfil.rol === 'admin' || perfil.rol === 'programador') ? 'flex' : 'none';
             }
 
+            // "Notificaciones" — solo admin (la RLS de auditoria ya limita a
+            // un programador a ver solo sus propias filas, sin sentido acá).
+            var tileNotificaciones = document.getElementById('tileNotificaciones');
+            if (tileNotificaciones) {
+                tileNotificaciones.style.display = (perfil.rol === 'admin') ? 'flex' : 'none';
+                if (perfil.rol === 'admin') actualizarBadgeNotificaciones();
+            }
+
             elLogin.style.display = 'none';
             elMenu.style.display = 'flex';
+        }
+
+        async function actualizarBadgeNotificaciones() {
+            if (typeof CusshmiAuditoria === 'undefined') return;
+            var filas = await CusshmiAuditoria.listarAuditoria(200);
+            var vistasEn = localStorage.getItem('cusshmi_notif_vistas_en');
+            var nuevas = vistasEn ? filas.filter(function (f) { return f.creado_en > vistasEn; }).length : filas.length;
+            var badge = document.getElementById('badgeNotificaciones');
+            if (!badge) return;
+            if (nuevas > 0) {
+                badge.textContent = nuevas > 99 ? '99+' : String(nuevas);
+                badge.style.display = 'flex';
+            } else {
+                badge.style.display = 'none';
+            }
         }
 
         function mostrarLogin() {

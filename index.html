@@ -1955,6 +1955,87 @@ const COMISIONES = {
             document.body.appendChild(div.firstElementChild);
         }
 
+        // ── Panel "Notificaciones" (admin) ───────────────────────────────────
+        // Muestra el historial de auditoría (confirmaciones, desbloqueos,
+        // solicitudes/rechazos de edición) de todos los módulos con candado —
+        // reutiliza CusshmiAuditoria.listarAuditoria tal cual, ya filtrado por
+        // RLS a todas las filas para un admin.
+        const ICONO_POR_ACCION_NOTIF = {
+            'Confirmación': '✅',
+            'Desbloqueo': '🔓',
+            'Solicitud de edición': '📩',
+            'Rechazo de solicitud de edición': '❌',
+            'Generación de enlace': '🔗',
+            'Confirmación de recepción G-4': '✅',
+            'Apertura de enlace': '👁️'
+        };
+
+        async function mostrarPanelNotificaciones() {
+            if (!window.CusshmiAuditoria) return;
+            const filas = await CusshmiAuditoria.listarAuditoria(200);
+            localStorage.setItem('cusshmi_notif_vistas_en', new Date().toISOString());
+            const fmt = (iso) => iso ? new Date(iso).toLocaleString('es-PE') : '-';
+            const nombreDe = (f) => {
+                const p = f.profiles;
+                if (!p) return 'Alguien';
+                const nombre = [p.primer_nombre, p.primer_apellido].filter(Boolean).join(' ');
+                return nombre || p.nombre_usuario || 'Alguien';
+            };
+
+            const filasHtml = filas.length
+                ? filas.map(f => `
+                    <tr>
+                        <td style="padding:8px;text-align:center;font-size:16px;">${ICONO_POR_ACCION_NOTIF[f.accion] || '📝'}</td>
+                        <td style="padding:8px;">${f.accion}</td>
+                        <td style="padding:8px;">${f.modulo || '-'}</td>
+                        <td style="padding:8px;">${f.registro_afectado || '-'}</td>
+                        <td style="padding:8px;">${nombreDe(f)}</td>
+                        <td style="padding:8px;text-align:center;font-size:12px;">${fmt(f.creado_en)}</td>
+                    </tr>`).join('')
+                : `<tr><td colspan="6" style="padding:16px;text-align:center;color:#888;">Sin notificaciones todavía.</td></tr>`;
+
+            const modalHtml = `
+                <div id="modalNotificaciones" class="modal-overlay active" style="z-index:99998;background:rgba(0,20,50,0.85);">
+                    <div class="modal-container" style="max-width:900px;max-height:85vh;overflow-y:auto;">
+                        <h3>🔔 Notificaciones</h3>
+                        <p style="font-size:12px;color:#666;margin-top:-6px;">
+                            Confirmaciones, desbloqueos y solicitudes/rechazos de edición de todos los módulos.
+                        </p>
+                        <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead>
+                                <tr style="background:#003876;color:white;">
+                                    <th style="padding:8px;"></th>
+                                    <th style="padding:8px;text-align:left;">Acción</th>
+                                    <th style="padding:8px;text-align:left;">Módulo</th>
+                                    <th style="padding:8px;text-align:left;">Registro afectado</th>
+                                    <th style="padding:8px;text-align:left;">Usuario</th>
+                                    <th style="padding:8px;">Fecha</th>
+                                </tr>
+                            </thead>
+                            <tbody>${filasHtml}</tbody>
+                        </table>
+                        </div>
+                        <div style="display:flex;gap:10px;margin-top:16px;">
+                            <button onclick="mostrarPanelNotificaciones()"
+                                style="flex:1;padding:9px;background:#e2e8f0;color:#4a5568;border:none;border-radius:4px;font-weight:600;font-size:13px;cursor:pointer;">
+                                🔄 Actualizar
+                            </button>
+                            <button onclick="document.getElementById('modalNotificaciones').remove()"
+                                style="padding:9px 18px;background:#003876;color:white;border:none;border-radius:4px;font-weight:600;font-size:13px;cursor:pointer;">
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+
+            const existente = document.getElementById('modalNotificaciones');
+            if (existente) existente.remove();
+            const div = document.createElement('div');
+            div.innerHTML = modalHtml;
+            document.body.appendChild(div.firstElementChild);
+        }
+
         // ── Panel "Orden de Riego" (admin/programador) ──────────────────────
         // Muestra en vivo quién ya confirmó la recepción de su Anexo G-4 (ver
         // movil/g4/confirmar.html) y quién no, por toma+semana. Reutiliza
@@ -2354,6 +2435,19 @@ const COMISIONES = {
                 if (headerText) headerText.appendChild(btnOrdenRiego);
             }
             btnOrdenRiego.style.display = esAdminOProgramador ? 'inline-block' : 'none';
+
+            // Botón panel de Notificaciones — solo administrador (misma
+            // fuente que la pantalla móvil equivalente, movil/notificaciones.html).
+            let btnNotificaciones = document.getElementById('btnNotificaciones');
+            if (!btnNotificaciones) {
+                btnNotificaciones = document.createElement('button');
+                btnNotificaciones.id = 'btnNotificaciones';
+                btnNotificaciones.textContent = '🔔 Notificaciones';
+                btnNotificaciones.onclick = mostrarPanelNotificaciones;
+                const headerText = document.querySelector('.header-text');
+                if (headerText) headerText.appendChild(btnNotificaciones);
+            }
+            btnNotificaciones.style.display = esAdmin ? 'inline-block' : 'none';
         }
 
         async function iniciarSistemaComisiones() {
