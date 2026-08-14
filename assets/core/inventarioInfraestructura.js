@@ -104,6 +104,7 @@ const MATERIAL_MEDIDOR = { C: 'Concreto', Ma: 'Mampostería', Me: 'Metal', O: 'O
 const MATERIAL_REGLA_MEDIDOR = { Ce: 'Cerámica', Me: 'Metal', PVC: 'Polivinilo', O: 'Otros' };
 const TIPO_ACUEDUCTO = { Pe: 'Permanente (concreto armado)', Sr: 'Semi-Rústico (mampostería de piedras)', R: 'Rústico (piedra y tierra)' };
 const MATERIAL_ACUEDUCTO = { C: 'Concreto', M: 'Metálico', HDPE: 'Polietileno (HDPE)', PVC: 'PVC', O: 'Otros' };
+const MATERIAL_REPARTIDOR = { C: 'Concreto', M: 'Mampostería', R: 'Rústico', O: 'Otros' };
 
 const TIPOS_ESTRUCTURA_GENERICOS = {
     pase_vehicular: {
@@ -292,6 +293,45 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 23, clave: 'estadoIngreso', etiqueta: 'Estado — Estribo de Ingreso', diccionario: ESTADO_INVENTARIO },
             { indice: 24, clave: 'estadoSalida', etiqueta: 'Estado — Estribo de Salida', diccionario: ESTADO_INVENTARIO },
             { indice: 25, clave: 'estadoPilar', etiqueta: 'Estado — Pilar', diccionario: ESTADO_INVENTARIO },
+        ],
+    },
+    // Divide el flujo en hasta 2 canales de derivación + una "estructura de
+    // control" (vertedero o compuerta, casi siempre vacía en el Excel real
+    // — se deja igual como referencia). El código de "Tipo" de cada
+    // compuerta ('G' en los datos reales) no tiene leyenda propia en esta
+    // hoja — se muestra tal cual, sin inventar significado.
+    repartidor: {
+        etiqueta: 'Repartidor', etiquetaPlural: 'Repartidores',
+        hojaExcel: 'Formato B-2.8-REPARTIDOR',
+        filaInicioDatos: 15,
+        colIndice: {
+            numeroOrden: 1, nombreObra: 2, canalFuente: 3, nombreCanal: 4, progresivaKm: 5,
+            zonaUtm: 6, este: 7, norte: 8, bloqueRiego: 32, observacion: 33,
+        },
+        colEstado: 12,
+        camposReferencia: [
+            { indice: 9, clave: 'elevacion', etiqueta: 'Elevación (m)' },
+            { indice: 10, clave: 'tipo', etiqueta: 'Tipo', diccionario: TIPO_PASE },
+            { indice: 11, clave: 'material', etiqueta: 'Material', diccionario: MATERIAL_REPARTIDOR },
+            { indice: 13, clave: 'anchoEntrada', etiqueta: 'Ancho — Canal de Entrada (m)' },
+            { indice: 14, clave: 'alturaEntrada', etiqueta: 'Altura — Canal de Entrada (m)' },
+            { indice: 15, clave: 'tiranteEntrada', etiqueta: 'Tirante — Canal de Entrada (m)' },
+            { indice: 16, clave: 'anchoSalida', etiqueta: 'Ancho — Canal de Salida (m)' },
+            { indice: 17, clave: 'alturaSalida', etiqueta: 'Altura — Canal de Salida (m)' },
+            { indice: 18, clave: 'tiranteSalida', etiqueta: 'Tirante — Canal de Salida (m)' },
+            { indice: 19, clave: 'anchoDerivacion1', etiqueta: 'Ancho — Canal de Derivación 1 (m)' },
+            { indice: 20, clave: 'alturaDerivacion1', etiqueta: 'Altura — Canal de Derivación 1 (m)' },
+            { indice: 21, clave: 'tiranteDerivacion1', etiqueta: 'Tirante — Canal de Derivación 1 (m)' },
+            { indice: 22, clave: 'estadoDerivacion1', etiqueta: 'Estado — Compuerta Derivación 1', diccionario: ESTADO_INVENTARIO },
+            { indice: 23, clave: 'tipoDerivacion1', etiqueta: 'Tipo — Compuerta Derivación 1' },
+            { indice: 24, clave: 'anchoDerivacion2', etiqueta: 'Ancho — Canal de Derivación 2 (m)' },
+            { indice: 25, clave: 'alturaDerivacion2', etiqueta: 'Altura — Canal de Derivación 2 (m)' },
+            { indice: 26, clave: 'tiranteDerivacion2', etiqueta: 'Tirante — Canal de Derivación 2 (m)' },
+            { indice: 27, clave: 'estadoDerivacion2', etiqueta: 'Estado — Compuerta Derivación 2', diccionario: ESTADO_INVENTARIO },
+            { indice: 28, clave: 'tipoDerivacion2', etiqueta: 'Tipo — Compuerta Derivación 2' },
+            { indice: 29, clave: 'estadoVertedero', etiqueta: 'Estado — Vertedero (Estructura de Control)', diccionario: ESTADO_INVENTARIO },
+            { indice: 30, clave: 'estadoCompuertaControl', etiqueta: 'Estado — Compuerta (Estructura de Control)', diccionario: ESTADO_INVENTARIO },
+            { indice: 31, clave: 'tipoCompuertaControl', etiqueta: 'Tipo — Compuerta (Estructura de Control)' },
         ],
     },
 };
