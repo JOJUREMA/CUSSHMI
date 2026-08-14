@@ -29,6 +29,7 @@
     <script src="../assets/core/anexoG2.js"></script>
     <script src="../assets/core/mapa.js"></script>
     <script src="../assets/core/coordenadasUtm.js"></script>
+    <script src="../assets/core/capturaOffline.js"></script>
     <script src="../assets/core/inventarioInfraestructura.js"></script>
     <script src="vendor/leaflet.js"></script>
 
@@ -39,6 +40,29 @@
             height: 60vh;
             border-radius: 10px;
             margin: 10px 0;
+        }
+        .foto-miniatura { display: inline-block; position: relative; margin: 6px; }
+        .foto-miniatura img {
+            width: 90px;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .badge-foto { position: absolute; bottom: 2px; left: 2px; font-size: 9px; padding: 1px 4px; border-radius: 4px; }
+        .btn-quitar-foto {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            background: #c0392b;
+            color: #fff;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 11px;
+            cursor: pointer;
         }
         .campo textarea {
             width: 100%;
@@ -331,6 +355,13 @@
                 <label for="inputObservacion">Observación</label>
                 <textarea id="inputObservacion"></textarea>
             </div>
+
+            <div class="seccion-titulo">Fotos</div>
+            <div class="estado-busqueda" id="estadoFotosAviso" style="max-width:420px; opacity:0.75;"></div>
+            <input type="file" id="inputFotoInventario" accept="image/*" capture="environment" style="display:none;">
+            <button class="boton-secundario" id="btnTomarFotoInventario" style="max-width:420px; margin-bottom:10px;">📷 Tomar foto</button>
+            <div class="estado-busqueda" id="estadoFotoInventario" style="max-width:420px;"></div>
+            <div id="listaFotosInventario" style="width:100%; max-width:420px; text-align:center;"></div>
 
             <div class="estado-busqueda" id="estadoGuardadoFormulario"></div>
             <button class="boton-secundario" id="btnVolverAListaAbajo" style="max-width:420px; margin-top:6px;">← Volver a la lista</button>
@@ -872,7 +903,7 @@
                 zonaUtm: '17', este: '', norte: '', margen: '',
                 material: '', tipo_: '', estado: '', dimensionA: '', dimensionH: '', dimensionD: '',
                 operacion: '', hojaA: '', hojaH: '', marcoA: '', marcoH: '', bloqueRiego: '',
-                observacion: '',
+                observacion: '', fotos: [],
                 confirmado: false, solicitudEdicion: false, solicitudEdicionPorNombre: '', solicitudEdicionEn: null,
             };
             return base;
@@ -888,6 +919,7 @@
                 confirmado: !!r.confirmado, solicitudEdicion: !!r.solicitud_edicion,
                 solicitudEdicionPorNombre: r.solicitud_edicion_por_nombre || '', solicitudEdicionEn: r.solicitud_edicion_en || null,
                 nombreObra: r.nombre_obra || '', bloqueRiego: r.bloque_riego || '', campos: r.campos || {},
+                fotos: [],
             };
             if (tipo === 'toma') {
                 base.material = r.material || ''; base.tipo_ = r.tipo || '';
@@ -1031,7 +1063,139 @@
                 'inputBloqueRiego'];
             idsCamposEditables.forEach(function (id) { document.getElementById(id).disabled = bloqueado; });
             idsCamposIdentidadYTipo.forEach(function (id) { document.getElementById(id).disabled = bloqueado || esGenerico; });
+
+            cargarFotosDeRegistro();
         }
+
+        // ═══ Fotos (14 tipos por igual) ═══
+        // A diferencia de Sinceramiento de Áreas, ninguna tabla de inventario
+        // tiene columna fotos_urls (evita que el resync desde Excel la borre)
+        // — las fotos se listan directo desde Storage por carpeta.
+        function _tablaSupabaseDeTipo(tipo) {
+            if (tipo === 'toma') return 'inventario_tomas';
+            if (tipo === 'compuerta') return 'inventario_compuertas';
+            return 'inventario_estructuras';
+        }
+
+        function renderizarFotosInventario() {
+            var cont = document.getElementById('listaFotosInventario');
+            cont.innerHTML = '';
+            (registroActual.fotos || []).forEach(function (f, idx) {
+                var elFoto = document.createElement('div');
+                elFoto.className = 'foto-miniatura';
+                var img = document.createElement('img');
+                img.src = f.urlMostrar || '';
+                elFoto.appendChild(img);
+                var badge = document.createElement('span');
+                badge.className = 'badge-foto';
+                if (f.sincronizada) { badge.style.background = '#1e7e34'; badge.style.color = '#fff'; badge.textContent = '✓'; }
+                else { badge.style.background = '#c8a84b'; badge.style.color = '#002555'; badge.textContent = '🕓'; }
+                elFoto.appendChild(badge);
+                if (!registroActual.confirmado) {
+                    var btnQuitar = document.createElement('button');
+                    btnQuitar.type = 'button';
+                    btnQuitar.className = 'btn-quitar-foto';
+                    btnQuitar.textContent = '✕';
+                    btnQuitar.addEventListener('click', async function () {
+                        if (f.idLocal) await eliminarFotoLocal(f.idLocal);
+                        registroActual.fotos.splice(idx, 1);
+                        renderizarFotosInventario();
+                    });
+                    elFoto.appendChild(btnQuitar);
+                }
+                cont.appendChild(elFoto);
+            });
+        }
+
+        async function cargarFotosDeRegistro() {
+            var r = registroActual;
+            var elAviso = document.getElementById('estadoFotosAviso');
+            var elBoton = document.getElementById('btnTomarFotoInventario');
+            if (!r.id) {
+                r.fotos = [];
+                renderizarFotosInventario();
+                elAviso.textContent = 'Guarda la estructura (Continuar →) antes de agregar fotos.';
+                elBoton.style.display = 'none';
+                return;
+            }
+            elAviso.textContent = '';
+            elBoton.style.display = r.confirmado ? 'none' : 'block';
+
+            var tabla = _tablaSupabaseDeTipo(r.tipo);
+            var remoto = await CusshmiDatos.listarFotosInventario(r.comisionKey, tabla, r.id);
+            var mapaFotos = {};
+            (remoto.ok ? remoto.fotos : []).forEach(function (fr) {
+                mapaFotos[fr.nombreArchivo] = { idLocal: null, path: fr.path, nombreArchivo: fr.nombreArchivo, sincronizada: true, urlMostrar: null };
+            });
+            var fotosLocalesGuardadas = await listarFotosLocal(r.id);
+            fotosLocalesGuardadas.forEach(function (fl) {
+                if (mapaFotos[fl.nombreArchivo]) {
+                    mapaFotos[fl.nombreArchivo].idLocal = fl.id;
+                } else {
+                    mapaFotos[fl.nombreArchivo] = {
+                        idLocal: fl.id, path: fl.pathRemoto, nombreArchivo: fl.nombreArchivo,
+                        sincronizada: fl.sincronizada, urlMostrar: URL.createObjectURL(fl.blob),
+                    };
+                }
+            });
+            r.fotos = Object.values(mapaFotos);
+            for (var i = 0; i < r.fotos.length; i++) {
+                var f = r.fotos[i];
+                if (!f.urlMostrar && f.path) {
+                    var firmada = await CusshmiDatos.obtenerUrlFirmadaFotoInventario(f.path);
+                    if (firmada.ok) f.urlMostrar = firmada.url;
+                }
+            }
+            renderizarFotosInventario();
+            sincronizarFotosPendientesInventario();
+        }
+
+        var sincronizandoFotosInventario = false;
+        async function sincronizarFotosPendientesInventario() {
+            var r = registroActual;
+            if (!r || !r.id || r.confirmado) return;
+            if (!navigator.onLine) return;
+            if (sincronizandoFotosInventario) return;
+            sincronizandoFotosInventario = true;
+            try {
+                var tabla = _tablaSupabaseDeTipo(r.tipo);
+                var fotosLocalesCompletas = await listarFotosLocal(r.id);
+                for (var i = 0; i < fotosLocalesCompletas.length; i++) {
+                    var fl = fotosLocalesCompletas[i];
+                    if (fl.sincronizada) continue;
+                    var subida = await CusshmiDatos.subirFotoInventario(r.comisionKey, tabla, r.id, fl.blob, fl.nombreArchivo);
+                    if (subida.ok) {
+                        await marcarFotoSincronizada(fl.id, subida.path);
+                        var enMemoria = r.fotos.find(function (f) { return f.idLocal === fl.id; });
+                        if (enMemoria) { enMemoria.sincronizada = true; enMemoria.path = subida.path; }
+                    }
+                }
+                renderizarFotosInventario();
+            } finally {
+                sincronizandoFotosInventario = false;
+            }
+        }
+
+        window.addEventListener('online', function () { if (registroActual) sincronizarFotosPendientesInventario(); });
+
+        document.getElementById('btnTomarFotoInventario').addEventListener('click', function () {
+            document.getElementById('inputFotoInventario').click();
+        });
+        document.getElementById('inputFotoInventario').addEventListener('change', async function (e) {
+            if (!registroActual || !registroActual.id || registroActual.confirmado) return;
+            var archivo = e.target.files && e.target.files[0];
+            e.target.value = '';
+            if (!archivo) return;
+
+            var nombreArchivo = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.jpg';
+            var idLocal = await guardarFotoLocal(registroActual.id, archivo, nombreArchivo);
+            registroActual.fotos.push({
+                idLocal: idLocal, path: null, nombreArchivo: nombreArchivo,
+                sincronizada: false, urlMostrar: URL.createObjectURL(archivo),
+            });
+            renderizarFotosInventario();
+            sincronizarFotosPendientesInventario();
+        });
 
         // Lee todos los campos del formulario hacia registroActual — se llama
         // antes de cada guardado (no hay autoguardado por campo, a diferencia
@@ -1136,6 +1300,7 @@
                 document.getElementById('estadoGuardadoFormulario').textContent = '';
                 if (!resultado.ok) { alert('No se pudo guardar: ' + resultado.error); return; }
                 registroActual.id = resultado.id;
+                cargarFotosDeRegistro();
             }
             mostrarConfirmacion();
         });

@@ -1967,6 +1967,68 @@
         return { ok: true, guardados };
     }
 
+    // ── Fotos del Inventario de Infraestructura ─────────────────────────────
+    // A diferencia de sinceramiento-fotos, ninguna de las 3 tablas de
+    // inventario tiene una columna fotos_urls: la sincronización desde Excel
+    // hace upsert completo de cada fila y podría borrar esa referencia en el
+    // próximo resync. Las fotos se suben a Storage y se listan directamente
+    // desde ahí (bucket 022_inventario_fotos.sql), sin depender de ninguna
+    // columna que el resync pudiera pisar. Ruta: {comision_id}/{tabla}/
+    // {registro_id}/{archivo} — "tabla" evita mezclar fotos entre las 3
+    // tablas cuando comparten el mismo id (no debería pasar con uuid, pero
+    // mantiene la ruta autoexplicativa).
+    async function subirFotoInventario(comisionKey, tabla, registroId, blob, nombreArchivo) {
+        if (!comisionKey || !tabla || !registroId || !blob) return { ok: false, error: 'Faltan datos para subir la foto.' };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+
+        const path = comisionId + '/' + tabla + '/' + registroId + '/' + nombreArchivo;
+        const { error } = await client.storage.from('inventario-fotos').upload(path, blob, { upsert: true });
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, path };
+    }
+
+    async function listarFotosInventario(comisionKey, tabla, registroId) {
+        if (!comisionKey || !tabla || !registroId) return { ok: false, error: 'Faltan datos para listar las fotos.', fotos: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + comisionKey + '" no existe en Supabase.', fotos: [] };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message, fotos: [] };
+        }
+
+        const carpeta = comisionId + '/' + tabla + '/' + registroId;
+        const { data, error } = await client.storage.from('inventario-fotos').list(carpeta);
+        if (error) return { ok: false, error: error.message, fotos: [] };
+        const fotos = (data || [])
+            .filter((f) => f.name && f.id) // Storage devuelve un placeholder ".emptyFolderPlaceholder" en carpetas vacías, sin id
+            .map((f) => ({ path: carpeta + '/' + f.name, nombreArchivo: f.name, subidoEn: f.created_at || null }));
+        return { ok: true, fotos };
+    }
+
+    async function obtenerUrlFirmadaFotoInventario(path) {
+        if (!path) return { ok: false, error: 'Falta la ruta de la foto.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.storage.from('inventario-fotos').createSignedUrl(path, 3600);
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, url: data.signedUrl };
+    }
+
     // ── Padrón oficial A-1 (R.J. N° 0155-2022-ANA) ──────────────────────────
     // Carga masiva desde escritorio (parser del Excel oficial de ANA, formato
     // de encabezados fusionados). `filasEntrada`: [{numeroOrden,
@@ -2275,6 +2337,9 @@
         listarSolicitudesEdicionInventarioEstructura,
         rechazarSolicitudEdicionInventarioEstructura,
         sincronizarInventarioEstructuras,
+        subirFotoInventario,
+        listarFotosInventario,
+        obtenerUrlFirmadaFotoInventario,
         cargarRegistrosIdentificacionParaExportar,
         guardarPadronOficialA1,
         cargarPadronOficialA1,
