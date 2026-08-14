@@ -42,10 +42,22 @@ function _normCanal(valor) {
 function resolverTomaPorCanal(filas) {
     const canalATomaMap = {};
 
+    // Semilla tanto por nombreCanal como por canalFuente — necesario para
+    // hojas pequeñas y aisladas (ej. Caídas, con apenas 7 filas) donde
+    // NINGUNA fila tiene su propio nombreCanal="Principal SDx" (todas son
+    // ya laterales de un lateral), pero sí tienen canalFuente="Principal
+    // SDx" directo — sin esto, esas hojas nunca resuelven nada porque el
+    // patrón nunca aparece como nombreCanal dentro de la propia hoja.
+    // Es puramente aditivo: nunca reduce la cobertura ya verificada en
+    // Tomas/Compuertas, solo puede sumar más semillas al mapa.
     (filas || []).forEach((f) => {
         const canal = _normCanal(f.nombreCanal);
         const m = canal.match(RE_CANAL_PRINCIPAL);
         if (m) canalATomaMap[canal] = m[1].toUpperCase();
+
+        const fuente = _normCanal(f.canalFuente);
+        const mFuente = fuente.match(RE_CANAL_PRINCIPAL);
+        if (mFuente) canalATomaMap[fuente] = mFuente[1].toUpperCase();
     });
 
     let cambiosHechos = true;
@@ -85,6 +97,7 @@ function resolverTomaPorCanal(filas) {
 
 const MATERIAL_PASE = { C: 'Concreto', M: 'Mampostería', Ma: 'Madera', O: 'Otros' };
 const TIPO_PASE = { Pe: 'Permanente', Sr: 'Semi-Rústico', R: 'Rústico' };
+const MATERIAL_CAIDA = { C: 'Concreto', R: 'Rústico', O: 'Otros' };
 
 const TIPOS_ESTRUCTURA_GENERICOS = {
     pase_vehicular: {
@@ -123,6 +136,32 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 13, clave: 'longitud', etiqueta: 'Longitud (m)' },
             { indice: 14, clave: 'ancho', etiqueta: 'Ancho (m)' },
             { indice: 15, clave: 'altura', etiqueta: 'Altura (m)' },
+        ],
+    },
+    // "Estado" acá tiene 3 sub-componentes en el Excel (Características de
+    // la Caída / Canal de Transición / Colchón Disipador) — se usa el de
+    // "Características de la Caída" (col. 11) como el Estado editable de la
+    // tabla (la condición general de la obra); los otros dos quedan como
+    // referencia de solo lectura junto a sus materiales.
+    caida: {
+        etiqueta: 'Caída', etiquetaPlural: 'Caídas',
+        hojaExcel: 'Formato B-2.3-CAÍDAS',
+        filaInicioDatos: 15,
+        colIndice: {
+            numeroOrden: 1, nombreObra: 2, canalFuente: 3, nombreCanal: 4, progresivaKm: 5,
+            zonaUtm: 6, este: 7, norte: 8, bloqueRiego: 19, observacion: 20,
+        },
+        colEstado: 11,
+        camposReferencia: [
+            { indice: 9, clave: 'elevacion', etiqueta: 'Elevación (m)' },
+            { indice: 10, clave: 'material', etiqueta: 'Material', diccionario: MATERIAL_CAIDA },
+            { indice: 12, clave: 'materialTransicion', etiqueta: 'Material (Canal de Transición)', diccionario: MATERIAL_CAIDA },
+            { indice: 13, clave: 'estadoTransicion', etiqueta: 'Estado (Canal de Transición)', diccionario: ESTADO_INVENTARIO },
+            { indice: 14, clave: 'materialColchon', etiqueta: 'Material (Colchón Disipador)', diccionario: MATERIAL_CAIDA },
+            { indice: 15, clave: 'estadoColchon', etiqueta: 'Estado (Colchón Disipador)', diccionario: ESTADO_INVENTARIO },
+            { indice: 16, clave: 'longitudColchon', etiqueta: 'Longitud — Colchón Disipador (m)' },
+            { indice: 17, clave: 'anchoColchon', etiqueta: 'Ancho — Colchón Disipador (m)' },
+            { indice: 18, clave: 'altoColchon', etiqueta: 'Alto — Colchón Disipador (m)' },
         ],
     },
 };
