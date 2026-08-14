@@ -278,6 +278,7 @@
             <div class="editor-poligono-footer">
                 <div class="estado-busqueda" id="estadoEditorPoligono" style="max-width:none;"></div>
                 <button class="boton" id="btnGpsEditor" type="button" style="max-width:420px;">📍 Agregar vértice por GPS</button>
+                <button class="boton-secundario" id="btnDeshacerUltimoPunto" type="button" style="max-width:420px;">↩️ Deshacer último punto</button>
             </div>
         </div>
 
@@ -1073,6 +1074,21 @@
             }, function (err) {
                 elEstado.textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '.';
             }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+        });
+
+        // Deshacer el último punto agregado — más rápido que tener que
+        // encontrar y tocar el marcador exacto justo después de haberlo
+        // puesto por error (tap o GPS, cualquiera haya sido el último).
+        // Para quitar un vértice que NO es el último, se sigue usando el
+        // popup "🗑 Quitar este vértice" al tocarlo en el mapa.
+        document.getElementById('btnDeshacerUltimoPunto').addEventListener('click', function () {
+            if (verticesEdicionTemp.length === 0) {
+                document.getElementById('estadoEditorPoligono').textContent = 'No hay ningún punto que deshacer.';
+                return;
+            }
+            verticesEdicionTemp.pop();
+            renumerarVertices(verticesEdicionTemp);
+            redibujarEditor();
         });
 
         document.getElementById('btnCerrarEditor').addEventListener('click', function () {
