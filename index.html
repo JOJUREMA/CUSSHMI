@@ -1412,30 +1412,20 @@
             <h3>📦 Actualización del Inventario</h3>
             <p class="info-text" style="text-align:left;">
                 Sube el Formato oficial de ANA "Inventario de Obras de Arte"
-                (el mismo archivo que ya usa la comisión) para sincronizar las
-                hojas <strong>Tomas</strong> y <strong>Compuertas</strong> —
-                el módulo móvil "Actualización del Inventario" permite luego
-                revisar y corregir el estado de cada estructura en campo.
-                Es un archivo grande (~1300 y ~800 filas reales); sincronizar
-                puede tardar unos segundos.
+                (el mismo archivo que ya usa la comisión) — el módulo móvil
+                "Actualización del Inventario" permite luego revisar y
+                corregir el estado de cada estructura en campo. Elige qué
+                tipo de obra sincronizar; solo se lee(n) la(s) hoja(s) de
+                ese tipo, el resto del archivo se ignora.
             </p>
 
-            <button class="btn btn-primary" id="btnSincronizarInventario" onclick="document.getElementById('inputInventario').click()" style="width: 100%;" title="Sube el Excel de Inventario de Obras de Arte para sincronizar Tomas y Compuertas">
-                📡 Sincronizar Inventario (ANA)
-            </button>
-            <input type="file" id="inputInventario" accept=".xlsx" style="display:none;" onchange="importarInventarioInfraestructura(event)">
-
-            <hr style="margin: 18px 0; border-color: #ddd;">
-            <p class="info-text" style="text-align:left;">
-                Otros tipos de obra del mismo archivo (Acueductos, Sifón
-                Invertido, Caídas, etc.) — elige el tipo y sube el mismo
-                Excel; solo se lee la hoja correspondiente.
-            </p>
-            <select id="selectTipoEstructuraGenerica" style="width: 100%; padding: 8px; margin-bottom: 10px;"></select>
-            <button class="btn btn-primary" id="btnSincronizarEstructuraGenerica" onclick="document.getElementById('inputEstructuraGenerica').click()" style="width: 100%;">
+            <select id="selectTipoInventario" style="width: 100%; padding: 8px; margin-bottom: 10px;">
+                <option value="tomas_compuertas">Tomas y Compuertas</option>
+            </select>
+            <button class="btn btn-primary" id="btnSincronizarTipoInventario" onclick="document.getElementById('inputTipoInventario').click()" style="width: 100%;" title="Sube el Excel de Inventario de Obras de Arte para sincronizar el tipo elegido">
                 📡 Sincronizar tipo seleccionado
             </button>
-            <input type="file" id="inputEstructuraGenerica" accept=".xlsx" style="display:none;" onchange="importarInventarioEstructuraGenerica(event)">
+            <input type="file" id="inputTipoInventario" accept=".xlsx" style="display:none;" onchange="importarInventarioSegunTipoSeleccionado(event)">
 
             <button class="btn btn-secondary" onclick="cerrarModalInventario()" style="width: 100%; margin-top: 12px;">
                 ❌ Cerrar
@@ -3082,16 +3072,28 @@ const COMISIONES = {
             return filas;
         }
 
+        // Un solo dropdown para los 14 tipos ("Tomas y Compuertas" fijo +
+        // los 12 genéricos de TIPOS_ESTRUCTURA_GENERICOS) — despacha al
+        // sincronizador que corresponda según lo elegido.
+        async function importarInventarioSegunTipoSeleccionado(event) {
+            const tipo = document.getElementById('selectTipoInventario').value;
+            if (tipo === 'tomas_compuertas') {
+                await importarInventarioInfraestructura(event);
+            } else {
+                await importarInventarioEstructuraGenerica(event);
+            }
+        }
+
         async function importarInventarioEstructuraGenerica(event) {
             const file = event.target.files && event.target.files[0];
             if (!file) return;
-            const tipoEstructura = document.getElementById('selectTipoEstructuraGenerica').value;
+            const tipoEstructura = document.getElementById('selectTipoInventario').value;
             const definicion = (typeof TIPOS_ESTRUCTURA_GENERICOS === 'object') ? TIPOS_ESTRUCTURA_GENERICOS[tipoEstructura] : null;
             if (!definicion) { alert('Elige un tipo de obra antes de subir el archivo.'); event.target.value = ''; return; }
             if (!window.ExcelJS) { alert('Librería Excel no disponible'); event.target.value = ''; return; }
             if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); event.target.value = ''; return; }
 
-            const btn = document.getElementById('btnSincronizarEstructuraGenerica');
+            const btn = document.getElementById('btnSincronizarTipoInventario');
             const textoOriginal = btn ? btn.textContent : '';
             if (btn) { btn.disabled = true; btn.textContent = '📡 Leyendo archivo…'; }
 
@@ -3144,7 +3146,7 @@ const COMISIONES = {
             if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); event.target.value = ''; return; }
             if (typeof resolverTomaPorCanal !== 'function') { alert('No se pudo cargar la lógica de inventario (assets/core/inventarioInfraestructura.js).'); event.target.value = ''; return; }
 
-            const btn = document.getElementById('btnSincronizarInventario');
+            const btn = document.getElementById('btnSincronizarTipoInventario');
             const textoOriginal = btn ? btn.textContent : '';
             if (btn) { btn.disabled = true; btn.textContent = '📡 Leyendo archivo…'; }
 
@@ -4881,8 +4883,10 @@ function cerrarModalSiembraDIS() {
 function abrirModalInventario() {
     const modal = document.getElementById('modalInventario');
     if (modal) modal.classList.add('active');
-    const select = document.getElementById('selectTipoEstructuraGenerica');
-    if (select && typeof TIPOS_ESTRUCTURA_GENERICOS === 'object' && select.options.length === 0) {
+    // "Tomas y Compuertas" ya viene fijo como primera opción en el HTML —
+    // acá solo se agregan los 12 tipos genéricos (Fase 2), una sola vez.
+    const select = document.getElementById('selectTipoInventario');
+    if (select && typeof TIPOS_ESTRUCTURA_GENERICOS === 'object' && select.options.length === 1) {
         Object.keys(TIPOS_ESTRUCTURA_GENERICOS).forEach((clave) => {
             const opt = document.createElement('option');
             opt.value = clave;
