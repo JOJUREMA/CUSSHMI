@@ -109,6 +109,13 @@ const MATERIAL_REPARTIDOR = { C: 'Concreto', M: 'Mampostería', R: 'Rústico', O
 // Excel, aunque HDPE técnicamente sea polietileno; no se corrige el
 // documento oficial.
 const MATERIAL_SIFON = { C: 'Concreto', M: 'Metálico', HDPE: 'Polipropileno', O: 'Otros' };
+const TIPO_USO_LATERAL = { A: 'Agrario', M: 'Multisectorial', P: 'Poblacional' };
+const TIPO_CANAL_LATERAL = { R: 'Revestido', T: 'Tierra', O: 'Otros' };
+const MATERIAL_CANAL_LATERAL = { C: 'Concreto', M: 'Mampostería', O: 'Otros' };
+// La leyenda real dice "Fe (Concreto)" para el material de la compuerta —
+// se transcribe tal cual el Excel, aunque Fe normalmente sea Fierro.
+const MATERIAL_COMPUERTA_LATERAL = { Fe: 'Concreto', M: 'Mampostería', O: 'Otros' };
+const TIPO_MEDIDOR_LATERAL = { P: 'Parshall', SC: 'Sin cuello', RBC: 'RBC', O: 'Otros' };
 
 const TIPOS_ESTRUCTURA_GENERICOS = {
     pase_vehicular: {
@@ -462,6 +469,59 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 28, clave: 'caminoVigilanciaIzquierda', etiqueta: 'Camino de Vigilancia — Margen Izquierda' },
             { indice: 29, clave: 'areaBeneficiada', etiqueta: 'Área Beneficiada (ha)' },
             { indice: 30, clave: 'numeroUsuarios', etiqueta: 'Número de Usuarios' },
+        ],
+    },
+    // La hoja más ancha (47 columnas reales, no las 1191 que reporta
+    // ExcelJS por celdas con formato heredado sin datos) pero sigue siendo
+    // una fila por lateral, igual que los demás tipos. canalFuente/
+    // nombreCanal son el mismo par canal→canal ya usado en todo el
+    // sistema (acá con nombres propios: "Nombre del canal de derivación o
+    // lateral fuente" / "Nombre del Lateral"). Se omiten las columnas de
+    // longitud duplicadas en km (40-42, redundantes con 37-39 en metros).
+    canal_lateral: {
+        etiqueta: 'Canal Lateral', etiquetaPlural: 'Canales Laterales',
+        hojaExcel: 'Formato B-5. CANALES LATERALES',
+        filaInicioDatos: 15,
+        colIndice: {
+            numeroOrden: 1, nombreObra: 2, canalFuente: 3, nombreCanal: 4, progresivaKm: 6,
+            este: 7, norte: 8, bloqueRiego: 46, observacion: 47,
+        },
+        colEstado: 18,
+        camposReferencia: [
+            { indice: 5, clave: 'ordenLateral', etiqueta: 'Orden del Lateral' },
+            { indice: 9, clave: 'esteFinal', etiqueta: 'Este final' },
+            { indice: 10, clave: 'norteFinal', etiqueta: 'Norte final' },
+            { indice: 11, clave: 'margen', etiqueta: 'Margen', diccionario: MARGEN_INVENTARIO },
+            { indice: 12, clave: 'tipoUso', etiqueta: 'Tipo de Uso', diccionario: TIPO_USO_LATERAL },
+            { indice: 13, clave: 'numeroUsuarios', etiqueta: 'Número Total de Usuarios' },
+            { indice: 14, clave: 'areaBajoRiego', etiqueta: 'Área Total Bajo Riego (ha)' },
+            { indice: 15, clave: 'volumenOtorgado', etiqueta: 'Volumen Otorgado (Hm³)' },
+            { indice: 16, clave: 'tipo', etiqueta: 'Tipo de Canal', diccionario: TIPO_CANAL_LATERAL },
+            { indice: 17, clave: 'material', etiqueta: 'Material', diccionario: MATERIAL_CANAL_LATERAL },
+            { indice: 19, clave: 'caudalDiseno', etiqueta: 'Caudal de Diseño (m³/s)' },
+            { indice: 20, clave: 'caudalOperacionM3s', etiqueta: 'Caudal de Operación (m³/s)' },
+            { indice: 21, clave: 'caudalOperacionLs', etiqueta: 'Caudal de Operación (l/s)' },
+            { indice: 22, clave: 'numeroCompuertas', etiqueta: 'N° de Compuertas' },
+            { indice: 23, clave: 'anchoCompuerta', etiqueta: 'Ancho — Compuerta (m)' },
+            { indice: 24, clave: 'altoCompuerta', etiqueta: 'Alto — Compuerta (m)' },
+            { indice: 25, clave: 'materialCompuerta', etiqueta: 'Material — Compuerta', diccionario: MATERIAL_COMPUERTA_LATERAL },
+            { indice: 26, clave: 'estadoCompuerta', etiqueta: 'Estado — Compuerta', diccionario: ESTADO_INVENTARIO },
+            { indice: 27, clave: 'baseMayor', etiqueta: 'Base Mayor B (m)' },
+            { indice: 28, clave: 'baseMenor', etiqueta: 'Base Menor b (m)' },
+            { indice: 29, clave: 'altura', etiqueta: 'Altura H (m)' },
+            { indice: 30, clave: 'talud', etiqueta: 'Talud Z' },
+            { indice: 31, clave: 'tirante', etiqueta: 'Tirante y (m)' },
+            { indice: 32, clave: 'desnivel', etiqueta: 'Desnivel ΔH' },
+            { indice: 33, clave: 'pendiente', etiqueta: 'Pendiente S (%)' },
+            { indice: 34, clave: 'perimetroMojado', etiqueta: 'Perímetro Mojado P (m)' },
+            { indice: 35, clave: 'areaHidraulica', etiqueta: 'Área Hidráulica A (m²)' },
+            { indice: 36, clave: 'radioHidraulico', etiqueta: 'Radio Hidráulico R (m)' },
+            { indice: 37, clave: 'longitudRevestida', etiqueta: 'Longitud Revestida (m)' },
+            { indice: 38, clave: 'longitudSinRevestir', etiqueta: 'Longitud Sin Revestir (m)' },
+            { indice: 39, clave: 'longitudTotal', etiqueta: 'Longitud Total (m)' },
+            { indice: 43, clave: 'numeroMedidores', etiqueta: 'N° Total de Medidores' },
+            { indice: 44, clave: 'tipoMedidor', etiqueta: 'Tipo — Medidor', diccionario: TIPO_MEDIDOR_LATERAL },
+            { indice: 45, clave: 'estadoMedidor', etiqueta: 'Estado — Medidor', diccionario: ESTADO_INVENTARIO },
         ],
     },
 };
