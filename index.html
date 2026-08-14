@@ -1414,15 +1414,22 @@
                 Sube el Formato oficial de ANA "Inventario de Obras de Arte"
                 (el mismo archivo que ya usa la comisión) — el módulo móvil
                 "Actualización del Inventario" permite luego revisar y
-                corregir el estado de cada estructura en campo. Elige qué
-                tipo de obra sincronizar; solo se lee(n) la(s) hoja(s) de
-                ese tipo, el resto del archivo se ignora.
+                corregir el estado de cada estructura en campo.
             </p>
 
+            <button class="btn btn-primary" id="btnSincronizarTodo" onclick="document.getElementById('inputSincronizarTodo').click()" style="width: 100%;" title="Lee el archivo una sola vez y sincroniza los 14 tipos (Tomas, Compuertas y los 12 tipos de obra)">
+                📡 Sincronizar TODO (14 tipos)
+            </button>
+            <input type="file" id="inputSincronizarTodo" accept=".xlsx" style="display:none;" onchange="importarInventarioTodosLosTipos(event)">
+
+            <hr style="margin: 18px 0; border-color: #ddd;">
+            <p class="info-text" style="text-align:left; font-size: 0.9em;">
+                O sincroniza un solo tipo (por ejemplo, si solo cambió una hoja):
+            </p>
             <select id="selectTipoInventario" style="width: 100%; padding: 8px; margin-bottom: 10px;">
                 <option value="tomas_compuertas">Tomas y Compuertas</option>
             </select>
-            <button class="btn btn-primary" id="btnSincronizarTipoInventario" onclick="document.getElementById('inputTipoInventario').click()" style="width: 100%;" title="Sube el Excel de Inventario de Obras de Arte para sincronizar el tipo elegido">
+            <button class="btn btn-secondary" id="btnSincronizarTipoInventario" onclick="document.getElementById('inputTipoInventario').click()" style="width: 100%;" title="Sube el Excel de Inventario de Obras de Arte para sincronizar el tipo elegido">
                 📡 Sincronizar tipo seleccionado
             </button>
             <input type="file" id="inputTipoInventario" accept=".xlsx" style="display:none;" onchange="importarInventarioSegunTipoSeleccionado(event)">
@@ -3081,6 +3088,85 @@ const COMISIONES = {
                 await importarInventarioInfraestructura(event);
             } else {
                 await importarInventarioEstructuraGenerica(event);
+            }
+        }
+
+        // Lee el archivo UNA sola vez y sincroniza los 14 tipos seguidos
+        // (Tomas, Compuertas y los 12 tipos de TIPOS_ESTRUCTURA_GENERICOS)
+        // en vez de que el usuario tenga que subir el mismo Excel 13 veces
+        // desde el selector de tipo único. Secuencial (no en paralelo) para
+        // no saturar Supabase con 14 sincronizaciones simultáneas.
+        async function importarInventarioTodosLosTipos(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); event.target.value = ''; return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); event.target.value = ''; return; }
+            if (typeof resolverTomaPorCanal !== 'function') { alert('No se pudo cargar la lógica de inventario (assets/core/inventarioInfraestructura.js).'); event.target.value = ''; return; }
+
+            const btn = document.getElementById('btnSincronizarTodo');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📡 Leyendo archivo…'; }
+
+            const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+            const resumen = [];
+
+            try {
+                const buffer = await file.arrayBuffer();
+                const wb = new ExcelJS.Workbook();
+                await wb.xlsx.load(buffer);
+
+                if (btn) btn.textContent = '📡 Sincronizando Tomas y Compuertas…';
+                const wsTomas = wb.getWorksheet('Formato de TOMAS');
+                const wsCompuertas = wb.getWorksheet('Formato de COMPUERTAS ');
+                if (wsTomas && wsCompuertas) {
+                    const filasTomas = _extraerFilasTomas(wsTomas);
+                    const filasCompuertas = _extraerFilasCompuertas(wsCompuertas);
+                    const obtenerTomaTomas = resolverTomaPorCanal(filasTomas);
+                    filasTomas.forEach((f) => { f.tomaNombre = obtenerTomaTomas(f.nombreCanal); });
+                    const obtenerTomaCompuertas = resolverTomaPorCanal(filasCompuertas);
+                    filasCompuertas.forEach((f) => { f.tomaNombre = obtenerTomaCompuertas(f.nombreCanal); });
+
+                    const rTomas = await CusshmiDatos.sincronizarInventarioTomas(comisionKey, filasTomas);
+                    resumen.push({ etiqueta: 'Tomas', ok: rTomas.ok, guardados: rTomas.guardados, total: filasTomas.length, sinToma: filasTomas.filter((f) => !f.tomaNombre).length, error: rTomas.error });
+
+                    const rCompuertas = await CusshmiDatos.sincronizarInventarioCompuertas(comisionKey, filasCompuertas);
+                    resumen.push({ etiqueta: 'Compuertas', ok: rCompuertas.ok, guardados: rCompuertas.guardados, total: filasCompuertas.length, sinToma: filasCompuertas.filter((f) => !f.tomaNombre).length, error: rCompuertas.error });
+                } else {
+                    resumen.push({ etiqueta: 'Tomas y Compuertas', ok: false, error: 'No se encontraron las hojas "Formato de TOMAS"/"Formato de COMPUERTAS " en el archivo.' });
+                }
+
+                for (const tipoEstructura of Object.keys(TIPOS_ESTRUCTURA_GENERICOS)) {
+                    const definicion = TIPOS_ESTRUCTURA_GENERICOS[tipoEstructura];
+                    if (btn) btn.textContent = '📡 Sincronizando ' + definicion.etiquetaPlural + '…';
+                    const sheet = wb.getWorksheet(definicion.hojaExcel);
+                    if (!sheet) {
+                        resumen.push({ etiqueta: definicion.etiquetaPlural, ok: false, error: 'Hoja "' + definicion.hojaExcel + '" no encontrada.' });
+                        continue;
+                    }
+                    const filas = _extraerFilasEstructuraGenerica(sheet, definicion);
+                    if (filas.length === 0) {
+                        resumen.push({ etiqueta: definicion.etiquetaPlural, ok: true, guardados: 0, total: 0, sinToma: 0 });
+                        continue;
+                    }
+                    const obtenerToma = resolverTomaPorCanal(filas);
+                    filas.forEach((f) => { f.tomaNombre = obtenerToma(f.nombreCanal); });
+                    const r = await CusshmiDatos.sincronizarInventarioEstructuras(comisionKey, tipoEstructura, filas);
+                    resumen.push({ etiqueta: definicion.etiquetaPlural, ok: r.ok, guardados: r.guardados, total: filas.length, sinToma: filas.filter((f) => !f.tomaNombre).length, error: r.error });
+                }
+
+                const lineas = resumen.map((r) => {
+                    if (!r.ok) return '❌ ' + r.etiqueta + ': ' + (r.error || 'error desconocido');
+                    if (r.total === 0) return '⚪ ' + r.etiqueta + ': sin filas en el archivo';
+                    return '✅ ' + r.etiqueta + ': ' + r.guardados + ' de ' + r.total + (r.sinToma ? ' (' + r.sinToma + ' sin toma)' : '');
+                });
+                alert('Sincronización completa.\n\n' + lineas.join('\n'));
+            } catch (e) {
+                console.error('Error al sincronizar todo el inventario:', e);
+                alert('No se pudo completar la sincronización: ' + (e.message || e) +
+                    (resumen.length ? ('\n\nAlcanzó a sincronizar antes del error:\n' + resumen.map((r) => r.etiqueta).join(', ')) : ''));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+                event.target.value = '';
             }
         }
 
