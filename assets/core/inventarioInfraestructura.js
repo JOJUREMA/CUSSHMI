@@ -98,6 +98,7 @@ function resolverTomaPorCanal(filas) {
 const MATERIAL_PASE = { C: 'Concreto', M: 'Mampostería', Ma: 'Madera', O: 'Otros' };
 const TIPO_PASE = { Pe: 'Permanente', Sr: 'Semi-Rústico', R: 'Rústico' };
 const MATERIAL_CAIDA = { C: 'Concreto', R: 'Rústico', O: 'Otros' };
+const MATERIAL_RAPIDA = { C: 'Concreto', M: 'Mampostería', O: 'Otros' };
 
 const TIPOS_ESTRUCTURA_GENERICOS = {
     pase_vehicular: {
@@ -162,6 +163,41 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 16, clave: 'longitudColchon', etiqueta: 'Longitud — Colchón Disipador (m)' },
             { indice: 17, clave: 'anchoColchon', etiqueta: 'Ancho — Colchón Disipador (m)' },
             { indice: 18, clave: 'altoColchon', etiqueta: 'Alto — Colchón Disipador (m)' },
+        ],
+    },
+    // 3 sub-componentes con su propio Material/Estado (Canal / Colchón
+    // Disipador / Escalones — este último solo aplica a rápidas
+    // escalonadas, casi siempre "-" en el Excel real). Se usa el Estado
+    // del Canal (col. 14) como el editable de la tabla.
+    rapida: {
+        etiqueta: 'Rápida', etiquetaPlural: 'Rápidas',
+        hojaExcel: 'Formato B-2.4-RAPIDAS',
+        filaInicioDatos: 15,
+        colIndice: {
+            numeroOrden: 1, nombreObra: 2, canalFuente: 3, nombreCanal: 4, progresivaKm: 5,
+            zonaUtm: 6, este: 7, norte: 8, bloqueRiego: 29, observacion: 30,
+        },
+        colEstado: 14,
+        camposReferencia: [
+            { indice: 9, clave: 'elevacionInicio', etiqueta: 'Elevación inicio (m)' },
+            { indice: 10, clave: 'esteFinal', etiqueta: 'Este final' },
+            { indice: 11, clave: 'norteFinal', etiqueta: 'Norte final' },
+            { indice: 12, clave: 'elevacionFinal', etiqueta: 'Elevación final (m)' },
+            { indice: 13, clave: 'material', etiqueta: 'Material (Canal)', diccionario: MATERIAL_RAPIDA },
+            { indice: 15, clave: 'longitud', etiqueta: 'Longitud — Canal (m)' },
+            { indice: 16, clave: 'ancho', etiqueta: 'Ancho — Canal (m)' },
+            { indice: 17, clave: 'tirante', etiqueta: 'Tirante Y — Canal (m)' },
+            { indice: 18, clave: 'pendiente', etiqueta: 'Pendiente S — Canal' },
+            { indice: 19, clave: 'materialColchon', etiqueta: 'Material (Colchón Disipador)', diccionario: MATERIAL_RAPIDA },
+            { indice: 20, clave: 'estadoColchon', etiqueta: 'Estado (Colchón Disipador)', diccionario: ESTADO_INVENTARIO },
+            { indice: 21, clave: 'longitudColchon', etiqueta: 'Longitud — Colchón Disipador (m)' },
+            { indice: 22, clave: 'anchoColchon', etiqueta: 'Ancho — Colchón Disipador (m)' },
+            { indice: 23, clave: 'altoColchon', etiqueta: 'Alto — Colchón Disipador (m)' },
+            { indice: 24, clave: 'materialEscalones', etiqueta: 'Material (Escalones)', diccionario: MATERIAL_RAPIDA },
+            { indice: 25, clave: 'estadoEscalones', etiqueta: 'Estado (Escalones)', diccionario: ESTADO_INVENTARIO },
+            { indice: 26, clave: 'paso', etiqueta: 'Paso — Escalones (m)' },
+            { indice: 27, clave: 'contrapaso', etiqueta: 'Contrapaso — Escalones (m)' },
+            { indice: 28, clave: 'numeroEscalones', etiqueta: 'N° Escalones' },
         ],
     },
 };
