@@ -1097,6 +1097,8 @@
 <script src="assets/core/mapa.js"></script>
 <script src="assets/core/modulosRiego.js"></script>
 <script src="assets/core/inventarioInfraestructura.js"></script>
+<script src="assets/core/anexoE41.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
     
@@ -1405,9 +1407,15 @@
                 <select id="selectUsuarioE41" style="width:100%; padding:8px; border-radius:6px; margin-bottom:12px;" disabled>
                     <option value="">Todos los usuarios de la toma (agregado)</option>
                 </select>
+
+                <label style="font-size:12px; font-weight:600; display:block; margin-bottom:4px;">Formato</label>
+                <div style="display:flex; gap:16px; margin-bottom:14px; font-size:13px;">
+                    <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="radio" name="formatoE41" value="excel" checked> Excel</label>
+                    <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="radio" name="formatoE41" value="pdf"> PDF</label>
+                </div>
             </div>
 
-            <button class="btn btn-success" id="btnExportarE41" onclick="exportarFormatoE41()" style="width: 100%;" title="Genera un Excel con el Formato E-4.1 según lo elegido arriba">
+            <button class="btn btn-success" id="btnExportarE41" onclick="_alExportarE41Click()" style="width: 100%;" title="Genera el Formato E-4.1 en el formato elegido arriba">
                 📊 Exportar Formato E-4.1
             </button>
 
@@ -4335,6 +4343,59 @@ const COMISIONES = {
             return ws;
         }
 
+        // Compartido por el exportador Excel y el PDF: filtra las
+        // declaraciones confirmadas según la Toma/Usuario elegidos en el
+        // modal y trae el padrón A-1 completo de la comisión.
+        async function _recopilarDatosExportE41() {
+            const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+            const tomaFiltro = (document.getElementById('selectTomaE41') || {}).value || '';
+            const usuarioFiltro = (document.getElementById('selectUsuarioE41') || {}).value || '';
+
+            const [resultadoSiembra, resultadoPadronA1] = await Promise.all([
+                CusshmiDatos.cargarRegistrosSiembraParaExportar(comisionKey),
+                CusshmiDatos.cargarPadronOficialA1CompletoParaExportar(comisionKey),
+            ]);
+            if (!resultadoSiembra.ok) return { ok: false, error: 'No se pudo cargar las declaraciones de siembra: ' + resultadoSiembra.error };
+            if (resultadoSiembra.registros.length === 0) return { ok: false, error: 'No hay declaraciones de siembra confirmadas todavía para esta comisión.' };
+
+            let registrosFiltrados = resultadoSiembra.registros;
+            if (tomaFiltro) registrosFiltrados = registrosFiltrados.filter((r) => r.toma_nombre === tomaFiltro);
+            if (usuarioFiltro) registrosFiltrados = registrosFiltrados.filter((r) => r.apellidos_nombres === usuarioFiltro);
+            if (registrosFiltrados.length === 0) return { ok: false, error: 'No hay declaraciones confirmadas para lo seleccionado.' };
+
+            const comisionNombre = (COMISIONES[comisionKey] && COMISIONES[comisionKey].nombre) || comisionKey;
+            const padronA1 = resultadoPadronA1.ok ? resultadoPadronA1.resultados : [];
+            return { ok: true, comisionKey, comisionNombre, tomaFiltro, usuarioFiltro, registrosFiltrados, padronA1 };
+        }
+
+        // Reúne lo que hace falta para armar UNA toma (Excel o PDF): el tipo
+        // de riego a marcar (prioriza el que declaró el usuario si es una
+        // sola persona) y el nombre a mostrar en "NOMBRE - RAZÓN SOCIAL".
+        async function _prepararTomaE41(comisionKey, toma, filas, padronA1, comisionNombre) {
+            const resultadoPadronToma = await CusshmiDatos.cargarPadronToma(comisionKey, toma);
+            const usuariosToma = (resultadoPadronToma.ok && resultadoPadronToma.resultados) ? resultadoPadronToma.resultados : [];
+            const conteoTipoRiego = {};
+            usuariosToma.forEach((u) => { if (u.tipo_riego) conteoTipoRiego[u.tipo_riego] = (conteoTipoRiego[u.tipo_riego] || 0) + 1; });
+            const tipoRiegoDominante = Object.keys(conteoTipoRiego).sort((a, b) => conteoTipoRiego[b] - conteoTipoRiego[a])[0] || '';
+            const filasPadronA1Toma = padronA1.filter((f) => f.toma_nombre === toma);
+            // El campo "NOMBRE - RAZÓN SOCIAL" es del usuario evaluado, no
+            // de la comisión — solo se usa el nombre agregado de la comisión
+            // cuando la hoja junta a más de un usuario de esa toma en un
+            // mismo documento (caso poco común).
+            const usuarioNombre = filas.length === 1 ? filas[0].apellidos_nombres : comisionNombre;
+            // Si es la declaración de un solo usuario, prioriza el tipo de
+            // riego que ÉL marcó en su propia Declaración de Intención de
+            // Siembra sobre el agregado de toda la toma.
+            const tipoRiego = (filas.length === 1 && filas[0].tipo_riego) ? filas[0].tipo_riego : tipoRiegoDominante;
+            return { filasPadronA1Toma, tipoRiego, usuarioNombre };
+        }
+
+        function _alExportarE41Click() {
+            const formato = (document.querySelector('input[name="formatoE41"]:checked') || {}).value || 'excel';
+            if (formato === 'pdf') exportarFormatoE41PDF();
+            else exportarFormatoE41();
+        }
+
         async function exportarFormatoE41() {
             if (!window.ExcelJS) { alert('Librería Excel no disponible'); return; }
             if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
@@ -4344,31 +4405,10 @@ const COMISIONES = {
             if (btn) { btn.disabled = true; btn.textContent = '📊 Generando…'; }
 
             try {
-                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
-                const tomaFiltro = (document.getElementById('selectTomaE41') || {}).value || '';
-                const usuarioFiltro = (document.getElementById('selectUsuarioE41') || {}).value || '';
-
-                const [resultadoSiembra, resultadoPadronA1] = await Promise.all([
-                    CusshmiDatos.cargarRegistrosSiembraParaExportar(comisionKey),
-                    CusshmiDatos.cargarPadronOficialA1CompletoParaExportar(comisionKey),
-                ]);
-                if (!resultadoSiembra.ok) { alert('No se pudo cargar las declaraciones de siembra: ' + resultadoSiembra.error); return; }
-                if (resultadoSiembra.registros.length === 0) {
-                    alert('No hay declaraciones de siembra confirmadas todavía para esta comisión.');
-                    return;
-                }
-
-                let registrosFiltrados = resultadoSiembra.registros;
-                if (tomaFiltro) registrosFiltrados = registrosFiltrados.filter((r) => r.toma_nombre === tomaFiltro);
-                if (usuarioFiltro) registrosFiltrados = registrosFiltrados.filter((r) => r.apellidos_nombres === usuarioFiltro);
-                if (registrosFiltrados.length === 0) {
-                    alert('No hay declaraciones confirmadas para lo seleccionado.');
-                    return;
-                }
-
-                const comisionNombre = (COMISIONES[comisionKey] && COMISIONES[comisionKey].nombre) || comisionKey;
+                const datos = await _recopilarDatosExportE41();
+                if (!datos.ok) { alert(datos.error); return; }
+                const { comisionKey, comisionNombre, tomaFiltro, usuarioFiltro, registrosFiltrados, padronA1 } = datos;
                 const fecha = new Date().toISOString().split('T')[0];
-                const padronA1 = resultadoPadronA1.ok ? resultadoPadronA1.resultados : [];
 
                 const imagenesE41 = await _cargarImagenesE41();
                 const porToma = _agruparPorToma(registrosFiltrados);
@@ -4376,22 +4416,7 @@ const COMISIONES = {
                 let correlativo = 1;
                 for (const { toma, filas } of porToma) {
                     if (toma === 'SIN TOMA IDENTIFICADA') continue; // no se puede armar un E-4.1 sin toma
-                    const resultadoPadronToma = await CusshmiDatos.cargarPadronToma(comisionKey, toma);
-                    const usuariosToma = (resultadoPadronToma.ok && resultadoPadronToma.resultados) ? resultadoPadronToma.resultados : [];
-                    const conteoTipoRiego = {};
-                    usuariosToma.forEach((u) => { if (u.tipo_riego) conteoTipoRiego[u.tipo_riego] = (conteoTipoRiego[u.tipo_riego] || 0) + 1; });
-                    const tipoRiegoDominante = Object.keys(conteoTipoRiego).sort((a, b) => conteoTipoRiego[b] - conteoTipoRiego[a])[0] || '';
-
-                    const filasPadronA1Toma = padronA1.filter((f) => f.toma_nombre === toma);
-                    // El campo "NOMBRE - RAZÓN SOCIAL" es del usuario evaluado,
-                    // no de la comisión — solo se usa el nombre agregado de la
-                    // comisión cuando la hoja junta a más de un usuario de esa
-                    // toma en un mismo documento (caso poco común).
-                    const usuarioNombre = filas.length === 1 ? filas[0].apellidos_nombres : comisionNombre;
-                    // Si es la declaración de un solo usuario, prioriza el
-                    // tipo de riego que ÉL marcó en su propia Declaración de
-                    // Intención de Siembra sobre el agregado de toda la toma.
-                    const tipoRiego = (filas.length === 1 && filas[0].tipo_riego) ? filas[0].tipo_riego : tipoRiegoDominante;
+                    const { filasPadronA1Toma, tipoRiego, usuarioNombre } = await _prepararTomaE41(comisionKey, toma, filas, padronA1, comisionNombre);
                     construirHojaE41(wb, toma, filas, filasPadronA1Toma, tipoRiego, usuarioNombre, correlativo, imagenesE41);
                     correlativo++;
                 }
@@ -4408,6 +4433,107 @@ const COMISIONES = {
                 console.error('Error al exportar Formato E-4.1:', e);
                 alert('No se pudo generar el archivo: ' + (e.message || e));
             } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+            }
+        }
+
+        function _esperarImagenesListasE41(contenedor) {
+            const imgs = Array.from(contenedor.querySelectorAll('img'));
+            return Promise.all(imgs.map((img) => {
+                if (img.complete) return Promise.resolve();
+                return new Promise((resolve) => {
+                    img.addEventListener('load', resolve, { once: true });
+                    img.addEventListener('error', resolve, { once: true });
+                });
+            }));
+        }
+
+        function _esperarRepintadoE41() {
+            return new Promise((resolve) => {
+                requestAnimationFrame(() => requestAnimationFrame(resolve));
+            });
+        }
+
+        // Versión PDF del mismo Formato E-4.1 — un navegador no puede
+        // convertir el workbook ExcelJS a PDF directamente, así que se arma
+        // una réplica visual en HTML/CSS (assets/core/anexoE41.js) y se
+        // captura con html2pdf.js, mismo patrón ya usado para el Anexo G-4 y
+        // los reportes de Condición del Usuario. El cálculo (curva mensual,
+        // demanda, referencia de cultivo) sale de las mismas funciones de
+        // assets/core/modulosRiego.js que usa el Excel — nunca se
+        // reimplementa acá.
+        async function exportarFormatoE41PDF() {
+            if (!window.html2pdf) { alert('Librería PDF no disponible'); return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+
+            const btn = document.getElementById('btnExportarE41');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📊 Generando…'; }
+
+            let contenedor = null;
+            try {
+                const datos = await _recopilarDatosExportE41();
+                if (!datos.ok) { alert(datos.error); return; }
+                const { comisionKey, comisionNombre, tomaFiltro, usuarioFiltro, registrosFiltrados, padronA1 } = datos;
+                const fecha = new Date().toISOString().split('T')[0];
+
+                const porToma = _agruparPorToma(registrosFiltrados);
+                let paginasHtml = '';
+                let correlativo = 1;
+                for (const { toma, filas } of porToma) {
+                    if (toma === 'SIN TOMA IDENTIFICADA') continue;
+                    const { filasPadronA1Toma, tipoRiego, usuarioNombre } = await _prepararTomaE41(comisionKey, toma, filas, padronA1, comisionNombre);
+                    const datosCalc = calcularDatosE41(toma, filas, filasPadronA1Toma, tipoRiego, usuarioNombre, correlativo);
+                    const paginaHtml = _construirAnexoE41Pagina(datosCalc, 'assets/img/e41/');
+                    // Cada toma nueva empieza en una página de PDF distinta,
+                    // salvo la primera.
+                    paginasHtml += correlativo > 1
+                        ? paginaHtml.replace('class="e41-pagina"', 'class="e41-pagina" style="page-break-before:always;"')
+                        : paginaHtml;
+                    correlativo++;
+                }
+                if (!paginasHtml) { alert('No hay tomas para exportar.'); return; }
+
+                // El contenedor va en el flujo normal del documento (nunca
+                // position:fixed/absolute) — comprobado con html2canvas en
+                // esta versión: un elemento con position:fixed captura con
+                // ALTO CERO (canvas en blanco) aunque su offsetHeight real
+                // sea correcto; en flujo normal captura bien. Se cubre con
+                // un overlay para que no se vea el contenido "saltar" en la
+                // pantalla mientras se genera.
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed; inset:0; background:#fff; z-index:99998;';
+                document.body.appendChild(overlay);
+                contenedor = document.createElement('div');
+                contenedor.style.cssText = 'position:relative; z-index:99999; background:#fff;';
+                contenedor.innerHTML = _estilosAnexoE41() + paginasHtml;
+                document.body.appendChild(contenedor);
+                contenedor._overlayE41 = overlay;
+                await _esperarImagenesListasE41(contenedor);
+                await _esperarRepintadoE41();
+
+                let sufijoArchivo = comisionKey;
+                if (usuarioFiltro) sufijoArchivo = normalizarTextoHeader(usuarioFiltro).replace(/\s+/g, '_');
+                else if (tomaFiltro) sufijoArchivo = tomaFiltro.replace(/[^A-Za-z0-9.]+/g, '_');
+
+                await html2pdf().set({
+                    margin: 5,
+                    filename: `Formato_E41_${sufijoArchivo}_${fecha}.pdf`,
+                    html2canvas: { scale: 2, useCORS: true },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                    pagebreak: { mode: ['css'] },
+                }).from(contenedor).save();
+
+                alert('✅ Exportado el Formato E-4.1 (PDF) con ' + (correlativo - 1) + ' toma(s).\n\n' +
+                    'La sección de usuario no agrario queda en blanco para completar manualmente — el volumen mensual autorizado ya se calcula solo.');
+            } catch (e) {
+                console.error('Error al exportar Formato E-4.1 en PDF:', e);
+                alert('No se pudo generar el PDF: ' + (e.message || e));
+            } finally {
+                if (contenedor) {
+                    if (contenedor._overlayE41) document.body.removeChild(contenedor._overlayE41);
+                    document.body.removeChild(contenedor);
+                }
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
             }
         }
