@@ -27,13 +27,39 @@ function _obtenerSectoristaPorTomaE41(tomaNombre) {
     return { nombre: 'DIEGO SILVA', imagenArchivo: 'sello_diego_silva.png' };
 }
 
+function _normUCE41Pdf(v) {
+    return (v || '').toString().trim().toUpperCase().replace(/\s+/g, '');
+}
+
+// Encuentra la fila del padrón A-1 del usuario que se está exportando
+// (por unidad catastral, o por nombre si no hay UC) — mismo criterio que
+// _emparejarPadronA1E41 en construirHojaE41 (Sistema_Riego_CUSSHMI_14.html).
+function _emparejarPadronA1E41Pdf(padronA1Toma, unidadCatastral, nombre) {
+    const uc = _normUCE41Pdf(unidadCatastral);
+    if (uc) {
+        const porUC = padronA1Toma.find((p) => _normUCE41Pdf(p.unidad_catastral) === uc);
+        if (porUC) return porUC;
+    }
+    const nombreNorm = (nombre || '').toString().trim().toUpperCase();
+    if (!nombreNorm) return null;
+    return padronA1Toma.find((p) => (p.apellidos_nombres || '').toString().trim().toUpperCase() === nombreNorm) || null;
+}
+
 // Toma los mismos datos de entrada que construirHojaE41 y devuelve un
 // objeto plano con todo lo que necesita el render HTML — números ya
 // sumados, sin fórmulas (un PDF no recalcula nada).
 function calcularDatosE41(tomaNombre, filasSiembraToma, filasPadronA1Toma, tipoRiegoDominante, usuarioNombre, numeroCorrelativo) {
-    const areaBajoRiegoToma = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
+    const usuarioA1 = (filasSiembraToma.length === 1)
+        ? _emparejarPadronA1E41Pdf(filasPadronA1Toma, filasSiembraToma[0].unidad_catastral, filasSiembraToma[0].apellidos_nombres)
+        : null;
+
+    let areaBajoRiegoToma = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
+    if (!areaBajoRiegoToma && usuarioA1) areaBajoRiegoToma = parseFloat(usuarioA1.area_bajo_riego_ha) || 0;
     const volumenHm3 = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.volumen_m3) || 0), 0) / 1e6;
-    const claseDerecho = (filasPadronA1Toma.find((f) => f.clase_derecho) || {}).clase_derecho || '-';
+    const claseDerecho = (usuarioA1 && usuarioA1.clase_derecho) || (filasPadronA1Toma.find((f) => f.clase_derecho) || {}).clase_derecho || '-';
+    const numeroResolucion = (usuarioA1 && usuarioA1.numero_resolucion) || (filasPadronA1Toma.find((f) => f.numero_resolucion) || {}).numero_resolucion || '';
+    const unidadCatastral = usuarioA1 ? (usuarioA1.unidad_catastral || '') : '';
+    const canalSecundario = usuarioA1 ? (usuarioA1.canal_derivacion || '') : '';
     const tipoRiegoEtiqueta = _tipoRiegoEtiquetaE41(tipoRiegoDominante);
 
     const areaPorCultivo = new Map();
@@ -101,7 +127,7 @@ function calcularDatosE41(tomaNombre, filasSiembraToma, filasPadronA1Toma, tipoR
 
     return {
         tomaNombre, usuarioNombre, numeroCorrelativo,
-        areaBajoRiegoToma, volumenHm3, claseDerecho, tipoRiegoEtiqueta,
+        areaBajoRiegoToma, volumenHm3, claseDerecho, numeroResolucion, unidadCatastral, canalSecundario, tipoRiegoEtiqueta,
         bloque: (typeof obtenerBloqueDeToma === 'function' ? obtenerBloqueDeToma(tomaNombre) : null) || '—',
         filasDIS, filasCultivoAprobado, areaTotalCultivos, demandaTotalHm3, hayCultivosSinReferencia,
         seccion3: {
@@ -240,9 +266,9 @@ function _construirAnexoE41Pagina(datos, rutaImagenes) {
             <div>TOMA - SECTOR: ${escapeHtml(d.tomaNombre)}</div>
         </div>
         <div class="e41-linea2">
-            <span>Unidad catastral:</span>
+            <span>Unidad catastral: ${escapeHtml(d.unidadCatastral || '—')}</span>
             <span>Área bajo riego (ha): ${fmt2(d.areaBajoRiegoToma)}</span>
-            <span>Canal Secundario:</span>
+            <span>Canal Secundario: ${escapeHtml(d.canalSecundario || '—')}</span>
             <span>Nombre del bloque de riego: ${escapeHtml(d.bloque)}</span>
         </div>
 
@@ -257,7 +283,7 @@ function _construirAnexoE41Pagina(datos, rutaImagenes) {
                 <th colspan="9"></th>
             </tr>
             <tr>
-                <td>SUPERFICIAL</td><td>Rio Chira</td><td class="e41-centrado">${escapeHtml(d.claseDerecho)}</td><td></td><td class="e41-centrado">${fmt3(d.volumenHm3)}</td>
+                <td>SUPERFICIAL</td><td>Rio Chira</td><td class="e41-centrado">${escapeHtml(d.claseDerecho)}</td><td class="e41-centrado">${escapeHtml(d.numeroResolucion || '—')}</td><td class="e41-centrado">${fmt3(d.volumenHm3)}</td>
                 <td colspan="7">GRAVEDAD</td><td colspan="2" class="e41-centrado">${(d.tipoRiegoEtiqueta === 'GRAVEDAD') ? 'X' : ''}</td>
             </tr>
             <tr>

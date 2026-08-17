@@ -4667,10 +4667,18 @@ const COMISIONES = {
                 let sufijoArchivo = comisionKey;
                 if (usuarioFiltro) sufijoArchivo = normalizarTextoHeader(usuarioFiltro).replace(/\s+/g, '_');
                 else if (tomaFiltro) sufijoArchivo = tomaFiltro.replace(/[^A-Za-z0-9.]+/g, '_');
-                pdf.save(`Formato_E41_${sufijoArchivo}_${fecha}.pdf`);
+                pdf.setProperties({ title: `Formato_E41_${sufijoArchivo}_${fecha}` });
 
-                alert('✅ Exportado el Formato E-4.1 (PDF) con ' + (correlativo - 1) + ' toma(s).\n\n' +
-                    'La sección de usuario no agrario queda en blanco para completar manualmente — el volumen mensual autorizado ya se calcula solo.');
+                // Vista previa en vez de descarga directa: se abre el PDF en
+                // una pestaña nueva (visor nativo del navegador) para que el
+                // usuario vea exactamente cómo va a quedar ANTES de decidir
+                // si lo imprime o lo descarga — desde esa misma pestaña ya
+                // tiene los botones de imprimir/descargar del visor.
+                const urlVistaPrevia = pdf.output('bloburl');
+                const ventana = window.open(urlVistaPrevia, '_blank');
+                if (!ventana) {
+                    alert('El navegador bloqueó la ventana de vista previa (revisa el bloqueador de pop-ups). El PDF ya se generó — habilita las ventanas emergentes para este sitio e inténtalo de nuevo.');
+                }
             } catch (e) {
                 console.error('Error al exportar Formato E-4.1 en PDF:', e);
                 alert('No se pudo generar el PDF: ' + (e.message || e));
