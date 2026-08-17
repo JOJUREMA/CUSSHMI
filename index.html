@@ -3801,52 +3801,126 @@ const COMISIONES = {
             c.alignment = { horizontal: 'center' };
         }
 
-        function construirHojaE41(wb, tomaNombre, filasSiembraToma, filasPadronA1Toma, tipoRiegoDominante, comisionNombre, numeroCorrelativo) {
+        // Rutas de las imágenes reales (logos + firmas/sellos) extraídas del
+        // Formato E-4.1 oficial ya firmado que compartió el usuario — se
+        // cargan una sola vez (fetch + arrayBuffer) antes de recorrer las
+        // tomas, no en cada hoja, para no repetir 15+ descargas.
+        const IMAGENES_E41 = {
+            logoMidagri: { url: 'assets/img/e41/logo_midagri.jpg', extension: 'jpeg' },
+            logoAna: { url: 'assets/img/e41/logo_ana.jpg', extension: 'jpeg' },
+            firmaJosephReyes: { url: 'assets/img/e41/firma_joseph_reyes.jpg', extension: 'jpeg' },
+            selloFranklinSaul: { url: 'assets/img/e41/sello_franklin_saul.jpg', extension: 'jpeg' },
+            selloDiegoSilva: { url: 'assets/img/e41/sello_diego_silva.png', extension: 'png' },
+        };
+
+        async function _cargarImagenesE41() {
+            const claves = Object.keys(IMAGENES_E41);
+            const buffers = await Promise.all(claves.map((clave) =>
+                fetch(IMAGENES_E41[clave].url).then((r) => r.arrayBuffer())
+            ));
+            const resultado = {};
+            claves.forEach((clave, idx) => {
+                resultado[clave] = { buffer: buffers[idx], extension: IMAGENES_E41[clave].extension };
+            });
+            return resultado;
+        }
+
+        // El sectorista (firma/sello pequeño junto a "CULTIVO APROBADO") es
+        // distinto según el tramo de tomas — confirmado por el usuario con
+        // dos Formato E-4.1 reales ya firmados (SD8 → Franklin Saúl, SD14.1
+        // → Diego Silva). Las tomas SD3–SD8 llevan a Franklin Saúl; SD8.1 en
+        // adelante (incluidas SI*/otras no cubiertas explícitamente) llevan
+        // a Diego Silva, el sectorista del tramo más reciente/más grande.
+        function _obtenerSectoristaPorToma(tomaNombre) {
+            const m = /^SD(\d+(?:\.\d+)?)$/.exec((tomaNombre || '').trim());
+            if (m && parseFloat(m[1]) <= 8) {
+                return { nombre: 'FRANKLIN SAÚL MORÁN CRUZ', imagenClave: 'selloFranklinSaul' };
+            }
+            return { nombre: 'DIEGO SILVA', imagenClave: 'selloDiegoSilva' };
+        }
+
+        function _tipoRiegoEtiqueta(codigo) {
+            const mapa = { G: 'GRAVEDAD', A: 'ASPERSIÓN', GT: 'GOTEO', GO: 'GOTEO' };
+            return mapa[(codigo || '').toUpperCase()] || null;
+        }
+
+        const DIAS_POR_MES_E41 = [31, 30, 31, 30, 31, 31, 28, 31, 30, 31, 30, 31]; // AGO..JUL
+
+        function construirHojaE41(wb, tomaNombre, filasSiembraToma, filasPadronA1Toma, tipoRiegoDominante, comisionNombre, numeroCorrelativo, imagenes) {
             const NUM_COLS = 14;
             const nombreHoja = tomaNombre.length > 31 ? tomaNombre.slice(0, 31) : tomaNombre;
             const ws = wb.addWorksheet(nombreHoja, { views: [{ showGridLines: false }] });
-            for (let c = 1; c <= NUM_COLS; c++) ws.getColumn(c).width = 9;
+            for (let c = 1; c <= NUM_COLS; c++) ws.getColumn(c).width = 6.2;
+            ws.pageSetup = {
+                paperSize: 9, orientation: 'portrait',
+                fitToPage: true, fitToWidth: 1, fitToHeight: 1,
+                margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0, footer: 0 },
+            };
+
+            const BORDE_FINO = { style: 'thin', color: { argb: 'FF000000' } };
+            const BORDE_COMPLETO = { top: BORDE_FINO, left: BORDE_FINO, bottom: BORDE_FINO, right: BORDE_FINO };
+            const FILL_AZUL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6F1' } };
+            const FILL_TOTAL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } };
+            const ROJO = { argb: 'FFC00000' };
+
+            const idImgMidagri = wb.addImage({ buffer: imagenes.logoMidagri.buffer, extension: imagenes.logoMidagri.extension });
+            const idImgAna = wb.addImage({ buffer: imagenes.logoAna.buffer, extension: imagenes.logoAna.extension });
 
             let r = 1;
-            _escribirTituloSeccionE41(ws, r, NUM_COLS, 'AUTORIDAD NACIONAL DEL AGUA'); r++;
-            const cFormato = ws.getCell(r, 1);
-            ws.mergeCells(r, 1, r, NUM_COLS);
-            cFormato.value = 'Formato E-4.1. Demanda de Agua del Usuario';
-            cFormato.font = { bold: true, size: 12 };
-            cFormato.alignment = { horizontal: 'center' };
+            ws.mergeCells(r, 4, r, 11);
+            ws.getCell(r, 4).value = 'AUTORIDAD NACIONAL DEL AGUA';
+            ws.getCell(r, 4).font = { bold: true, size: 11 };
+            ws.getCell(r, 4).alignment = { horizontal: 'center' };
             r++;
-            _escribirTituloSeccionE41(ws, r, NUM_COLS, 'PERIODO AÑO  2026  - 2027'); r++;
-            r++; // fila en blanco (como en el original)
+            ws.mergeCells(r, 4, r, 11);
+            ws.getCell(r, 4).value = 'Formato E-4.1. Demanda de Agua del Usuario';
+            ws.getCell(r, 4).font = { bold: true, size: 11.5 };
+            ws.getCell(r, 4).alignment = { horizontal: 'center' };
+            r++;
+            ws.mergeCells(r, 4, r, 11);
+            ws.getCell(r, 4).value = 'PERIODO AÑO  2026  - 2027';
+            ws.getCell(r, 4).font = { bold: true, size: 11 };
+            ws.getCell(r, 4).alignment = { horizontal: 'center' };
+            ws.addImage(idImgMidagri, { tl: { col: 0, row: 0 }, ext: { width: 185, height: 31 } });
+            ws.addImage(idImgAna, { tl: { col: 12.1, row: 0.1 }, ext: { width: 78, height: 42 } });
+            r += 2;
 
-            const filaTexto = (colDesde, colHasta, texto) => {
+            const filaTexto = (colDesde, colHasta, texto, opciones) => {
                 const c = ws.getCell(r, colDesde);
                 if (colHasta > colDesde) ws.mergeCells(r, colDesde, r, colHasta);
                 c.value = texto;
-                c.font = { size: 9 };
+                c.font = Object.assign({ size: 9 }, opciones || {});
+                return c;
             };
-            filaTexto(1, 5, 'Autoridad Administrativa del Agua: ' + AAA_NOMBRE);
-            filaTexto(7, 13, 'Operador de Infraestructura Hidráulica: Junta de Usuarios Chira');
+            filaTexto(1, 7, 'Autoridad Administrativa del Agua: Jequetepeque Zarumilla V');
+            filaTexto(8, 14, 'Operador de Infraestructura Hidráulica: Junta de Usuarios Chira');
             r++;
-            filaTexto(1, 5, 'Administración Local de Agua: ' + ALA_NOMBRE);
-            filaTexto(7, 13, 'Sector Hidráulico: Menor - Chira');
+            filaTexto(1, 7, 'Administración Local de Agua: Chira');
+            filaTexto(8, 14, 'Sector Hidráulico: Menor - Chira');
             r++;
-            filaTexto(1, 5, 'Unidad Hidrográfica: 138');
-            filaTexto(7, 13, 'Subsector Hidráulico: ' + comisionNombre);
+            filaTexto(1, 7, 'Unidad Hidrográfica: 138');
+            filaTexto(8, 14, 'Subsector Hidráulico: Margen Izquierda del río Chira');
             r += 2;
 
-            filaTexto(1, 4, 'Usuario que recibe el servicio de suministro de agua del Operador:');
-            ws.getCell(r, 5).value = 'X';
-            filaTexto(7, 11, 'Usuario con sistema de abastecimiento de agua propio:');
+            filaTexto(1, 5, 'Operador:', { bold: true });
+            ws.getCell(r, 6).value = 'X';
+            ws.getCell(r, 6).alignment = { horizontal: 'center' };
+            ws.getCell(r, 6).border = BORDE_COMPLETO;
+            filaTexto(8, 12, 'Usuario con sistema de abastecimiento de agua propio:', { bold: true });
+            ws.getCell(r, 13).border = BORDE_COMPLETO;
             r++;
-            filaTexto(1, 2, '() Marcar con una X según corresponda.');
+            filaTexto(1, 5, '() Marcar con una X según corresponda.', { italic: true, size: 8 });
             r += 2;
 
             ws.getCell(r, 1).value = 'FECHA DE RECEPCIÓN';
             ws.mergeCells(r, 1, r, 3);
+            ws.getCell(r, 1).font = { bold: true, size: 9 };
             const cFecha = ws.getCell(r, 4);
-            ws.mergeCells(r, 4, r, 5);
+            ws.mergeCells(r, 4, r, 6);
             cFecha.value = new Date().toLocaleDateString('es-PE');
+            cFecha.alignment = { horizontal: 'center' };
             ws.getCell(r, 11).value = 'N°';
+            ws.getCell(r, 11).font = { bold: true, size: 9 };
             ws.getCell(r, 12).value = String(numeroCorrelativo).padStart(3, '0');
             r += 2;
 
@@ -3854,47 +3928,136 @@ const COMISIONES = {
             ws.mergeCells(r, 1, r, NUM_COLS);
             cNombre.value = 'NOMBRE - RAZÓN SOCIAL DEL USUARIO DE AGUA: ' + comisionNombre;
             cNombre.font = { size: 9, bold: true };
+            cNombre.border = BORDE_COMPLETO;
             r += 2;
 
-            filaTexto(1, 6, '1) USUARIO:  AGRARIO');
-            filaTexto(7, 14, 'TOMA - SECTOR: ' + tomaNombre);
-            ws.getRow(r).font = { bold: true, size: 10 };
-            r += 2;
+            const cUsuarioAgrario = ws.getCell(r, 1);
+            ws.mergeCells(r, 1, r, 6);
+            cUsuarioAgrario.value = '1) USUARIO:  AGRARIO';
+            ws.mergeCells(r, 7, r, 14);
+            ws.getCell(r, 7).value = 'TOMA - SECTOR: ' + tomaNombre;
+            for (let c = 1; c <= NUM_COLS; c++) {
+                ws.getCell(r, c).fill = FILL_AZUL;
+                ws.getCell(r, c).font = { bold: true, size: 10 };
+            }
+            r++;
 
-            const areaBajoRiego = filasSiembraToma.reduce((suma, reg) => {
-                const cultivos = Array.isArray(reg.cultivos) ? reg.cultivos : [];
-                return suma + cultivos.reduce((s, c) => s + (parseFloat(c.area) || 0), 0);
-            }, 0);
+            // "Área bajo riego" es el total real de la toma (padrón A-1,
+            // todos los usuarios) — no la suma de lo declarado en el DIS,
+            // que suele ser menor (no todos declaran cada campaña). Mismo
+            // criterio que muestran los dos Formato E-4.1 reales ya
+            // firmados (52.2 ha en SD14.1 con solo 47 ha declaradas; 410 ha
+            // en SD8 con solo 253 ha declaradas).
+            const areaBajoRiegoToma = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
             filaTexto(1, 2, 'Unidad catastral:');
-            filaTexto(3, 5, 'Área bajo riego (ha): ' + areaBajoRiego.toFixed(2));
+            filaTexto(3, 6, 'Área bajo riego (ha): ' + areaBajoRiegoToma.toFixed(1));
             filaTexto(7, 9, 'Canal Secundario:');
-            filaTexto(11, 14, 'Nombre del bloque de riego: ' + (obtenerBloqueDeToma(tomaNombre) || '—'));
+            filaTexto(10, 14, 'Nombre del bloque de riego: ' + (obtenerBloqueDeToma(tomaNombre) || '—'));
             r += 2;
 
-            // Fuente de agua / derecho — agregado desde el Padrón A-1
-            // (volumen_m3, clase_derecho) y el padrón operativo (tipo de
-            // riego mayoritario). Simplificado a una sola fila de datos
-            // (columnas 1-6) en vez de replicar la grilla de checkboxes del
-            // original — el dato importa más que el formato exacto de la
-            // casilla.
             const volumenHm3 = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.volumen_m3) || 0), 0) / 1e6;
             const claseDerecho = (filasPadronA1Toma.find((f) => f.clase_derecho) || {}).clase_derecho || '-';
-            ['TIPO', 'NOMBRE FUENTE', 'CLASE DE DERECHO', 'RESOLUCIÓN', 'VOLUMEN (Hm3)', 'TIPO DE RIEGO'].forEach((texto, idx) => {
-                const c = ws.getCell(r, idx + 1);
-                c.value = texto;
-                _estiloEncabezadoTablaOficial(c);
-            });
+            const tipoRiegoEtiqueta = _tipoRiegoEtiqueta(tipoRiegoDominante);
+
+            const rGrupoFuente = r;
+            ws.mergeCells(rGrupoFuente, 1, rGrupoFuente, 2);
+            ws.getCell(rGrupoFuente, 1).value = 'FUENTE DE AGUA';
+            ws.mergeCells(rGrupoFuente, 3, rGrupoFuente, 5);
+            ws.getCell(rGrupoFuente, 3).value = 'ASIGNACIÓN';
+            ws.mergeCells(rGrupoFuente, 6, rGrupoFuente, 14);
+            ws.getCell(rGrupoFuente, 6).value = 'TIPO DE RIEGO (MARCAR CON X)';
             r++;
-            _escribirFilaDatos(ws, r, 6, ['SUPERFICIAL', 'Rio Chira', claseDerecho, '', volumenHm3.toFixed(3), tipoRiegoDominante || '-']);
-            r += 2;
+            const rColFuente = r;
+            ['TIPO', 'NOMBRE', 'CLASE DE DERECHO\nDE USO DE AGUA', 'RESOLUCIÓN\nADMINISTRATIVA', 'VOLUMEN\n(Hm³)'].forEach((texto, idx) => {
+                ws.getCell(rColFuente, idx + 1).value = texto;
+            });
+            for (let c = 1; c <= NUM_COLS; c++) {
+                _estiloEncabezadoTablaOficial(ws.getCell(rGrupoFuente, c));
+                _estiloEncabezadoTablaOficial(ws.getCell(rColFuente, c));
+            }
+            ws.getRow(rGrupoFuente).height = 18;
+            ws.getRow(rColFuente).height = 26;
+            r++;
 
-            _escribirTituloSeccionE41(ws, r, NUM_COLS, 'DECLARACIÓN DE INTENCIÓN DE SIEMBRA'); r += 2;
+            const rDatosFuente = r;
+            ws.getCell(rDatosFuente, 1).value = 'SUPERFICIAL';
+            ws.getCell(rDatosFuente, 2).value = 'Rio Chira';
+            ws.getCell(rDatosFuente, 3).value = claseDerecho;
+            ws.getCell(rDatosFuente, 5).value = volumenHm3.toFixed(3);
+            ws.getCell(rDatosFuente + 1, 1).value = 'SUBTERRÁNEA';
+            ws.getCell(rDatosFuente + 2, 1).value = 'TOTAL';
+            ws.getCell(rDatosFuente + 2, 5).value = volumenHm3.toFixed(3);
+            ws.getCell(rDatosFuente + 2, 5).fill = FILL_TOTAL;
+            for (let rr = rDatosFuente; rr <= rDatosFuente + 2; rr++) {
+                for (let c = 1; c <= 5; c++) {
+                    const celda = ws.getCell(rr, c);
+                    celda.border = BORDE_COMPLETO;
+                    celda.font = { size: 9 };
+                    celda.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                }
+            }
+            ['GRAVEDAD', 'ASPERSIÓN', 'GOTEO', 'OTRO:'].forEach((etiqueta, idx) => {
+                const rr = rDatosFuente + idx;
+                ws.mergeCells(rr, 6, rr, 12);
+                ws.getCell(rr, 6).value = etiqueta;
+                ws.getCell(rr, 6).border = BORDE_COMPLETO;
+                ws.getCell(rr, 6).font = { size: 9 };
+                ws.mergeCells(rr, 13, rr, 14);
+                const cMarca = ws.getCell(rr, 13);
+                cMarca.border = BORDE_COMPLETO;
+                cMarca.alignment = { horizontal: 'center' };
+                if (tipoRiegoEtiqueta && etiqueta.indexOf(tipoRiegoEtiqueta) === 0) cMarca.value = 'X';
+            });
+            r = rDatosFuente + 4;
 
-            // Un cultivo real por fila (no agrupado por categoría), área
-            // sumada entre todos los usuarios confirmados de la toma —
-            // fecha de siembra/cosecha/período/módulo desde la tabla de
-            // referencia (assets/core/modulosRiego.js), NO declarados por
-            // usuario (ver justificación en el plan).
+            const rTituloDis = r;
+            ws.mergeCells(rTituloDis, 1, rTituloDis, NUM_COLS);
+            ws.getCell(rTituloDis, 1).value = 'DECLARACIÓN DE INTENCIÓN DE SIEMBRA';
+            ws.getCell(rTituloDis, 1).font = { bold: true, size: 10 };
+            ws.getCell(rTituloDis, 1).alignment = { horizontal: 'center' };
+            r++;
+
+            ws.mergeCells(r, 1, r, 6);
+            ws.getCell(r, 1).value = 'PARA SER LLENADO POR EL USUARIO DECLARANTE';
+            ws.mergeCells(r, 7, r, 14);
+            ws.getCell(r, 7).value = 'PARA SER LLENADO POR EL OPERADOR HIDRÁULICO';
+            for (let c = 1; c <= NUM_COLS; c++) _estiloEncabezadoTablaOficial(ws.getCell(r, c));
+            r++;
+            ws.mergeCells(r, 1, r, 6);
+            ws.getCell(r, 1).value = 'DECLARACIÓN DE INTENCIÓN DE SIEMBRA [DIS]';
+            ws.mergeCells(r, 7, r, 14);
+            ws.getCell(r, 7).value = 'PLAN DE CULTIVO APROBADO [PC]';
+            for (let c = 1; c <= NUM_COLS; c++) _estiloEncabezadoTablaOficial(ws.getCell(r, c));
+            r++;
+
+            const rGrupoCols = r;
+            ws.mergeCells(rGrupoCols, 1, rGrupoCols + 1, 1);
+            ws.getCell(rGrupoCols, 1).value = 'CULTIVO / VARIEDAD';
+            ws.mergeCells(rGrupoCols, 2, rGrupoCols + 1, 2);
+            ws.getCell(rGrupoCols, 2).value = 'ÁREA [ha]';
+            ws.mergeCells(rGrupoCols, 3, rGrupoCols, 5);
+            ws.getCell(rGrupoCols, 3).value = 'FECHA SIEMBRA';
+            ws.mergeCells(rGrupoCols, 6, rGrupoCols + 1, 6);
+            ws.getCell(rGrupoCols, 6).value = 'PERÍODO\nVEGETATIVO\n(MES)';
+            ws.mergeCells(rGrupoCols, 7, rGrupoCols + 1, 7);
+            ws.getCell(rGrupoCols, 7).value = 'ÁREA [ha]';
+            ws.mergeCells(rGrupoCols, 8, rGrupoCols, 10);
+            ws.getCell(rGrupoCols, 8).value = 'FECHA SIEMBRA';
+            ws.mergeCells(rGrupoCols, 11, rGrupoCols + 1, 11);
+            ws.getCell(rGrupoCols, 11).value = 'PERÍODO\nVEGETATIVO\n(MES)';
+            ws.mergeCells(rGrupoCols, 12, rGrupoCols, 14);
+            ws.getCell(rGrupoCols, 12).value = 'FECHA COSECHA';
+            r++;
+            ['d', 'm', 'a'].forEach((etq, idx) => { ws.getCell(r, 3 + idx).value = etq; });
+            ['d', 'm', 'a'].forEach((etq, idx) => { ws.getCell(r, 8 + idx).value = etq; });
+            ['d', 'm', 'a'].forEach((etq, idx) => { ws.getCell(r, 12 + idx).value = etq; });
+            for (let c = 1; c <= NUM_COLS; c++) {
+                _estiloEncabezadoTablaOficial(ws.getCell(rGrupoCols, c));
+                _estiloEncabezadoTablaOficial(ws.getCell(r, c));
+            }
+            ws.getRow(rGrupoCols).height = 26;
+            r++;
+
             const areaPorCultivo = new Map();
             filasSiembraToma.forEach((reg) => {
                 (Array.isArray(reg.cultivos) ? reg.cultivos : []).forEach((c) => {
@@ -3905,59 +4068,148 @@ const COMISIONES = {
                 });
             });
 
-            ['CULTIVO / VARIEDAD', 'ÁREA [ha]', 'FECHA SIEMBRA', 'PERÍODO VEGETATIVO (MES)', 'FECHA COSECHA', 'MÓDULO RIEGO [m³/ha]', 'DEMANDA DE AGUA [hm³]'].forEach((texto, idx) => {
+            let areaTotalCultivos = 0;
+            let demandaTotalHm3 = 0;
+            let hayCultivosSinReferencia = false;
+            const anioSiembra = 2026;
+            const filasCultivoAprobado = []; // para la tabla CULTIVO APROBADO de más abajo
+            Array.from(areaPorCultivo.entries()).forEach(([cultivo, area]) => {
+                const ref = obtenerReferenciaCultivo(cultivo);
+                areaTotalCultivos += area;
+                const valores = ref
+                    ? [cultivo, area.toFixed(2), ref.siembraDia, ref.siembraMes, anioSiembra, ref.periodoMeses,
+                       area.toFixed(2), ref.siembraDia, ref.siembraMes, anioSiembra, ref.periodoMeses]
+                    : [cultivo, area.toFixed(2), '—', '—', '—', '—', area.toFixed(2), '—', '—', '—', '—'];
+                if (ref) {
+                    const cosecha = calcularFechaCosecha(ref.siembraDia, ref.siembraMes, anioSiembra, ref.periodoMeses);
+                    valores.push(cosecha.dia, cosecha.mes, cosecha.anio);
+                    const demanda = calcularDemandaHm3(ref, area);
+                    demandaTotalHm3 += demanda;
+                    filasCultivoAprobado.push({ cultivo, area, moduloM3Ha: ref.moduloM3Ha, demanda });
+                } else {
+                    hayCultivosSinReferencia = true;
+                    valores.push('—', '—', '—');
+                    filasCultivoAprobado.push({ cultivo, area, moduloM3Ha: null, demanda: 0 });
+                }
+                valores.forEach((val, idx) => {
+                    const celda = ws.getCell(r, idx + 1);
+                    celda.value = (val === null || val === undefined) ? '' : val;
+                    celda.border = BORDE_COMPLETO;
+                    celda.font = { size: 9 };
+                    celda.alignment = { vertical: 'middle', horizontal: (idx === 0) ? 'left' : 'center', wrapText: idx === 0 };
+                });
+                r++;
+            });
+            ws.mergeCells(r, 1, r, 2);
+            ws.getCell(r, 1).value = 'TOTAL';
+            ws.getCell(r, 2).value = areaTotalCultivos.toFixed(2);
+            ws.mergeCells(r, 7, r, 7);
+            ws.getCell(r, 7).value = areaTotalCultivos.toFixed(2);
+            for (let c = 1; c <= NUM_COLS; c++) {
+                const celda = ws.getCell(r, c);
+                celda.border = BORDE_COMPLETO;
+                celda.font = { bold: true, size: 9 };
+                celda.alignment = { horizontal: 'center' };
+                celda.fill = FILL_TOTAL;
+            }
+            r += 2;
+
+            const rEncabezadoAprobado = r;
+            ['CULTIVO APROBADO', 'ÁREA [ha]', 'MÓDULO RIEGO [m²/ha]', 'DEMANDA DE AGUA [hm³]'].forEach((texto, idx) => {
                 const c = ws.getCell(r, idx + 1);
                 c.value = texto;
                 _estiloEncabezadoTablaOficial(c);
             });
             r++;
-
-            let areaTotalCultivos = 0;
-            let demandaTotalHm3 = 0;
-            let hayCultivosSinReferencia = false;
-            const anioSiembra = 2026;
-            Array.from(areaPorCultivo.entries()).forEach(([cultivo, area]) => {
-                const ref = obtenerReferenciaCultivo(cultivo);
-                areaTotalCultivos += area;
-                if (ref) {
-                    const cosecha = calcularFechaCosecha(ref.siembraDia, ref.siembraMes, anioSiembra, ref.periodoMeses);
-                    const demanda = calcularDemandaHm3(ref, area);
-                    demandaTotalHm3 += demanda;
-                    _escribirFilaDatos(ws, r, 7, [
-                        cultivo, area.toFixed(2),
-                        ref.siembraDia + '/' + ref.siembraMes + '/' + anioSiembra,
-                        ref.periodoMeses,
-                        cosecha.dia + '/' + cosecha.mes + '/' + cosecha.anio,
-                        ref.moduloM3Ha, demanda.toFixed(5),
-                    ]);
-                } else {
-                    hayCultivosSinReferencia = true;
-                    _escribirFilaDatos(ws, r, 7, [cultivo, area.toFixed(2), '—', '—', '—', 'SIN REFERENCIA', '—']);
-                }
+            filasCultivoAprobado.forEach((fila) => {
+                _escribirFilaDatos(ws, r, 4, [fila.cultivo, fila.area.toFixed(2), fila.moduloM3Ha || 'SIN REFERENCIA', fila.demanda.toFixed(2)]);
                 r++;
             });
-            _escribirFilaDatos(ws, r, 7, ['TOTAL', areaTotalCultivos.toFixed(2), '', '', '', '', demandaTotalHm3.toFixed(5)]);
-            ws.getRow(r).font = { bold: true, size: 9 };
+            ws.getCell(r, 1).value = 'TOTAL';
+            ws.getCell(r, 2).value = areaTotalCultivos.toFixed(2);
+            ws.getCell(r, 3).value = filasCultivoAprobado.reduce((s, f) => s + (parseFloat(f.moduloM3Ha) || 0) * 0, 0) || '';
+            ws.getCell(r, 4).value = demandaTotalHm3.toFixed(2);
+            for (let c = 1; c <= 4; c++) {
+                const celda = ws.getCell(r, c);
+                celda.border = BORDE_COMPLETO;
+                celda.font = { bold: true, size: 9 };
+                celda.alignment = { horizontal: 'center' };
+                celda.fill = FILL_TOTAL;
+            }
+
+            const sectorista = _obtenerSectoristaPorToma(tomaNombre);
+            const idImgSello = wb.addImage({ buffer: imagenes[sectorista.imagenClave].buffer, extension: imagenes[sectorista.imagenClave].extension });
+            ws.addImage(idImgSello, { tl: { col: 8, row: rEncabezadoAprobado - 1 }, ext: { width: 145, height: 76 } });
             r += 2;
 
             if (hayCultivosSinReferencia) {
                 const cAviso = ws.getCell(r, 1);
                 ws.mergeCells(r, 1, r, NUM_COLS);
                 cAviso.value = '⚠️ Hay cultivos declarados sin módulo de riego de referencia — revisar y completar manualmente.';
-                cAviso.font = { italic: true, size: 9, color: { argb: 'FFC0392B' } };
+                cAviso.font = { italic: true, size: 9, color: ROJO };
                 r += 2;
             }
 
+            const rTitulo3 = r;
+            ws.mergeCells(rTitulo3, 1, rTitulo3, NUM_COLS);
+            ws.getCell(rTitulo3, 1).value = '3) VOLUMEN DE AGUA TOTAL AUTORIZADO (Hm³) / USUARIO AGRARIO O USUARIO NO AGRARIO';
+            ws.getCell(rTitulo3, 1).font = { bold: true, size: 10 };
+            ws.getCell(rTitulo3, 1).alignment = { horizontal: 'center' };
+            r++;
+
+            const rEncMeses = r;
+            const meses = ['AGO', 'SET', 'OCT', 'NOV', 'DIC', 'ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL'];
+            ws.getCell(rEncMeses, 1).value = 'TIPO DE FUENTE';
+            meses.forEach((mes, idx) => { ws.getCell(rEncMeses, 2 + idx).value = mes; });
+            ws.getCell(rEncMeses, 14).value = 'VOLUMEN TOTAL\nAUTORIZADO (hm³)';
+            for (let c = 1; c <= NUM_COLS; c++) _estiloEncabezadoTablaOficial(ws.getCell(rEncMeses, c));
+            ws.getRow(rEncMeses).height = 28;
+            r++;
+
+            // Este cuadro depende de una asignación mensual que ANA/la Junta
+            // define por toma (no se deriva de los cultivos declarados —
+            // verificado contra los Formato E-4.1 reales: el total no
+            // cuadra con la demanda calculada arriba) — queda para llenado
+            // manual, igual que en el formato oficial en blanco.
+            [
+                ['SUPERFICIAL (Hm³)', false],
+                ['SUBTERRÁNEA (Hm³)', false],
+                ['TOTAL (Hm³) Demanda neta', true],
+                ['TOTAL (m³/seg)', false],
+                ['TOTAL (Hm³) Demanda Bruta', true],
+            ].forEach(([etiqueta, resaltado]) => {
+                ws.getCell(r, 1).value = etiqueta;
+                for (let c = 1; c <= NUM_COLS; c++) {
+                    const celda = ws.getCell(r, c);
+                    celda.border = BORDE_COMPLETO;
+                    celda.font = { size: 9, bold: resaltado, color: etiqueta.indexOf('Bruta') !== -1 ? ROJO : undefined };
+                    celda.alignment = { horizontal: c === 1 ? 'left' : 'center' };
+                }
+                r++;
+            });
+            DIAS_POR_MES_E41.forEach((dias, idx) => {
+                const celda = ws.getCell(r, 2 + idx);
+                celda.value = dias;
+                celda.font = { size: 8, italic: true };
+                celda.alignment = { horizontal: 'center' };
+            });
+            r += 2;
+
+            filaTexto(1, 6, '_____________________');
+            r++;
+            const idImgFirma = wb.addImage({ buffer: imagenes.firmaJosephReyes.buffer, extension: imagenes.firmaJosephReyes.extension });
+            ws.addImage(idImgFirma, { tl: { col: 3.5, row: r - 4.3 }, ext: { width: 170, height: 132 } });
+            r += 3;
+            filaTexto(1, 14, 'Aprobado por Jefe de Sub Sector de la CUSSHMI').alignment = { horizontal: 'center' };
+            r++;
+            const cIngNombre = filaTexto(1, 14, 'ING. JOSEPH JUNIOR REYES MAURICIO', { bold: true });
+            cIngNombre.alignment = { horizontal: 'center' };
+            r += 2;
+
             const cNota = ws.getCell(r, 1);
             ws.mergeCells(r, 1, r, NUM_COLS);
-            cNota.value = '2) Usuario no agrario y 3) Volumen de agua total autorizado (mensual): completar manualmente.';
+            cNota.value = 'Nota: Para los usuarios con sistema de abastecimiento de agua propio irá la firma de la ALA y para los usuarios que reciben el Servicio del Operador, irá la firma del Operador (' + sectorista.nombre + ', sectorista de riego).';
             cNota.font = { italic: true, size: 8, color: { argb: 'FF666666' } };
-            r += 3;
-
-            filaTexto(1, 5, '_____________________');
-            r++;
-            filaTexto(1, 5, 'Aprobado por Jefe de Sub Sector de la CUSSHMI');
-            r += 3;
 
             return ws;
         }
@@ -3986,6 +4238,7 @@ const COMISIONES = {
                 const fecha = new Date().toISOString().split('T')[0];
                 const padronA1 = resultadoPadronA1.ok ? resultadoPadronA1.resultados : [];
 
+                const imagenesE41 = await _cargarImagenesE41();
                 const porToma = _agruparPorToma(resultadoSiembra.registros);
                 const wb = new ExcelJS.Workbook();
                 let correlativo = 1;
@@ -3998,7 +4251,7 @@ const COMISIONES = {
                     const tipoRiegoDominante = Object.keys(conteoTipoRiego).sort((a, b) => conteoTipoRiego[b] - conteoTipoRiego[a])[0] || '';
 
                     const filasPadronA1Toma = padronA1.filter((f) => f.toma_nombre === toma);
-                    construirHojaE41(wb, toma, filas, filasPadronA1Toma, tipoRiegoDominante, comisionNombre, correlativo);
+                    construirHojaE41(wb, toma, filas, filasPadronA1Toma, tipoRiegoDominante, comisionNombre, correlativo, imagenesE41);
                     correlativo++;
                 }
                 await _descargarWorkbook(wb, `Formato_E41_${comisionKey}_${fecha}.xlsx`);
