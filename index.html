@@ -4449,8 +4449,15 @@ const COMISIONES = {
         }
 
         function _esperarRepintadoE41() {
+            // requestAnimationFrame nunca se dispara si la pestaña queda en
+            // segundo plano (el usuario cambia de pestaña/app mientras
+            // espera la exportación) — un setTimeout de respaldo evita que
+            // la exportación se quede colgada indefinidamente en ese caso.
             return new Promise((resolve) => {
-                requestAnimationFrame(() => requestAnimationFrame(resolve));
+                let listo = false;
+                const continuar = () => { if (!listo) { listo = true; resolve(); } };
+                requestAnimationFrame(() => requestAnimationFrame(continuar));
+                setTimeout(continuar, 150);
             });
         }
 
@@ -4471,28 +4478,15 @@ const COMISIONES = {
             if (btn) { btn.disabled = true; btn.textContent = '📊 Generando…'; }
 
             let contenedor = null;
+            let overlay = null;
             try {
                 const datos = await _recopilarDatosExportE41();
                 if (!datos.ok) { alert(datos.error); return; }
                 const { comisionKey, comisionNombre, tomaFiltro, usuarioFiltro, registrosFiltrados, padronA1 } = datos;
                 const fecha = new Date().toISOString().split('T')[0];
 
-                const porToma = _agruparPorToma(registrosFiltrados);
-                let paginasHtml = '';
-                let correlativo = 1;
-                for (const { toma, filas } of porToma) {
-                    if (toma === 'SIN TOMA IDENTIFICADA') continue;
-                    const { filasPadronA1Toma, tipoRiego, usuarioNombre } = await _prepararTomaE41(comisionKey, toma, filas, padronA1, comisionNombre);
-                    const datosCalc = calcularDatosE41(toma, filas, filasPadronA1Toma, tipoRiego, usuarioNombre, correlativo);
-                    const paginaHtml = _construirAnexoE41Pagina(datosCalc, 'assets/img/e41/');
-                    // Cada toma nueva empieza en una página de PDF distinta,
-                    // salvo la primera.
-                    paginasHtml += correlativo > 1
-                        ? paginaHtml.replace('class="e41-pagina"', 'class="e41-pagina" style="page-break-before:always;"')
-                        : paginaHtml;
-                    correlativo++;
-                }
-                if (!paginasHtml) { alert('No hay tomas para exportar.'); return; }
+                const porToma = _agruparPorToma(registrosFiltrados).filter((t) => t.toma !== 'SIN TOMA IDENTIFICADA');
+                if (!porToma.length) { alert('No hay tomas para exportar.'); return; }
 
                 // El contenedor va en el flujo normal del documento (nunca
                 // position:fixed/absolute) — comprobado con html2canvas en
@@ -4501,39 +4495,79 @@ const COMISIONES = {
                 // sea correcto; en flujo normal captura bien. Se cubre con
                 // un overlay para que no se vea el contenido "saltar" en la
                 // pantalla mientras se genera.
-                const overlay = document.createElement('div');
+                overlay = document.createElement('div');
                 overlay.style.cssText = 'position:fixed; inset:0; background:#fff; z-index:99998;';
                 document.body.appendChild(overlay);
                 contenedor = document.createElement('div');
                 contenedor.style.cssText = 'position:relative; z-index:99999; background:#fff;';
-                contenedor.innerHTML = _estilosAnexoE41() + paginasHtml;
                 document.body.appendChild(contenedor);
-                contenedor._overlayE41 = overlay;
-                await _esperarImagenesListasE41(contenedor);
-                await _esperarRepintadoE41();
+
+                // Cada toma se dibuja a mano como UNA página completa (nunca
+                // se deja que el paginado automático de html2pdf decida):
+                // se captura su canvas por separado y se coloca centrada
+                // horizontal y verticalmente en la hoja A4, escalada para
+                // que quepa entera sin cortarse — mismo criterio "una hoja
+                // por toma" ya usado en el Excel.
+                let pdf = null;
+                let correlativo = 1;
+                for (const { toma, filas } of porToma) {
+                    const { filasPadronA1Toma, tipoRiego, usuarioNombre } = await _prepararTomaE41(comisionKey, toma, filas, padronA1, comisionNombre);
+                    const datosCalc = calcularDatosE41(toma, filas, filasPadronA1Toma, tipoRiego, usuarioNombre, correlativo);
+                    const paginaHtml = _construirAnexoE41Pagina(datosCalc, 'assets/img/e41/');
+                    contenedor.innerHTML = _estilosAnexoE41() + paginaHtml;
+                    await _esperarImagenesListasE41(contenedor);
+                    await _esperarRepintadoE41();
+
+                    const worker = html2pdf().set({
+                        margin: 5,
+                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                        // width/windowWidth explícitos: sin esto, html2canvas
+                        // captura con el ancho de página (~756px) en vez del
+                        // ancho real del contenedor, cortando las columnas
+                        // de la derecha de la tabla.
+                        html2canvas: { scale: 2, useCORS: true, width: contenedor.scrollWidth, windowWidth: contenedor.scrollWidth },
+                    }).from(contenedor);
+                    const canvas = await worker.toCanvas().get('canvas');
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+                    if (!pdf) {
+                        // Página 1 real: se obtiene la instancia jsPDF a
+                        // partir de una hoja semilla en blanco (10x10px) en
+                        // vez de dejar que toPdf() procese el contenido real
+                        // — así se garantiza 1 sola página aunque el
+                        // contenido sea más alto de lo esperado (el
+                        // paginado automático de html2pdf podría partirlo
+                        // en 2+ páginas antes de que lo reescalemos acá).
+                        const seed = document.createElement('div');
+                        seed.style.cssText = 'width:10px;height:10px;';
+                        document.body.appendChild(seed);
+                        pdf = await html2pdf().set({ margin: 5, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } }).from(seed).toPdf().get('pdf');
+                        document.body.removeChild(seed);
+                    } else {
+                        pdf.addPage();
+                    }
+
+                    const pageWmm = pdf.internal.pageSize.getWidth();
+                    const pageHmm = pdf.internal.pageSize.getHeight();
+                    const margenMm = 5;
+                    const usableWmm = pageWmm - margenMm * 2;
+                    const usableHmm = pageHmm - margenMm * 2;
+                    const pxAMm = 25.4 / 96 / 2; // /2 porque scale:2 duplicó los píxeles
+                    let wMm = canvas.width * pxAMm;
+                    let hMm = canvas.height * pxAMm;
+                    const factorEscala = Math.min(usableWmm / wMm, usableHmm / hMm);
+                    wMm *= factorEscala; hMm *= factorEscala;
+                    const x = margenMm + (usableWmm - wMm) / 2;
+                    const y = margenMm + (usableHmm - hMm) / 2;
+                    pdf.addImage(imgData, 'JPEG', x, y, wMm, hMm);
+
+                    correlativo++;
+                }
 
                 let sufijoArchivo = comisionKey;
                 if (usuarioFiltro) sufijoArchivo = normalizarTextoHeader(usuarioFiltro).replace(/\s+/g, '_');
                 else if (tomaFiltro) sufijoArchivo = tomaFiltro.replace(/[^A-Za-z0-9.]+/g, '_');
-
-                await html2pdf().set({
-                    margin: 5,
-                    filename: `Formato_E41_${sufijoArchivo}_${fecha}.pdf`,
-                    // width/windowWidth explícitos: sin esto, html2canvas
-                    // captura con el ancho de página (~756px) en vez del
-                    // ancho real del contenedor, cortando las columnas de
-                    // la derecha de la tabla (bug ya confirmado: canvas de
-                    // 1512px de ancho contra un contenedor de 1770px reales
-                    // a scale:2). Con el ancho real, jsPDF sigue escalando
-                    // la imagen completa para que quepa en el ancho de
-                    // página, solo que ahora sin perder la parte derecha.
-                    html2canvas: { scale: 2, useCORS: true, width: contenedor.scrollWidth, windowWidth: contenedor.scrollWidth },
-                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                    // 'legacy' es el que corta automáticamente el contenido
-                    // que se pasa de una página (sin él, lo que sobra queda
-                    // cortado en vez de continuar en una página siguiente).
-                    pagebreak: { mode: ['css', 'legacy'] },
-                }).from(contenedor).save();
+                pdf.save(`Formato_E41_${sufijoArchivo}_${fecha}.pdf`);
 
                 alert('✅ Exportado el Formato E-4.1 (PDF) con ' + (correlativo - 1) + ' toma(s).\n\n' +
                     'La sección de usuario no agrario queda en blanco para completar manualmente — el volumen mensual autorizado ya se calcula solo.');
@@ -4541,10 +4575,8 @@ const COMISIONES = {
                 console.error('Error al exportar Formato E-4.1 en PDF:', e);
                 alert('No se pudo generar el PDF: ' + (e.message || e));
             } finally {
-                if (contenedor) {
-                    if (contenedor._overlayE41) document.body.removeChild(contenedor._overlayE41);
-                    document.body.removeChild(contenedor);
-                }
+                if (overlay) document.body.removeChild(overlay);
+                if (contenedor) document.body.removeChild(contenedor);
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
             }
         }

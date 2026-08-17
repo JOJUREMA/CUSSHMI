@@ -168,9 +168,9 @@ function _construirAnexoE41Pagina(datos, rutaImagenes) {
     const fecha = new Date().toLocaleDateString('es-PE');
 
     const filasDisHtml = d.filasDIS.map((f) => {
-        const fs = f.fechaSiembra ? (f.fechaSiembra.d + '</td><td class="e41-centrado">' + f.fechaSiembra.m + '</td><td class="e41-centrado">' + f.fechaSiembra.a) : '—</td><td class="e41-centrado">—</td><td class="e41-centrado">—';
+        const fs = f.fechaSiembra ? (f.fechaSiembra.d + '/' + f.fechaSiembra.m + '/' + f.fechaSiembra.a) : '—';
         const per = f.periodoMeses != null ? f.periodoMeses : '—';
-        const fc = f.fechaCosecha ? (f.fechaCosecha.dia + '</td><td class="e41-centrado">' + f.fechaCosecha.mes + '</td><td class="e41-centrado">' + f.fechaCosecha.anio) : '—</td><td class="e41-centrado">—</td><td class="e41-centrado">—';
+        const fc = f.fechaCosecha ? (f.fechaCosecha.dia + '/' + f.fechaCosecha.mes + '/' + f.fechaCosecha.anio) : '—';
         return '<tr>' +
             '<td class="e41-izq">' + escapeHtml(f.cultivo) + '</td>' +
             '<td class="e41-centrado">' + fmt2(f.area) + '</td>' +
