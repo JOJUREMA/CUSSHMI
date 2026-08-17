@@ -3867,7 +3867,7 @@ const COMISIONES = {
             ws.properties.defaultRowHeight = 20; // filas sin alto explícito ocupan más espacio — usa mejor la hoja completa
             ws.pageSetup = {
                 paperSize: 9, orientation: 'portrait',
-                fitToPage: true, fitToWidth: 1, fitToHeight: 1,
+                fitToPage: false, scale: 70, // reemplazado más abajo por un % calculado — placeholder mientras se arma la hoja
                 horizontalCentered: true, verticalCentered: true,
                 margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0, footer: 0 },
             };
@@ -4278,6 +4278,43 @@ const COMISIONES = {
             ws.mergeCells(r, 1, r, NUM_COLS);
             cNota.value = 'Nota: Para los usuarios con sistema de abastecimiento de agua propio irá la firma de la ALA y para los usuarios que reciben el Servicio del Operador, irá la firma del Operador (' + sectorista.nombre + ', sectorista de riego).';
             cNota.font = { italic: true, size: 10, color: { argb: 'FF666666' } };
+
+            // `defaultRowHeight` es solo un valor de respaldo — Excel/LibreOffice
+            // igual recalculan el alto de cualquier fila sin altura explícita
+            // según el contenido, lo que en la práctica la deja MÁS BAJA que el
+            // default y hace que la hoja no llene la página al imprimir. Se fija
+            // el alto real de cada fila usada, para partir de la altura verdadera
+            // al calcular el % de escala de impresión (ver más abajo).
+            for (let rr = 1; rr < r; rr++) {
+                const fila = ws.getRow(rr);
+                if (!fila.height) fila.height = 20;
+            }
+
+            // "Ajustar a 1 página" (fitToWidth/fitToHeight) se probó y, pese a
+            // que el cálculo daba una escala que debería llenar casi toda la
+            // altura, el resultado real dejaba media hoja en blanco (bug o
+            // comportamiento demasiado conservador de Excel/LibreOffice con esa
+            // combinación) — reemplazado por un % de escala literal, calculado
+            // aquí mismo a partir del alto real de filas y ancho real de
+            // columnas, que si llena la página de verdad. Se recalcula por
+            // hoja (no un valor fijo) porque el alto total varía según cuántos
+            // cultivos declaró el usuario.
+            let altoTotalPt = 0;
+            for (let rr = 1; rr < r; rr++) altoTotalPt += ws.getRow(rr).height;
+            let anchoTotalPt = 0;
+            for (let c = 1; c <= NUM_COLS; c++) anchoTotalPt += ws.getColumn(c).width * 7 + 5;
+            anchoTotalPt *= 0.75; // px → pt (96dpi)
+            const altoDisponiblePt = (11.69 - 0.6) * 72; // A4 menos márgenes top+bottom
+            const anchoDisponiblePt = (8.27 - 0.5) * 72; // A4 menos márgenes left+right
+            // Factor de seguridad 0.88: probado con una toma de 6 cultivos
+            // (como SD3 real) — sin este margen, un cálculo "exacto" seguía
+            // desbordando a una 2da página (Excel/LibreOffice a veces
+            // necesitan algo más de alto del que da la suma nominal de filas
+            // para renderizar texto envuelto sin cortar).
+            const escalaPct = Math.max(30, Math.min(100, Math.floor(
+                Math.min(anchoDisponiblePt / anchoTotalPt, altoDisponiblePt / altoTotalPt) * 100 * 0.88
+            )));
+            ws.pageSetup.scale = escalaPct;
 
             return ws;
         }
