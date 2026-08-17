@@ -3864,7 +3864,7 @@ const COMISIONES = {
             const NUM_COLS = 14;
             const nombreHoja = tomaNombre.length > 31 ? tomaNombre.slice(0, 31) : tomaNombre;
             const ws = wb.addWorksheet(nombreHoja, { views: [{ showGridLines: false }] });
-            for (let c = 1; c <= NUM_COLS; c++) ws.getColumn(c).width = 6.2;
+            for (let c = 1; c <= NUM_COLS; c++) ws.getColumn(c).width = 7.6;
             ws.pageSetup = {
                 paperSize: 9, orientation: 'portrait',
                 fitToPage: true, fitToWidth: 1, fitToHeight: 1,
@@ -4181,40 +4181,33 @@ const COMISIONES = {
             ws.getRow(rEncMeses).height = 28;
             r++;
 
-            // Autocompletado con la misma metodología del Excel real (hoja
-            // "MODULOS"): los cultivos permanentes (12 meses) reparten su
-            // demanda anual en partes iguales entre los 12 meses. Los de
-            // ciclo corto aportan solo en SU ventana natural de siembra
-            // (chica Ago-Dic o grande Ene-Jul, según ref.siembraMes) como
-            // un coeficiente mensual (curva de esa ventana, normalizada a
-            // que sume 1) multiplicado por la demanda anual YA duplicada
-            // (columna D — calcularDemandaHm3 ya aplica el factor ×2 de
-            // "replante") — verificado exacto contra la fórmula real de la
-            // hoja SD3 del Excel del usuario mes a mes (SORGO coincide con
-            // MODULOS!D34*F44 en Set-Dic y con 0 en Ene-Jul; no se replica
-            // el aporte plano de ARROZ en 7 meses de esa misma hoja porque,
-            // verificado a mano, sobrecuenta ~7× su demanda anual — es un
-            // artefacto de copiado en el Excel real, no un método a seguir).
-            const filasPermanentes = filasCultivoAprobado.filter((f) => f.ref && f.ref.periodoMeses === 12);
-            const filasCortas = filasCultivoAprobado.filter((f) => f.ref && f.ref.periodoMeses < 12);
-            const terminoPermanentes = filasPermanentes.length
-                ? '(' + filasPermanentes.map((f) => 'D' + f.filaHoja).join('+') + ')/12'
-                : '';
-            const terminosPorMes = Array.from({ length: 12 }, () => (terminoPermanentes ? [terminoPermanentes] : []));
-            filasCortas.forEach((f) => {
+            // Autocompletado con la curva mensual real del Anexo 05 (ver
+            // assets/core/modulosRiego.js, obtenerCurvaMensual): cada
+            // cultivo con curva reparte su demanda anual YA calculada
+            // (columna D) mes a mes según su propio coeficiente (curva de
+            // 12 meses normalizada a que sume 1) — se aplica igual a
+            // permanentes y a ciclo corto, ya que el Anexo 05 trae curva
+            // real para ambos. Un cultivo sin curva de referencia reparte
+            // su demanda en partes iguales entre los 12 meses (respaldo,
+            // no debería pasar salvo un cultivo nuevo sin Anexo 05 aún).
+            const terminosPorMes = Array.from({ length: 12 }, () => []);
+            const filasSinCurva = [];
+            filasCultivoAprobado.forEach((f) => {
+                if (!f.ref) return; // sin referencia — ya se avisa "SIN REFERENCIA" en la tabla, no aporta
                 const curva = obtenerCurvaMensual(f.cultivo);
-                if (!curva) return;
-                const enChica = f.ref.siembraMes >= 8;
-                const ventana = enChica ? curva.slice(0, 5) : curva.slice(5, 12);
-                const offset = enChica ? 0 : 5;
-                const total = ventana.reduce((s, v) => s + v, 0);
-                if (total <= 0) return;
-                ventana.forEach((v, idx) => {
+                if (!curva) { filasSinCurva.push(f); return; }
+                const total = curva.reduce((s, v) => s + v, 0);
+                if (total <= 0) { filasSinCurva.push(f); return; }
+                curva.forEach((v, m) => {
                     if (v <= 0) return;
                     const coef = v / total;
-                    terminosPorMes[offset + idx].push('(' + coef.toFixed(6) + '*D' + f.filaHoja + ')');
+                    terminosPorMes[m].push('(' + coef.toFixed(6) + '*D' + f.filaHoja + ')');
                 });
             });
+            if (filasSinCurva.length) {
+                const terminoFlat = '(' + filasSinCurva.map((f) => 'D' + f.filaHoja).join('+') + ')/12';
+                for (let m = 0; m < 12; m++) terminosPorMes[m].push(terminoFlat);
+            }
             const rSuperficial = r;
             for (let m = 0; m < 12; m++) {
                 const col = 2 + m;
