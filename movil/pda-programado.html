@@ -496,16 +496,26 @@
             try {
                 await esperarImagenesListas(contenedor);
                 await esperarRepintado();
+                var MARGEN_MM = 5;
+                // Página del tamaño real del contenido (+ margen) en vez de
+                // A4 fijo — con A4 fijo el formulario ocupaba solo ~51% del
+                // alto y ~53% del ancho de la hoja, dejando el resto en
+                // blanco (mismo problema reportado para el reporte de
+                // Condición del Usuario, corregido con el mismo criterio
+                // acá). A diferencia de un tamaño fijo tipo A5, esto se mide
+                // en vivo contra el contenido ya renderizado en ESTE
+                // dispositivo, así que nunca corta el formulario a media
+                // hoja sin importar el tamaño de fuente del celular — el
+                // motivo original por el que se había elegido A4 fijo.
+                var anchoPaginaMm = contenedor.offsetWidth * 25.4 / 96 + MARGEN_MM * 2;
+                var altoPaginaMm = contenedor.scrollHeight * 25.4 / 96 + MARGEN_MM * 2;
+                var esApaisado = anchoPaginaMm > altoPaginaMm;
                 var opciones = {
-                    margin: 5,
+                    margin: MARGEN_MM,
                     filename: g4Actual.nombreArchivo + '.pdf',
                     image: { type: 'jpeg', quality: 0.98 },
                     html2canvas: { scale: 2 },
-                    // a4 vertical en vez de a5 horizontal: da mucho más alto
-                    // disponible, para que el formulario nunca se corte a
-                    // media hoja (partiéndose en una segunda página) en
-                    // celulares con fuentes más grandes que el promedio.
-                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    jsPDF: { unit: 'mm', format: [anchoPaginaMm, altoPaginaMm], orientation: esApaisado ? 'landscape' : 'portrait' }
                 };
                 var blob = await html2pdf().set(opciones).from(contenedor).outputPdf('blob');
                 var archivo = new File([blob], g4Actual.nombreArchivo + '.pdf', { type: 'application/pdf' });

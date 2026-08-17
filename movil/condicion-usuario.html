@@ -444,12 +444,29 @@
             try {
                 await esperarImagenesListas(contenedor);
                 await esperarRepintado();
+                var MARGEN_MM = 5;
+                // Página del tamaño real del contenido (+ margen) en vez de
+                // A4 fijo: este reporte es una tarjeta corta (usuario
+                // individual) o una tabla de una toma, no un formulario
+                // oficial — con A4 fijo, la tarjeta corta dejaba casi toda
+                // la hoja en blanco debajo del contenido real (reportado
+                // por el usuario, con captura del PDF compartido). 96px =
+                // 25.4mm es la equivalencia estándar CSS px → mm.
+                var anchoPaginaMm = contenedor.offsetWidth * 25.4 / 96 + MARGEN_MM * 2;
+                var altoPaginaMm = contenedor.scrollHeight * 25.4 / 96 + MARGEN_MM * 2;
+                // La orientación debe coincidir con la forma real del
+                // contenido — pedir 'portrait' junto con un arreglo [ancho,
+                // alto] más ancho que alto hace que la librería INVIERTA el
+                // arreglo para forzar el portrait, dejando una página angosta
+                // y más alta que el contenido real (detectado al verificar
+                // este mismo arreglo antes de desplegarlo).
+                var esApaisado = anchoPaginaMm > altoPaginaMm;
                 var opciones = {
-                    margin: 5,
+                    margin: MARGEN_MM,
                     filename: nombreArchivo + '.pdf',
                     image: { type: 'jpeg', quality: 0.98 },
                     html2canvas: { scale: 2 },
-                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    jsPDF: { unit: 'mm', format: [anchoPaginaMm, altoPaginaMm], orientation: esApaisado ? 'landscape' : 'portrait' }
                 };
                 var blob = await html2pdf().set(opciones).from(contenedor).outputPdf('blob');
                 var archivo = new File([blob], nombreArchivo + '.pdf', { type: 'application/pdf' });
