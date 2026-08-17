@@ -41,6 +41,24 @@
             border-radius: 10px;
             margin: 10px 0;
         }
+        .chk-gis {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            max-width: 420px;
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .chk-gis input { width: 17px; height: 17px; cursor: pointer; }
+        .gis-popup table { border-collapse: collapse; font-size: 11px; margin-top: 4px; }
+        .gis-popup td { padding: 1px 6px 1px 0; vertical-align: top; }
+        .gis-popup td:first-child { color: #666; white-space: nowrap; }
         .foto-miniatura { display: inline-block; position: relative; margin: 6px; }
         .foto-miniatura img {
             width: 90px;
@@ -218,6 +236,11 @@
             <button class="boton-secundario" id="btnVolverAListaDesdeMapa" style="max-width:420px;">← Volver a la lista</button>
             <h1 id="tituloMapaInventario" style="margin-top:14px; font-size:16px;"></h1>
             <div class="estado-busqueda" id="estadoMapaInventario"></div>
+            <label class="chk-gis" for="chkCapaGis">
+                <input type="checkbox" id="chkCapaGis">
+                🛰️ Mostrar infraestructura real (GIS)
+            </label>
+            <div class="estado-busqueda" id="estadoCapaGis" style="display:none;"></div>
             <div id="mapaInventario"></div>
         </div>
 
@@ -887,12 +910,99 @@
             document.getElementById('tituloMapaInventario').textContent = nombreToma + ' — ' + FUNCIONES_POR_TIPO[tipoActual].etiquetaPlural;
             inicializarMapaInventarioSiHaceFalta();
             pintarMarcadoresInventario();
+            limpiarCapaGisInventario();
+            document.getElementById('chkCapaGis').checked = false;
+            document.getElementById('estadoCapaGis').style.display = 'none';
         }
 
         document.getElementById('btnVerMapaInventario').addEventListener('click', mostrarVistaMapaInventario);
         document.getElementById('btnVolverAListaDesdeMapa').addEventListener('click', function () {
             document.getElementById('vistaMapaInventario').style.display = 'none';
             document.getElementById('vistaLista').style.display = 'flex';
+        });
+
+        // ═══ Capa GIS real (KMZ del levantamiento) — geometría exacta tal
+        // cual el archivo GIS del usuario, superpuesta a los marcadores de
+        // Supabase de arriba (que usan la conversión UTM→lat/lon). Se carga
+        // bajo demanda (checkbox) para no descargar 1.3MB repartidos en 14
+        // archivos si nadie la pide. Cacheada en memoria por tipo — cambiar
+        // de toma dentro del mismo tipo no vuelve a descargar el JSON.
+        var capaGisCache = {}; // tipo → array de features ya parseado
+        var capaGisLayers = []; // leaflet layers actualmente pintados
+
+        function limpiarCapaGisInventario() {
+            capaGisLayers.forEach(function (l) { mapaInventarioLeaflet.removeLayer(l); });
+            capaGisLayers = [];
+        }
+
+        function _popupHtmlGis(nombre, campos) {
+            var filas = Object.keys(campos || {})
+                .filter(function (k) { return campos[k] !== '' && campos[k] != null; })
+                .map(function (k) { return '<tr><td>' + escapeHtml(k) + '</td><td>' + escapeHtml(campos[k]) + '</td></tr>'; })
+                .join('');
+            return '<div class="gis-popup"><b>🛰️ ' + escapeHtml(nombre || '(sin nombre)') + '</b>' +
+                (filas ? '<table>' + filas + '</table>' : '') + '</div>';
+        }
+
+        async function cargarCapaGisInventario() {
+            var tipo = tipoActual;
+            var elEstado = document.getElementById('estadoCapaGis');
+            elEstado.style.display = 'block';
+
+            if (!capaGisCache[tipo]) {
+                elEstado.textContent = 'Cargando infraestructura real (GIS)…';
+                try {
+                    var resp = await fetch('../mapas/inventario_gis/' + tipo + '.json');
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    capaGisCache[tipo] = await resp.json();
+                } catch (e) {
+                    elEstado.textContent = 'No se pudo cargar la capa GIS de este tipo: ' + e.message;
+                    return;
+                }
+            }
+
+            limpiarCapaGisInventario();
+            var esDren = (tipo === 'dren_principal' || tipo === 'dren_secundario');
+            var features = capaGisCache[tipo].filter(function (f) {
+                return esDren || f.toma === tomaSeleccionada;
+            });
+
+            if (!features.length) {
+                elEstado.textContent = esDren
+                    ? 'No hay ' + FUNCIONES_POR_TIPO[tipo].etiquetaPlural.toLowerCase() + ' en el archivo GIS.'
+                    : 'El archivo GIS no trae ' + FUNCIONES_POR_TIPO[tipo].etiquetaPlural.toLowerCase() + ' identificadas para esta toma.';
+                return;
+            }
+
+            features.forEach(function (f) {
+                if (f.geom && f.geom.type === 'Point') {
+                    var m = L.circleMarker(f.geom.coords, {
+                        radius: 6, color: '#ffffff', weight: 1, fillColor: '#00bcd4', fillOpacity: 0.9
+                    }).addTo(mapaInventarioLeaflet);
+                    m.bindPopup(_popupHtmlGis(f.nombre, f.campos));
+                    capaGisLayers.push(m);
+                } else if (f.geom && f.geom.type === 'LineString') {
+                    var linea = L.polyline(f.geom.coords, { color: '#00bcd4', weight: 3, opacity: 0.85 }).addTo(mapaInventarioLeaflet);
+                    linea.bindPopup(_popupHtmlGis(f.nombre, f.campos));
+                    capaGisLayers.push(linea);
+                }
+            });
+
+            elEstado.textContent = capaGisLayers.length + ' elemento(s) del levantamiento GIS' + (esDren ? ' (sin filtrar por toma)' : '') + '.';
+
+            var grupo = L.featureGroup(capaGisLayers.concat(marcadoresInventario));
+            if (grupo.getLayers().length) {
+                mapaInventarioLeaflet.fitBounds(grupo.getBounds(), { padding: [30, 30], maxZoom: 17 });
+            }
+        }
+
+        document.getElementById('chkCapaGis').addEventListener('change', function (e) {
+            if (e.target.checked) {
+                cargarCapaGisInventario();
+            } else {
+                limpiarCapaGisInventario();
+                document.getElementById('estadoCapaGis').style.display = 'none';
+            }
         });
 
         // ═══ Pantalla 4 — formulario ═══
