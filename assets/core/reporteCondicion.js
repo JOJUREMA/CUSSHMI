@@ -25,13 +25,22 @@ function estilosReporteCondicion() {
         .rc-header-titulo{font-weight:800;font-size:13px;letter-spacing:.4px;}
         .rc-header-sub{font-size:10.5px;color:#333;margin-top:2px;}
         .rc-meta{font-size:10.5px;color:#333;margin:8px 0 12px;line-height:1.5;}
-        .rc-badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:800;font-size:10.5px;letter-spacing:.4px;}
+        .rc-badge{display:inline-block;padding:3px 8px;border-radius:999px;font-weight:800;font-size:9px;letter-spacing:.2px;white-space:normal;}
         .rc-badge.con{background:#1e7e34;color:#fff;}
         .rc-badge.sin{background:#c0392b;color:#fff;}
         .rc-nombre{font-size:15px;font-weight:800;margin:2px 0;}
-        .rc-tabla{width:100%;border-collapse:collapse;font-size:10.5px;margin-top:8px;}
-        .rc-tabla th{background:#f0f0f0;text-align:left;padding:5px 6px;border:1px solid #ccc;font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;}
-        .rc-tabla td{padding:5px 6px;border:1px solid #ddd;}
+        /* table-layout:fixed + word-break: la tabla del reporte por toma
+           (5 columnas: Nombre/U.Catastral/Cultivos/Deuda/Condición) se
+           desbordaba del ancho del contenedor en pantallas de celular
+           angostas (confirmado: 370px de tabla contra 335px de
+           contenedor) — html2canvas captura solo el ancho del contenedor,
+           así que la columna de la derecha (Condición) quedaba recortada
+           en la imagen/PDF compartido. Con layout fijo, cada columna
+           respeta el ancho asignado abajo y el texto se envuelve en vez
+           de forzar la tabla más ancha que su contenedor. */
+        .rc-tabla{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:8px;table-layout:fixed;}
+        .rc-tabla th{background:#f0f0f0;text-align:left;padding:4px 5px;border:1px solid #ccc;font-size:8.5px;text-transform:uppercase;letter-spacing:.2px;overflow-wrap:break-word;}
+        .rc-tabla td{padding:4px 5px;border:1px solid #ddd;overflow-wrap:break-word;word-break:break-word;}
         .rc-tabla tr{page-break-inside:avoid;}
         .rc-deuda-total{color:#b30000;font-weight:800;}
         .rc-resumen-table{width:100%;border-collapse:collapse;margin:10px 0;font-size:10.5px;}
@@ -141,7 +150,13 @@ function construirReporteTomaHtml(datos) {
             </tr></table>
 
             <table class="rc-tabla">
-                <thead><tr><th>Nombre</th><th>U. Catastral</th><th>Cultivos</th><th>Deuda total</th><th>Condición</th></tr></thead>
+                <thead><tr>
+                    <th style="width:26%;">Nombre</th>
+                    <th style="width:16%;">U. Catastral</th>
+                    <th style="width:20%;">Cultivos</th>
+                    <th style="width:18%;">Deuda total</th>
+                    <th style="width:20%;">Condición</th>
+                </tr></thead>
                 <tbody>${filasHtml || '<tr><td colspan="5">Sin usuarios en este filtro.</td></tr>'}</tbody>
             </table>
 
