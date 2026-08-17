@@ -319,7 +319,5 @@ function _construirAnexoE41Pagina(datos, rutaImagenes) {
             <div style="font-size:10px; margin-top:2px;">Aprobado por Jefe de Sub Sector de la CUSSHMI</div>
             <div style="font-size:11px; font-weight:bold;">Ing. Joseph Junior Reyes Mauricio</div>
         </div>
-
-        <div class="e41-nota">Nota: Para los usuarios con sistema de abastecimiento de agua propio irá la firma de la ALA y para los usuarios que reciben el Servicio del Operador, irá la firma del Operador (${escapeHtml(d.sectorista.nombre)}, sectorista de riego).</div>
     </div>`;
 }
