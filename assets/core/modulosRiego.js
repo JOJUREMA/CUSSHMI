@@ -63,6 +63,47 @@ function obtenerReferenciaCultivo(nombreCultivo) {
     return REFERENCIA_CULTIVO[clave] || null;
 }
 
+// Curva de módulo mensual (m3/ha) por cultivo de ciclo corto, extraída tal
+// cual de la hoja "MODULOS" del Excel real (DIS COMISION MARGEN IZQUIERDA
+// .xlsx) — filas 6-23 (Campaña Chica: Ago-Dic) y columnas N-T (Campaña
+// Grande: Ene-Jul) de esa misma tabla, no una estimación. Solo cultivos de
+// ciclo corto (periodoMeses < 12) tienen curva — los permanentes (12
+// meses) usan la demanda ya calculada dividida entre 12 en partes iguales
+// (igual que hace el Excel real: SUM de sus demandas / 12, sin curva por
+// cultivo individual).
+const MODULOS_MENSUAL = {
+    ARROZ: { chica: [5000, 3500, 3500, 3000, 2000], grande: [0, 5000, 3500, 3500, 3000, 2000, 0] }, // Arroz Trasplante
+    MAIZ: { chica: [2100, 1900, 1600, 1400, 0], grande: [0, 2100, 1900, 1600, 1400, 0, 0] },
+    SORGO: { chica: [0, 2800, 2000, 2000, 1600], grande: [0, 0, 2400, 1600, 1600, 1400, 0] }, // Sorgo Escobero
+    'TUBEROSAS/MANÍ': { chica: [0, 2000, 1500, 1500, 1000], grande: [0, 0, 0, 2000, 1500, 1500, 1000] },
+    'MELON/SANDIA': { chica: [1500, 1850, 2000, 2000, 1850], grande: [0, 0, 1500, 1850, 2000, 2000, 1850] },
+    'AJI PAPRIKA': { chica: [1000, 1000, 1500, 1500, 1000], grande: [0, 2000, 2000, 2000, 2000, 2000, 2000] },
+    CEBOLLA: { chica: [0, 2500, 2000, 3000, 2500], grande: [0, 0, 0, 2500, 2000, 3000, 2500] },
+    'MENESTRAS/HORTALIZAS': { chica: [0, 1000, 2000, 2000, 1000], grande: [0, 0, 1000, 2000, 2000, 2000, 0] },
+    YUCA: { chica: [1300, 1300, 1300, 1300, 1300], grande: [0, 2000, 1300, 1300, 1300, 1300, 1300] },
+};
+// Alias — mismos cultivos que ya comparten entrada en REFERENCIA_CULTIVO.
+MODULOS_MENSUAL['SORGO ESCOBERO'] = MODULOS_MENSUAL.SORGO;
+MODULOS_MENSUAL['SORGO - MAIZ'] = MODULOS_MENSUAL.SORGO;
+MODULOS_MENSUAL.MELON = MODULOS_MENSUAL['MELON/SANDIA'];
+MODULOS_MENSUAL.SANDIA = MODULOS_MENSUAL['MELON/SANDIA'];
+MODULOS_MENSUAL.FRIJOL = MODULOS_MENSUAL['MENESTRAS/HORTALIZAS'];
+
+// Curva mensual [Ago..Jul] (12 valores) de m3/ha para un cultivo de ciclo
+// corto, o null si es permanente o no tiene curva de referencia. El
+// llamador (construirHojaE41, Sistema_Riego_CUSSHMI_14.html) usa solo la
+// mitad de esta curva que corresponde a la campaña de su fecha de siembra
+// (chica u grande, nunca ambas) como coeficiente normalizado a que sume 1,
+// multiplicado por la demanda anual ya duplicada — verificado exacto
+// contra la fórmula real de la hoja SD3 (SORGO: coincide con
+// MODULOS!D34*F44 mes a mes, sin aportar nada en la otra campaña).
+function obtenerCurvaMensual(nombreCultivo) {
+    const clave = normalizarCultivoNombre(nombreCultivo);
+    const curva = clave && MODULOS_MENSUAL[clave];
+    if (!curva) return null;
+    return curva.chica.concat(curva.grande);
+}
+
 // 2 para cultivos de ciclo corto (se replantan dentro del mismo año
 // agrícola), 1 para cultivos permanentes de 12 meses — ver nota arriba.
 function obtenerFactorAnual(referencia) {

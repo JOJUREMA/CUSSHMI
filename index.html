@@ -3846,7 +3846,21 @@ const COMISIONES = {
 
         const DIAS_POR_MES_E41 = [31, 30, 31, 30, 31, 31, 28, 31, 30, 31, 30, 31]; // AGO..JUL
 
-        function construirHojaE41(wb, tomaNombre, filasSiembraToma, filasPadronA1Toma, tipoRiegoDominante, comisionNombre, numeroCorrelativo, imagenes) {
+        function _colLetraE41(n) {
+            let s = '';
+            while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+            return s;
+        }
+
+        function _estiloEncabezadoE41(celda) {
+            const bordeFino = { style: 'thin', color: { argb: 'FF000000' } };
+            celda.font = { bold: true, size: 8 };
+            celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
+            celda.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            celda.border = { top: bordeFino, left: bordeFino, bottom: bordeFino, right: bordeFino };
+        }
+
+        function construirHojaE41(wb, tomaNombre, filasSiembraToma, filasPadronA1Toma, tipoRiegoDominante, usuarioNombre, numeroCorrelativo, imagenes) {
             const NUM_COLS = 14;
             const nombreHoja = tomaNombre.length > 31 ? tomaNombre.slice(0, 31) : tomaNombre;
             const ws = wb.addWorksheet(nombreHoja, { views: [{ showGridLines: false }] });
@@ -3859,8 +3873,8 @@ const COMISIONES = {
 
             const BORDE_FINO = { style: 'thin', color: { argb: 'FF000000' } };
             const BORDE_COMPLETO = { top: BORDE_FINO, left: BORDE_FINO, bottom: BORDE_FINO, right: BORDE_FINO };
-            const FILL_AZUL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6F1' } };
-            const FILL_TOTAL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } };
+            const FILL_AZUL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9DC3E6' } };
+            const FILL_TOTAL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
             const ROJO = { argb: 'FFC00000' };
 
             const idImgMidagri = wb.addImage({ buffer: imagenes.logoMidagri.buffer, extension: imagenes.logoMidagri.extension });
@@ -3899,7 +3913,7 @@ const COMISIONES = {
             filaTexto(8, 14, 'Sector Hidráulico: Menor - Chira');
             r++;
             filaTexto(1, 7, 'Unidad Hidrográfica: 138');
-            filaTexto(8, 14, 'Subsector Hidráulico: Margen Izquierda del río Chira');
+            filaTexto(8, 14, 'Subsector Hidráulico: Margen Izquierda');
             r += 2;
 
             filaTexto(1, 5, 'Operador:', { bold: true });
@@ -3926,7 +3940,7 @@ const COMISIONES = {
 
             const cNombre = ws.getCell(r, 1);
             ws.mergeCells(r, 1, r, NUM_COLS);
-            cNombre.value = 'NOMBRE - RAZÓN SOCIAL DEL USUARIO DE AGUA: ' + comisionNombre;
+            cNombre.value = 'NOMBRE - RAZÓN SOCIAL DEL USUARIO DE AGUA: ' + usuarioNombre;
             cNombre.font = { size: 9, bold: true };
             cNombre.border = BORDE_COMPLETO;
             r += 2;
@@ -3972,8 +3986,8 @@ const COMISIONES = {
                 ws.getCell(rColFuente, idx + 1).value = texto;
             });
             for (let c = 1; c <= NUM_COLS; c++) {
-                _estiloEncabezadoTablaOficial(ws.getCell(rGrupoFuente, c));
-                _estiloEncabezadoTablaOficial(ws.getCell(rColFuente, c));
+                _estiloEncabezadoE41(ws.getCell(rGrupoFuente, c));
+                _estiloEncabezadoE41(ws.getCell(rColFuente, c));
             }
             ws.getRow(rGrupoFuente).height = 18;
             ws.getRow(rColFuente).height = 26;
@@ -4021,13 +4035,13 @@ const COMISIONES = {
             ws.getCell(r, 1).value = 'PARA SER LLENADO POR EL USUARIO DECLARANTE';
             ws.mergeCells(r, 7, r, 14);
             ws.getCell(r, 7).value = 'PARA SER LLENADO POR EL OPERADOR HIDRÁULICO';
-            for (let c = 1; c <= NUM_COLS; c++) _estiloEncabezadoTablaOficial(ws.getCell(r, c));
+            for (let c = 1; c <= NUM_COLS; c++) _estiloEncabezadoE41(ws.getCell(r, c));
             r++;
             ws.mergeCells(r, 1, r, 6);
             ws.getCell(r, 1).value = 'DECLARACIÓN DE INTENCIÓN DE SIEMBRA [DIS]';
             ws.mergeCells(r, 7, r, 14);
             ws.getCell(r, 7).value = 'PLAN DE CULTIVO APROBADO [PC]';
-            for (let c = 1; c <= NUM_COLS; c++) _estiloEncabezadoTablaOficial(ws.getCell(r, c));
+            for (let c = 1; c <= NUM_COLS; c++) _estiloEncabezadoE41(ws.getCell(r, c));
             r++;
 
             const rGrupoCols = r;
@@ -4052,8 +4066,8 @@ const COMISIONES = {
             ['d', 'm', 'a'].forEach((etq, idx) => { ws.getCell(r, 8 + idx).value = etq; });
             ['d', 'm', 'a'].forEach((etq, idx) => { ws.getCell(r, 12 + idx).value = etq; });
             for (let c = 1; c <= NUM_COLS; c++) {
-                _estiloEncabezadoTablaOficial(ws.getCell(rGrupoCols, c));
-                _estiloEncabezadoTablaOficial(ws.getCell(r, c));
+                _estiloEncabezadoE41(ws.getCell(rGrupoCols, c));
+                _estiloEncabezadoE41(ws.getCell(r, c));
             }
             ws.getRow(rGrupoCols).height = 26;
             r++;
@@ -4085,11 +4099,11 @@ const COMISIONES = {
                     valores.push(cosecha.dia, cosecha.mes, cosecha.anio);
                     const demanda = calcularDemandaHm3(ref, area);
                     demandaTotalHm3 += demanda;
-                    filasCultivoAprobado.push({ cultivo, area, moduloM3Ha: ref.moduloM3Ha, demanda });
+                    filasCultivoAprobado.push({ cultivo, area, moduloM3Ha: ref.moduloM3Ha, demanda, ref });
                 } else {
                     hayCultivosSinReferencia = true;
                     valores.push('—', '—', '—');
-                    filasCultivoAprobado.push({ cultivo, area, moduloM3Ha: null, demanda: 0 });
+                    filasCultivoAprobado.push({ cultivo, area, moduloM3Ha: null, demanda: 0, ref: null });
                 }
                 valores.forEach((val, idx) => {
                     const celda = ws.getCell(r, idx + 1);
@@ -4118,11 +4132,12 @@ const COMISIONES = {
             ['CULTIVO APROBADO', 'ÁREA [ha]', 'MÓDULO RIEGO [m²/ha]', 'DEMANDA DE AGUA [hm³]'].forEach((texto, idx) => {
                 const c = ws.getCell(r, idx + 1);
                 c.value = texto;
-                _estiloEncabezadoTablaOficial(c);
+                _estiloEncabezadoE41(c);
             });
             r++;
             filasCultivoAprobado.forEach((fila) => {
                 _escribirFilaDatos(ws, r, 4, [fila.cultivo, fila.area.toFixed(2), fila.moduloM3Ha || 'SIN REFERENCIA', fila.demanda.toFixed(2)]);
+                fila.filaHoja = r; // fila real en la hoja — se referencia desde las fórmulas de la sección 3
                 r++;
             });
             ws.getCell(r, 1).value = 'TOTAL';
@@ -4162,30 +4177,93 @@ const COMISIONES = {
             ws.getCell(rEncMeses, 1).value = 'TIPO DE FUENTE';
             meses.forEach((mes, idx) => { ws.getCell(rEncMeses, 2 + idx).value = mes; });
             ws.getCell(rEncMeses, 14).value = 'VOLUMEN TOTAL\nAUTORIZADO (hm³)';
-            for (let c = 1; c <= NUM_COLS; c++) _estiloEncabezadoTablaOficial(ws.getCell(rEncMeses, c));
+            for (let c = 1; c <= NUM_COLS; c++) _estiloEncabezadoE41(ws.getCell(rEncMeses, c));
             ws.getRow(rEncMeses).height = 28;
             r++;
 
-            // Este cuadro depende de una asignación mensual que ANA/la Junta
-            // define por toma (no se deriva de los cultivos declarados —
-            // verificado contra los Formato E-4.1 reales: el total no
-            // cuadra con la demanda calculada arriba) — queda para llenado
-            // manual, igual que en el formato oficial en blanco.
+            // Autocompletado con la misma metodología del Excel real (hoja
+            // "MODULOS"): los cultivos permanentes (12 meses) reparten su
+            // demanda anual en partes iguales entre los 12 meses. Los de
+            // ciclo corto aportan solo en SU ventana natural de siembra
+            // (chica Ago-Dic o grande Ene-Jul, según ref.siembraMes) como
+            // un coeficiente mensual (curva de esa ventana, normalizada a
+            // que sume 1) multiplicado por la demanda anual YA duplicada
+            // (columna D — calcularDemandaHm3 ya aplica el factor ×2 de
+            // "replante") — verificado exacto contra la fórmula real de la
+            // hoja SD3 del Excel del usuario mes a mes (SORGO coincide con
+            // MODULOS!D34*F44 en Set-Dic y con 0 en Ene-Jul; no se replica
+            // el aporte plano de ARROZ en 7 meses de esa misma hoja porque,
+            // verificado a mano, sobrecuenta ~7× su demanda anual — es un
+            // artefacto de copiado en el Excel real, no un método a seguir).
+            const filasPermanentes = filasCultivoAprobado.filter((f) => f.ref && f.ref.periodoMeses === 12);
+            const filasCortas = filasCultivoAprobado.filter((f) => f.ref && f.ref.periodoMeses < 12);
+            const terminoPermanentes = filasPermanentes.length
+                ? '(' + filasPermanentes.map((f) => 'D' + f.filaHoja).join('+') + ')/12'
+                : '';
+            const terminosPorMes = Array.from({ length: 12 }, () => (terminoPermanentes ? [terminoPermanentes] : []));
+            filasCortas.forEach((f) => {
+                const curva = obtenerCurvaMensual(f.cultivo);
+                if (!curva) return;
+                const enChica = f.ref.siembraMes >= 8;
+                const ventana = enChica ? curva.slice(0, 5) : curva.slice(5, 12);
+                const offset = enChica ? 0 : 5;
+                const total = ventana.reduce((s, v) => s + v, 0);
+                if (total <= 0) return;
+                ventana.forEach((v, idx) => {
+                    if (v <= 0) return;
+                    const coef = v / total;
+                    terminosPorMes[offset + idx].push('(' + coef.toFixed(6) + '*D' + f.filaHoja + ')');
+                });
+            });
+            const rSuperficial = r;
+            for (let m = 0; m < 12; m++) {
+                const col = 2 + m;
+                const partes = terminosPorMes[m];
+                ws.getCell(r, col).value = partes.length ? { formula: partes.join('+') } : 0;
+            }
+            ws.getCell(r, 14).value = { formula: 'SUM(' + _colLetraE41(2) + r + ':' + _colLetraE41(13) + r + ')' };
+            r++;
+            const rSubterranea = r;
+            for (let m = 0; m < 12; m++) ws.getCell(r, 2 + m).value = 0;
+            ws.getCell(r, 14).value = { formula: 'SUM(' + _colLetraE41(2) + r + ':' + _colLetraE41(13) + r + ')' };
+            r++;
+            const rDemandaNeta = r;
+            for (let m = 0; m < 12; m++) {
+                const col = 2 + m;
+                ws.getCell(r, col).value = { formula: _colLetraE41(col) + rSuperficial + '+' + _colLetraE41(col) + rSubterranea };
+            }
+            ws.getCell(r, 14).value = { formula: 'SUM(' + _colLetraE41(2) + r + ':' + _colLetraE41(13) + r + ')' };
+            r++;
+            const rM3seg = r;
+            for (let m = 0; m < 12; m++) {
+                const col = 2 + m;
+                ws.getCell(r, col).value = { formula: '(' + _colLetraE41(col) + rDemandaNeta + '*1000000)/(7*24*3600)' };
+            }
+            ws.getCell(r, 14).value = '-';
+            r++;
+            const rDemandaBruta = r;
+            for (let m = 0; m < 12; m++) {
+                const col = 2 + m;
+                ws.getCell(r, col).value = { formula: _colLetraE41(col) + rDemandaNeta + '/0.7' };
+            }
+            ws.getCell(r, 14).value = { formula: 'SUM(' + _colLetraE41(2) + r + ':' + _colLetraE41(13) + r + ')' };
+            r++;
+
             [
-                ['SUPERFICIAL (Hm³)', false],
-                ['SUBTERRÁNEA (Hm³)', false],
-                ['TOTAL (Hm³) Demanda neta', true],
-                ['TOTAL (m³/seg)', false],
-                ['TOTAL (Hm³) Demanda Bruta', true],
-            ].forEach(([etiqueta, resaltado]) => {
-                ws.getCell(r, 1).value = etiqueta;
+                [rSuperficial, 'SUPERFICIAL (Hm³)', false],
+                [rSubterranea, 'SUBTERRÁNEA (Hm³)', false],
+                [rDemandaNeta, 'TOTAL (Hm³) Demanda neta', true],
+                [rM3seg, 'TOTAL (m³/seg/sem)', false],
+                [rDemandaBruta, 'TOTAL (Hm³) Demanda Bruta', true],
+            ].forEach(([fila, etiqueta, resaltado]) => {
+                ws.getCell(fila, 1).value = etiqueta;
                 for (let c = 1; c <= NUM_COLS; c++) {
-                    const celda = ws.getCell(r, c);
+                    const celda = ws.getCell(fila, c);
                     celda.border = BORDE_COMPLETO;
+                    celda.numFmt = c >= 2 && c <= 14 ? '0.00' : undefined;
                     celda.font = { size: 9, bold: resaltado, color: etiqueta.indexOf('Bruta') !== -1 ? ROJO : undefined };
                     celda.alignment = { horizontal: c === 1 ? 'left' : 'center' };
                 }
-                r++;
             });
             DIAS_POR_MES_E41.forEach((dias, idx) => {
                 const celda = ws.getCell(r, 2 + idx);
@@ -4251,7 +4329,12 @@ const COMISIONES = {
                     const tipoRiegoDominante = Object.keys(conteoTipoRiego).sort((a, b) => conteoTipoRiego[b] - conteoTipoRiego[a])[0] || '';
 
                     const filasPadronA1Toma = padronA1.filter((f) => f.toma_nombre === toma);
-                    construirHojaE41(wb, toma, filas, filasPadronA1Toma, tipoRiegoDominante, comisionNombre, correlativo, imagenesE41);
+                    // El campo "NOMBRE - RAZÓN SOCIAL" es del usuario evaluado,
+                    // no de la comisión — solo se usa el nombre agregado de la
+                    // comisión cuando la hoja junta a más de un usuario de esa
+                    // toma en un mismo documento (caso poco común).
+                    const usuarioNombre = filas.length === 1 ? filas[0].apellidos_nombres : comisionNombre;
+                    construirHojaE41(wb, toma, filas, filasPadronA1Toma, tipoRiegoDominante, usuarioNombre, correlativo, imagenesE41);
                     correlativo++;
                 }
                 await _descargarWorkbook(wb, `Formato_E41_${comisionKey}_${fecha}.xlsx`);
