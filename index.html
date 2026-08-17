@@ -4060,6 +4060,20 @@ const COMISIONES = {
             ws.getCell(rDatosFuente, 3).value = claseDerecho;
             ws.getCell(rDatosFuente, 4).value = numeroResolucion || '—';
             ws.getCell(rDatosFuente, 5).value = volumenHm3.toFixed(3);
+            // La columna RESOLUCIÓN ADMINISTRATIVA es angosta (8.5) y el
+            // número real puede ser largo (ej. resoluciones regionales tipo
+            // "127-2006-G.R.PIURA-420010-AACH-ATD") — con wrapText activado
+            // se envuelve en varias líneas, pero el alto nominal de la fila
+            // (20 por defecto) no lo contemplaba: el cálculo de escala de
+            // más abajo subestimaba el alto real necesario y el documento
+            // terminaba desbordando a una 2da página. Se calcula un alto
+            // explícito según el largo del texto (≈7 caracteres por línea a
+            // este ancho de columna) para que el cálculo de escala parta de
+            // un número real.
+            if (numeroResolucion) {
+                const lineasResolucion = Math.ceil(numeroResolucion.length / 7);
+                ws.getRow(rDatosFuente).height = Math.max(20, lineasResolucion * 15);
+            }
             ws.getCell(rDatosFuente + 1, 1).value = 'SUBTERRÁNEA';
             ws.getCell(rDatosFuente + 2, 1).value = 'TOTAL';
             ws.getCell(rDatosFuente + 2, 5).value = volumenHm3.toFixed(3);
@@ -4334,6 +4348,15 @@ const COMISIONES = {
             ws.mergeCells(r, 1, r, NUM_COLS);
             cNota.value = 'Nota: Para los usuarios con sistema de abastecimiento de agua propio irá la firma de la ALA y para los usuarios que reciben el Servicio del Operador, irá la firma del Operador (' + sectorista.nombre + ', sectorista de riego).';
             cNota.font = { italic: true, size: 10, color: { argb: 'FF666666' } };
+            r++;
+
+            // Área de impresión explícita: sin esto, Excel/LibreOffice a
+            // veces agregan una 2da página en blanco al final (visto en
+            // pruebas reales) — probablemente porque la imagen de la firma,
+            // anclada por posición, hace que el motor de impresión calcule
+            // el área usada un poco más allá de la última fila con texto.
+            // Fijar el rango exacto lo evita.
+            ws.pageSetup.printArea = 'A1:' + _colLetraE41(NUM_COLS) + (r - 1);
 
             // `defaultRowHeight` es solo un valor de respaldo — Excel/LibreOffice
             // igual recalculan el alto de cualquier fila sin altura explícita
@@ -4381,15 +4404,28 @@ const COMISIONES = {
             // respeta el programa con el que el usuario imprime a PDF —ya
             // detectado antes con Excel/LibreOffice—, así que el centrado
             // real se fuerza acá con los márgenes: el espacio que sobra
-            // dentro del área imprimible (si el contenido escalado no la
-            // llena entera) se reparte igual a ambos lados, en vez de
-            // dejarlo todo pegado arriba-izquierda.
-            const anchoEscaladoPt = anchoTotalPt * (escalaPct / 100);
-            const altoEscaladoPt = altoTotalPt * (escalaPct / 100);
-            const sobranteHorizPt = Math.max(0, anchoDisponiblePt - anchoEscaladoPt);
-            const sobranteVertPt = Math.max(0, altoDisponiblePt - altoEscaladoPt);
-            ws.pageSetup.margins.left = ws.pageSetup.margins.right = 0.25 + (sobranteHorizPt / 2) / 72;
-            ws.pageSetup.margins.top = ws.pageSetup.margins.bottom = 0.3 + (sobranteVertPt / 2) / 72;
+            // dentro del área imprimible se reparte igual a ambos lados.
+            //
+            // OJO: el "sobrante" de la dimensión que definió la escala
+            // (ancho o alto, la del ratio más chico) incluye el colchón de
+            // seguridad del 0.88 — ese espacio NO es hueco real, es margen
+            // por si Excel necesita más alto/ancho del que da la suma
+            // nominal de filas/columnas (ver comentario del factor 0.88
+            // arriba). Convertirlo en margen de página se probó y hace que
+            // el contenido real se desborde a una 2da página (queda
+            // cortado). Por eso el centrado por margen SOLO se aplica a la
+            // dimensión que NO definió la escala — esa sí tiene espacio
+            // sobrante real, sin tocar el colchón de seguridad de la otra.
+            const anchoEsLimitante = (anchoDisponiblePt / anchoTotalPt) <= (altoDisponiblePt / altoTotalPt);
+            if (!anchoEsLimitante) {
+                const anchoEscaladoPt = anchoTotalPt * (escalaPct / 100);
+                const sobranteHorizPt = Math.max(0, anchoDisponiblePt - anchoEscaladoPt);
+                ws.pageSetup.margins.left = ws.pageSetup.margins.right = 0.25 + (sobranteHorizPt / 2) / 72;
+            } else {
+                const altoEscaladoPt = altoTotalPt * (escalaPct / 100);
+                const sobranteVertPt = Math.max(0, altoDisponiblePt - altoEscaladoPt);
+                ws.pageSetup.margins.top = ws.pageSetup.margins.bottom = 0.3 + (sobranteVertPt / 2) / 72;
+            }
 
             return ws;
         }
