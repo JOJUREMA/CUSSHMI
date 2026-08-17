@@ -436,12 +436,29 @@
         // producía un PDF completamente en blanco al compartir. Mostrarlo
         // en pantalla (como ya hacía el visor del Anexo G-4) evita ese
         // problema y además deja ver el reporte antes/después de compartir.
+        // Ancho de "documento" para capturar el PDF, en píxeles CSS — NO el
+        // ancho de pantalla del celular. Si se captura al ancho real de la
+        // tarjeta en pantalla (hasta 420px, o menos en celulares angostos:
+        // confirmado 335px en un viewport de 375px), una tabla de varias
+        // columnas (nombre, U.C., cultivos, deuda, condición) se queda sin
+        // espacio y el texto de los encabezados/celdas se corta o queda
+        // ilegible — reportado por el usuario con una captura del PDF.
+        // Ensanchar la tarjeta ANTES de capturar (y devolverla a su ancho
+        // normal después) le da a cada columna el espacio que necesita,
+        // sin afectar cómo se ve la tarjeta compacta en el resto de la
+        // pantalla del celular.
+        var ANCHO_IMPRESION_PX = 700;
+
         async function generarYCompartirReporte(html, nombreArchivo, textoWhatsApp, tituloCompartir, elEstado, contenedorId) {
             var contenedor = document.getElementById(contenedorId);
             contenedor.innerHTML = '<style>' + estilosReporteCondicion() + '</style>' + html;
             contenedor.style.display = 'block';
             elEstado.textContent = 'Generando PDF…';
+            var anchoOriginal = contenedor.style.width;
+            var maxAnchoOriginal = contenedor.style.maxWidth;
             try {
+                contenedor.style.maxWidth = 'none';
+                contenedor.style.width = ANCHO_IMPRESION_PX + 'px';
                 await esperarImagenesListas(contenedor);
                 await esperarRepintado();
                 var MARGEN_MM = 5;
@@ -487,6 +504,12 @@
                 }
             } catch (e) {
                 elEstado.textContent = 'No se pudo generar el PDF: ' + (e.message || e);
+            } finally {
+                // Devuelve la tarjeta a su ancho compacto normal — el
+                // ensanchado de arriba es solo para la captura del PDF, no
+                // debe quedar así en el resto de la pantalla.
+                contenedor.style.width = anchoOriginal;
+                contenedor.style.maxWidth = maxAnchoOriginal;
             }
         }
 
