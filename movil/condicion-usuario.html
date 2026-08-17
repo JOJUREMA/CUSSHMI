@@ -469,8 +469,20 @@
                 // la hoja en blanco debajo del contenido real (reportado
                 // por el usuario, con captura del PDF compartido). 96px =
                 // 25.4mm es la equivalencia estándar CSS px → mm.
+                // COLCHON_MM: con reportes de varias filas (tabla por toma)
+                // se detectó que un cálculo "justo" de altoPaginaMm podía
+                // quedar 1-2px corto del alto real que termina rasterizando
+                // html2canvas/jsPDF — lo suficiente para que la librería
+                // agregue una SEGUNDA página, casi vacía, con solo la
+                // última fila (que "page-break-inside:avoid" empuja
+                // completa a esa página nueva en vez de cortarla a la
+                // mitad). Reportado por el usuario con una captura de esa
+                // segunda página sobrante. Un colchón amplio (muy por
+                // encima de cualquier redondeo de subpíxel) elimina el
+                // problema de raíz.
+                var COLCHON_MM = 10;
                 var anchoPaginaMm = contenedor.offsetWidth * 25.4 / 96 + MARGEN_MM * 2;
-                var altoPaginaMm = contenedor.scrollHeight * 25.4 / 96 + MARGEN_MM * 2;
+                var altoPaginaMm = contenedor.scrollHeight * 25.4 / 96 + MARGEN_MM * 2 + COLCHON_MM;
                 // La orientación debe coincidir con la forma real del
                 // contenido — pedir 'portrait' junto con un arreglo [ancho,
                 // alto] más ancho que alto hace que la librería INVIERTA el
