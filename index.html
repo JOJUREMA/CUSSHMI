@@ -3976,10 +3976,15 @@ const COMISIONES = {
             ws.getCell(rGrupoFuente, 1).value = 'FUENTE DE AGUA';
             ws.mergeCells(rGrupoFuente, 3, rGrupoFuente, 5);
             ws.getCell(rGrupoFuente, 3).value = 'ASIGNACIÓN';
-            ws.mergeCells(rGrupoFuente, 6, rGrupoFuente, 14);
-            ws.getCell(rGrupoFuente, 6).value = 'TIPO DE RIEGO (MARCAR CON X)';
             r++;
             const rColFuente = r;
+            // "TIPO DE RIEGO (MARCAR CON X)" no tiene sub-encabezado propio
+            // (a diferencia de FUENTE DE AGUA/ASIGNACIÓN, que sí reparten
+            // TIPO/NOMBRE/CLASE.../RESOLUCIÓN.../VOLUMEN en la fila de
+            // abajo) — se combina verticalmente con la fila de abajo en
+            // vez de dejarla como una fila de celdas vacías.
+            ws.mergeCells(rGrupoFuente, 6, rColFuente, 14);
+            ws.getCell(rGrupoFuente, 6).value = 'TIPO DE RIEGO (MARCAR CON X)';
             ['TIPO', 'NOMBRE', 'CLASE DE DERECHO\nDE USO DE AGUA', 'RESOLUCIÓN\nADMINISTRATIVA', 'VOLUMEN\n(Hm³)'].forEach((texto, idx) => {
                 ws.getCell(rColFuente, idx + 1).value = texto;
             });
@@ -4258,11 +4263,13 @@ const COMISIONES = {
             });
             r += 2;
 
+            const rFirma = r; // fila donde arranca la firma — se deja libre para que la imagen nunca tape la tabla de volumen de arriba
+            r += 6;
             filaTexto(1, 6, '_____________________');
             r++;
             const idImgFirma = wb.addImage({ buffer: imagenes.firmaJosephReyes.buffer, extension: imagenes.firmaJosephReyes.extension });
-            ws.addImage(idImgFirma, { tl: { col: 3.5, row: r - 4.3 }, ext: { width: 170, height: 132 } });
-            r += 6;
+            ws.addImage(idImgFirma, { tl: { col: 3.5, row: rFirma }, ext: { width: 170, height: 132 } });
+            r += 2;
 
             const cNota = ws.getCell(r, 1);
             ws.mergeCells(r, 1, r, NUM_COLS);
