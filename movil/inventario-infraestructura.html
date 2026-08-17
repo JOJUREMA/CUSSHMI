@@ -59,6 +59,24 @@
         .gis-popup table { border-collapse: collapse; font-size: 11px; margin-top: 4px; }
         .gis-popup td { padding: 1px 6px 1px 0; vertical-align: top; }
         .gis-popup td:first-child { color: #666; white-space: nowrap; }
+        #mapaDrenes {
+            width: 100%;
+            max-width: 420px;
+            height: 60vh;
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+        .leyenda-drenes {
+            display: flex;
+            gap: 16px;
+            width: 100%;
+            max-width: 420px;
+            margin-top: 8px;
+            font-size: 13px;
+        }
+        .leyenda-drenes label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+        .leyenda-drenes input { width: 16px; height: 16px; cursor: pointer; }
+        .leyenda-drenes .swatch { width: 14px; height: 4px; border-radius: 2px; display: inline-block; }
         .foto-miniatura { display: inline-block; position: relative; margin: 6px; }
         .foto-miniatura img {
             width: 90px;
@@ -208,6 +226,7 @@
         <!-- ── Pantalla 2: selección de toma ── -->
         <div id="vistaTomas" style="width:100%; display:flex; flex-direction:column; align-items:center;">
             <button class="boton" id="btnVerSolicitudes" style="max-width:420px; display:none; margin-bottom:14px; background:#c0392b;">🔔 Solicitudes de edición pendientes</button>
+            <button class="boton-secundario" id="btnVerMapaDrenes" style="max-width:420px; margin-bottom:14px;">🌊 Ver Drenes (mapa general — cruzan varias tomas)</button>
             <div class="estado-busqueda" id="estadoTomas">Cargando tomas…</div>
             <div class="resultados" id="listaTomas"></div>
         </div>
@@ -242,6 +261,20 @@
             </label>
             <div class="estado-busqueda" id="estadoCapaGis" style="display:none;"></div>
             <div id="mapaInventario"></div>
+        </div>
+
+        <!-- ── Pantalla: mapa general de Drenes (independiente de toma — un
+             dren real puede atravesar dos o más tomas, así que no tiene
+             sentido acotarlo a la que esté seleccionada) ── -->
+        <div id="vistaMapaDrenes" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverATomasDesdeDrenes" style="max-width:420px;">← Volver a las tomas</button>
+            <h1 style="margin-top:14px; font-size:16px;">🌊 Drenes — toda la comisión</h1>
+            <div class="estado-busqueda" id="estadoMapaDrenes"></div>
+            <div class="leyenda-drenes">
+                <label><input type="checkbox" id="chkDrenPrincipal" checked><span class="swatch" style="background:#ff9800;"></span> Dren Principal</label>
+                <label><input type="checkbox" id="chkDrenSecundario" checked><span class="swatch" style="background:#9c27b0;"></span> Dren Secundario</label>
+            </div>
+            <div id="mapaDrenes"></div>
         </div>
 
         <!-- ── Pantalla 4: formulario ── -->
@@ -913,6 +946,22 @@
             limpiarCapaGisInventario();
             document.getElementById('chkCapaGis').checked = false;
             document.getElementById('estadoCapaGis').style.display = 'none';
+
+            // Los drenes reales cruzan dos o más tomas — no tiene sentido
+            // acotar su capa GIS a la toma que se esté viendo acá. Se
+            // deshabilita el checkbox de esta pantalla y se redirige al
+            // mapa general de Drenes (independiente de toma).
+            var esDrenAqui = (tipoActual === 'dren_principal' || tipoActual === 'dren_secundario');
+            document.getElementById('chkCapaGis').closest('label').style.display = esDrenAqui ? 'none' : 'flex';
+            if (esDrenAqui) {
+                var elEstado = document.getElementById('estadoCapaGis');
+                elEstado.style.display = 'block';
+                elEstado.innerHTML = 'Los drenes suelen cruzar varias tomas — usa <button type="button" id="btnIrAMapaDrenesDesdeToma" style="text-decoration:underline; background:none; border:none; color:inherit; font:inherit; cursor:pointer; padding:0;">🌊 Ver Drenes (mapa general)</button> en vez de esta capa.';
+                document.getElementById('btnIrAMapaDrenesDesdeToma').addEventListener('click', function () {
+                    document.getElementById('vistaMapaInventario').style.display = 'none';
+                    mostrarVistaMapaDrenes();
+                });
+            }
         }
 
         document.getElementById('btnVerMapaInventario').addEventListener('click', mostrarVistaMapaInventario);
@@ -962,15 +1011,16 @@
             }
 
             limpiarCapaGisInventario();
-            var esDren = (tipo === 'dren_principal' || tipo === 'dren_secundario');
+            // Los drenes (dren_principal/dren_secundario) nunca llegan acá —
+            // ver mostrarVistaMapaInventario(), que redirige a
+            // mostrarVistaMapaDrenes() para ese tipo — así que el filtro por
+            // toma siempre aplica sin excepción.
             var features = capaGisCache[tipo].filter(function (f) {
-                return esDren || f.toma === tomaSeleccionada;
+                return f.toma === tomaSeleccionada;
             });
 
             if (!features.length) {
-                elEstado.textContent = esDren
-                    ? 'No hay ' + FUNCIONES_POR_TIPO[tipo].etiquetaPlural.toLowerCase() + ' en el archivo GIS.'
-                    : 'El archivo GIS no trae ' + FUNCIONES_POR_TIPO[tipo].etiquetaPlural.toLowerCase() + ' identificadas para esta toma.';
+                elEstado.textContent = 'El archivo GIS no trae ' + FUNCIONES_POR_TIPO[tipo].etiquetaPlural.toLowerCase() + ' identificadas para esta toma.';
                 return;
             }
 
@@ -988,7 +1038,7 @@
                 }
             });
 
-            elEstado.textContent = capaGisLayers.length + ' elemento(s) del levantamiento GIS' + (esDren ? ' (sin filtrar por toma)' : '') + '.';
+            elEstado.textContent = capaGisLayers.length + ' elemento(s) del levantamiento GIS.';
 
             var grupo = L.featureGroup(capaGisLayers.concat(marcadoresInventario));
             if (grupo.getLayers().length) {
@@ -1004,6 +1054,81 @@
                 document.getElementById('estadoCapaGis').style.display = 'none';
             }
         });
+
+        // ═══ Mapa general de Drenes (independiente de toma) ═══
+        var mapaDrenesLeaflet = null;
+        var capaDrenesLayers = { dren_principal: [], dren_secundario: [] };
+        var COLOR_DREN = { dren_principal: '#ff9800', dren_secundario: '#9c27b0' };
+
+        function inicializarMapaDrenesSiHaceFalta() {
+            if (mapaDrenesLeaflet) {
+                setTimeout(function () { mapaDrenesLeaflet.invalidateSize(); }, 50);
+                return;
+            }
+            mapaDrenesLeaflet = L.map('mapaDrenes', { preferCanvas: true }).setView([-4.9, -80.6], 12);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            }).addTo(mapaDrenesLeaflet);
+            setTimeout(function () { mapaDrenesLeaflet.invalidateSize(); }, 50);
+        }
+
+        async function cargarSubtipoDren(subtipo) {
+            if (!capaGisCache[subtipo]) {
+                var resp = await fetch('../mapas/inventario_gis/' + subtipo + '.json');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                capaGisCache[subtipo] = await resp.json();
+            }
+            capaDrenesLayers[subtipo].forEach(function (l) { mapaDrenesLeaflet.removeLayer(l); });
+            capaDrenesLayers[subtipo] = [];
+            capaGisCache[subtipo].forEach(function (f) {
+                if (!f.geom || f.geom.type !== 'LineString') return;
+                var linea = L.polyline(f.geom.coords, { color: COLOR_DREN[subtipo], weight: 3, opacity: 0.85 }).addTo(mapaDrenesLeaflet);
+                linea.bindPopup(_popupHtmlGis(f.nombre, f.campos));
+                capaDrenesLayers[subtipo].push(linea);
+            });
+        }
+
+        async function mostrarVistaMapaDrenes() {
+            document.getElementById('vistaTomas').style.display = 'none';
+            document.getElementById('vistaMapaDrenes').style.display = 'flex';
+            inicializarMapaDrenesSiHaceFalta();
+            var elEstado = document.getElementById('estadoMapaDrenes');
+            elEstado.textContent = 'Cargando drenes…';
+            try {
+                await Promise.all([cargarSubtipoDren('dren_principal'), cargarSubtipoDren('dren_secundario')]);
+            } catch (e) {
+                elEstado.textContent = 'No se pudo cargar la capa de drenes: ' + e.message;
+                return;
+            }
+            elEstado.textContent = capaDrenesLayers.dren_principal.length + ' dren(es) principal(es) · ' + capaDrenesLayers.dren_secundario.length + ' secundario(s) — no filtrados por toma.';
+            aplicarVisibilidadDrenes();
+            var todasLasLineas = capaDrenesLayers.dren_principal.concat(capaDrenesLayers.dren_secundario);
+            if (todasLasLineas.length) {
+                mapaDrenesLeaflet.fitBounds(L.featureGroup(todasLasLineas).getBounds(), { padding: [30, 30], maxZoom: 16 });
+            }
+        }
+
+        function aplicarVisibilidadDrenes() {
+            var mostrarPrincipal = document.getElementById('chkDrenPrincipal').checked;
+            var mostrarSecundario = document.getElementById('chkDrenSecundario').checked;
+            capaDrenesLayers.dren_principal.forEach(function (l) {
+                if (mostrarPrincipal) { if (!mapaDrenesLeaflet.hasLayer(l)) l.addTo(mapaDrenesLeaflet); }
+                else { mapaDrenesLeaflet.removeLayer(l); }
+            });
+            capaDrenesLayers.dren_secundario.forEach(function (l) {
+                if (mostrarSecundario) { if (!mapaDrenesLeaflet.hasLayer(l)) l.addTo(mapaDrenesLeaflet); }
+                else { mapaDrenesLeaflet.removeLayer(l); }
+            });
+        }
+
+        document.getElementById('btnVerMapaDrenes').addEventListener('click', mostrarVistaMapaDrenes);
+        document.getElementById('btnVolverATomasDesdeDrenes').addEventListener('click', function () {
+            document.getElementById('vistaMapaDrenes').style.display = 'none';
+            document.getElementById('vistaTomas').style.display = 'flex';
+        });
+        document.getElementById('chkDrenPrincipal').addEventListener('change', aplicarVisibilidadDrenes);
+        document.getElementById('chkDrenSecundario').addEventListener('change', aplicarVisibilidadDrenes);
 
         // ═══ Pantalla 4 — formulario ═══
         function nuevoRegistroBase() {
