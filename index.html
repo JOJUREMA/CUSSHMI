@@ -4519,9 +4519,20 @@ const COMISIONES = {
                 await html2pdf().set({
                     margin: 5,
                     filename: `Formato_E41_${sufijoArchivo}_${fecha}.pdf`,
-                    html2canvas: { scale: 2, useCORS: true },
+                    // width/windowWidth explícitos: sin esto, html2canvas
+                    // captura con el ancho de página (~756px) en vez del
+                    // ancho real del contenedor, cortando las columnas de
+                    // la derecha de la tabla (bug ya confirmado: canvas de
+                    // 1512px de ancho contra un contenedor de 1770px reales
+                    // a scale:2). Con el ancho real, jsPDF sigue escalando
+                    // la imagen completa para que quepa en el ancho de
+                    // página, solo que ahora sin perder la parte derecha.
+                    html2canvas: { scale: 2, useCORS: true, width: contenedor.scrollWidth, windowWidth: contenedor.scrollWidth },
                     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                    pagebreak: { mode: ['css'] },
+                    // 'legacy' es el que corta automáticamente el contenido
+                    // que se pasa de una página (sin él, lo que sobra queda
+                    // cortado en vez de continuar en una página siguiente).
+                    pagebreak: { mode: ['css', 'legacy'] },
                 }).from(contenedor).save();
 
                 alert('✅ Exportado el Formato E-4.1 (PDF) con ' + (correlativo - 1) + ' toma(s).\n\n' +
