@@ -4008,16 +4008,15 @@ const COMISIONES = {
                 ? _emparejarPadronA1E41(filasPadronA1Toma, filasSiembraToma[0].unidad_catastral, filasSiembraToma[0].apellidos_nombres)
                 : null;
 
-            // "Área bajo riego" es el total real de la toma (padrón A-1,
-            // todos los usuarios) — no la suma de lo declarado en el DIS,
-            // que suele ser menor (no todos declaran cada campaña). Mismo
-            // criterio que muestran los dos Formato E-4.1 reales ya
-            // firmados (52.2 ha en SD14.1 con solo 47 ha declaradas; 410 ha
-            // en SD8 con solo 253 ha declaradas). Si el padrón no trae ese
-            // dato para ningún usuario de la toma, se cae al área del
-            // propio declarante (mejor un número real que un 0.0 vacío).
-            let areaBajoRiegoToma = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
-            if (!areaBajoRiegoToma && usuarioA1) areaBajoRiegoToma = parseFloat(usuarioA1.area_bajo_riego_ha) || 0;
+            // "Área bajo riego" es la de la LICENCIA del usuario que se está
+            // exportando (padrón A-1), no un agregado de toda la toma —
+            // confirmado explícitamente por el usuario del sistema. Solo
+            // cuando el documento junta a más de un usuario (exportación de
+            // toda la toma, sin filtrar a uno solo) se usa el total sumado
+            // de la toma, que es lo único que tiene sentido mostrar ahí.
+            let areaBajoRiegoToma = usuarioA1
+                ? (parseFloat(usuarioA1.area_bajo_riego_ha) || 0)
+                : filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
             filaTexto(1, 2, 'Unidad catastral: ' + (usuarioA1 ? (usuarioA1.unidad_catastral || '—') : '—'));
             filaTexto(3, 6, 'Área bajo riego (ha): ' + areaBajoRiegoToma.toFixed(1));
             filaTexto(7, 9, 'Canal Secundario: ' + (usuarioA1 ? (usuarioA1.canal_derivacion || '—') : '—'));

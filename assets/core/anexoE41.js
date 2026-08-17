@@ -53,8 +53,13 @@ function calcularDatosE41(tomaNombre, filasSiembraToma, filasPadronA1Toma, tipoR
         ? _emparejarPadronA1E41Pdf(filasPadronA1Toma, filasSiembraToma[0].unidad_catastral, filasSiembraToma[0].apellidos_nombres)
         : null;
 
-    let areaBajoRiegoToma = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
-    if (!areaBajoRiegoToma && usuarioA1) areaBajoRiegoToma = parseFloat(usuarioA1.area_bajo_riego_ha) || 0;
+    // "Área bajo riego" es la de la LICENCIA del usuario que se está
+    // exportando (padrón A-1), no un agregado de toda la toma — confirmado
+    // explícitamente por el usuario del sistema. Solo cuando el documento
+    // junta a más de un usuario se usa el total sumado de la toma.
+    const areaBajoRiegoToma = usuarioA1
+        ? (parseFloat(usuarioA1.area_bajo_riego_ha) || 0)
+        : filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
     const volumenHm3 = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.volumen_m3) || 0), 0) / 1e6;
     const claseDerecho = (usuarioA1 && usuarioA1.clase_derecho) || (filasPadronA1Toma.find((f) => f.clase_derecho) || {}).clase_derecho || '-';
     const numeroResolucion = (usuarioA1 && usuarioA1.numero_resolucion) || (filasPadronA1Toma.find((f) => f.numero_resolucion) || {}).numero_resolucion || '';
