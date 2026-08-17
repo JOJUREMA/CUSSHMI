@@ -64,7 +64,10 @@ function calcularDatosE41(tomaNombre, filasSiembraToma, filasPadronA1Toma, tipoR
     const claseDerecho = (usuarioA1 && usuarioA1.clase_derecho) || (filasPadronA1Toma.find((f) => f.clase_derecho) || {}).clase_derecho || '-';
     const numeroResolucion = (usuarioA1 && usuarioA1.numero_resolucion) || (filasPadronA1Toma.find((f) => f.numero_resolucion) || {}).numero_resolucion || '';
     const unidadCatastral = usuarioA1 ? (usuarioA1.unidad_catastral || '') : '';
-    const canalSecundario = usuarioA1 ? (usuarioA1.canal_derivacion || '') : '';
+    // Si el padrón no trae el canal de derivación real, se usa "PRINCIPAL
+    // TOMA <nombre>" como texto por defecto (pedido explícito) en vez de
+    // dejarlo en blanco.
+    const canalSecundario = (usuarioA1 && usuarioA1.canal_derivacion) || ('PRINCIPAL TOMA ' + tomaNombre);
     const tipoRiegoEtiqueta = _tipoRiegoEtiquetaE41(tipoRiegoDominante);
 
     const areaPorCultivo = new Map();

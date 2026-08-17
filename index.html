@@ -4019,7 +4019,10 @@ const COMISIONES = {
                 : filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
             filaTexto(1, 2, 'Unidad catastral: ' + (usuarioA1 ? (usuarioA1.unidad_catastral || '—') : '—'));
             filaTexto(3, 6, 'Área bajo riego (ha): ' + areaBajoRiegoToma.toFixed(1));
-            filaTexto(7, 9, 'Canal Secundario: ' + (usuarioA1 ? (usuarioA1.canal_derivacion || '—') : '—'));
+            // Si el padrón no trae el canal de derivación real, se usa
+            // "PRINCIPAL TOMA <nombre>" como texto por defecto (pedido
+            // explícito) en vez de dejarlo en blanco/guión.
+            filaTexto(7, 9, 'Canal Secundario: ' + ((usuarioA1 && usuarioA1.canal_derivacion) || ('PRINCIPAL TOMA ' + tomaNombre)));
             filaTexto(10, 14, 'Nombre del bloque de riego: ' + (obtenerBloqueDeToma(tomaNombre) || '—'));
             r += 2;
 
@@ -4603,31 +4606,60 @@ const COMISIONES = {
                 // por toma" ya usado en el Excel.
                 let pdf = null;
                 let correlativo = 1;
+                const advertenciasCaptura = [];
                 for (const { toma, filas } of porToma) {
                     const { filasPadronA1Toma, tipoRiego, usuarioNombre } = await _prepararTomaE41(comisionKey, toma, filas, padronA1, comisionNombre);
                     const datosCalc = calcularDatosE41(toma, filas, filasPadronA1Toma, tipoRiego, usuarioNombre, correlativo);
                     const paginaHtml = _construirAnexoE41Pagina(datosCalc, 'assets/img/e41/');
                     contenedor.innerHTML = _estilosAnexoE41() + paginaHtml;
                     await _esperarImagenesListasE41(contenedor);
+                    // Espera a que las fuentes terminen de cargar/aplicarse
+                    // antes de medir — si el texto todavía está con la
+                    // fuente de respaldo del navegador cuando se mide el
+                    // alto, el reflujo al llegar la fuente real puede
+                    // cambiar cuánto ocupa el texto, y la captura de
+                    // html2canvas queda corta.
+                    if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (e) {} }
                     await _esperarRepintadoE41();
+                    // Fuerza un reflow real justo antes de medir/capturar
+                    // (algunos navegadores no terminan de aplicar el layout
+                    // hasta que algo lo consulta).
+                    void contenedor.offsetHeight;
+                    const anchoCaptura = contenedor.scrollWidth;
+                    const altoCaptura = contenedor.scrollHeight;
 
                     const worker = html2pdf().set({
                         margin: 5,
                         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                        // width SÍ se fuerza (sin esto html2pdf usa ~756px
-                        // por defecto — el ancho de página en px, no el del
-                        // documento — y corta el lado derecho). windowWidth
-                        // NO se fuerza: forzarlo a un valor angosto obliga a
-                        // html2canvas a re-acomodar TODA la app dentro de esa
-                        // ventana angosta para poder capturar, lo que
-                        // desplaza el contenedor respecto a su posición real
-                        // y corta el lado izquierdo — ya no hace falta con
-                        // el contenedor ajustado a su ancho real
+                        // width Y height SÍ se fuerzan explícitos: sin esto,
+                        // html2canvas puede usar su propia detección (poco
+                        // confiable — ya se confirmó antes con el ancho,
+                        // que por defecto usaba ~756px en vez del real) y
+                        // terminar capturando una altura menor a la real,
+                        // cortando el documento antes de la tabla de
+                        // volumen/firma. windowWidth NO se fuerza: forzarlo
+                        // a un valor angosto obliga a html2canvas a
+                        // re-acomodar TODA la app dentro de esa ventana
+                        // angosta para poder capturar, lo que desplaza el
+                        // contenedor respecto a su posición real y corta el
+                        // lado izquierdo — ya no hace falta con el
+                        // contenedor ajustado a su ancho real
                         // (display:inline-block).
-                        html2canvas: { scale: 2, useCORS: true, width: contenedor.scrollWidth },
+                        html2canvas: { scale: 2, useCORS: true, width: anchoCaptura, height: altoCaptura },
                     }).from(contenedor);
                     const canvas = await worker.toCanvas().get('canvas');
                     const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+                    // Diagnóstico: si el canvas capturado sale claramente
+                    // más bajo de lo que medimos justo antes (menos del
+                    // 90%), algo cortó el contenido durante la captura —
+                    // se avisa en el mensaje final en vez de fallar en
+                    // silencio, para poder confirmar la causa si vuelve a
+                    // pasar.
+                    const altoEsperadoPx = altoCaptura * 2; // scale:2
+                    if (canvas.height < altoEsperadoPx * 0.9) {
+                        advertenciasCaptura.push(toma + ': se esperaba ~' + altoEsperadoPx + 'px de alto y se capturaron ' + canvas.height + 'px — el PDF de esta toma puede salir incompleto.');
+                    }
 
                     if (!pdf) {
                         // Página 1 real: se obtiene la instancia jsPDF a
@@ -4677,6 +4709,9 @@ const COMISIONES = {
                 const ventana = window.open(urlVistaPrevia, '_blank');
                 if (!ventana) {
                     alert('El navegador bloqueó la ventana de vista previa (revisa el bloqueador de pop-ups). El PDF ya se generó — habilita las ventanas emergentes para este sitio e inténtalo de nuevo.');
+                }
+                if (advertenciasCaptura.length) {
+                    alert('⚠️ Aviso de captura:\n\n' + advertenciasCaptura.join('\n') + '\n\nSi el PDF sale cortado, avisa a soporte con este mensaje.');
                 }
             } catch (e) {
                 console.error('Error al exportar Formato E-4.1 en PDF:', e);
