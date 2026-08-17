@@ -507,8 +507,15 @@
                 // dispositivo, así que nunca corta el formulario a media
                 // hoja sin importar el tamaño de fuente del celular — el
                 // motivo original por el que se había elegido A4 fijo.
+                // Colchón: un cálculo "justo" de altoPaginaMm puede quedar
+                // 1-2px corto del alto real que rasteriza html2canvas/jsPDF
+                // — lo suficiente para que la librería agregue una segunda
+                // página, casi vacía, con solo el borde inferior del
+                // formulario (mismo problema reportado y corregido para el
+                // reporte de Condición del Usuario, mismo criterio acá).
+                var COLCHON_MM = 15;
                 var anchoPaginaMm = contenedor.offsetWidth * 25.4 / 96 + MARGEN_MM * 2;
-                var altoPaginaMm = contenedor.scrollHeight * 25.4 / 96 + MARGEN_MM * 2;
+                var altoPaginaMm = contenedor.scrollHeight * 25.4 / 96 + MARGEN_MM * 2 + COLCHON_MM;
                 var esApaisado = anchoPaginaMm > altoPaginaMm;
                 var opciones = {
                     margin: MARGEN_MM,
