@@ -1389,15 +1389,26 @@
         <div class="modal-container" style="text-align: center; padding: 30px; max-width: 480px;">
             <h3>🌱 Declaración de Intención de Siembra</h3>
             <p class="info-text" style="text-align:left;">
-                Genera el Formato E-4.1 "Demanda de Agua del Usuario" (una hoja por toma)
-                a partir de lo que cada usuario declaró en el módulo móvil "Declaración de
-                Intención de Siembra". Cubre hasta la tabla de demanda de agua por cultivo
-                (área × módulo de riego) — la sección de usuario no agrario y el volumen
-                mensual autorizado quedan en blanco para completar manualmente, como hoy.
+                Genera el Formato E-4.1 "Demanda de Agua del Usuario" a partir de lo que
+                cada usuario declaró en el módulo móvil — demanda por cultivo y volumen
+                mensual autorizado ya calculados. Elige todas las tomas, una toma completa
+                (agregada) o un solo usuario.
             </p>
 
-            <button class="btn btn-success" id="btnExportarE41" onclick="exportarFormatoE41()" style="width: 100%;" title="Genera un Excel con el Formato E-4.1 por toma, a partir de las declaraciones de siembra confirmadas">
-                📊 Exportar Formato E-4.1 (todas las tomas)
+            <div style="text-align:left; margin-top:10px;">
+                <label for="selectTomaE41" style="font-size:12px; font-weight:600; display:block; margin-bottom:4px;">Toma</label>
+                <select id="selectTomaE41" style="width:100%; padding:8px; border-radius:6px; margin-bottom:12px;" onchange="alCambiarTomaE41()">
+                    <option value="">Cargando…</option>
+                </select>
+
+                <label for="selectUsuarioE41" style="font-size:12px; font-weight:600; display:block; margin-bottom:4px;">Usuario (opcional)</label>
+                <select id="selectUsuarioE41" style="width:100%; padding:8px; border-radius:6px; margin-bottom:12px;" disabled>
+                    <option value="">Todos los usuarios de la toma (agregado)</option>
+                </select>
+            </div>
+
+            <button class="btn btn-success" id="btnExportarE41" onclick="exportarFormatoE41()" style="width: 100%;" title="Genera un Excel con el Formato E-4.1 según lo elegido arriba">
+                📊 Exportar Formato E-4.1
             </button>
 
             <button class="btn btn-secondary" onclick="cerrarModalSiembraDIS()" style="width: 100%; margin-top: 12px;">
@@ -4334,6 +4345,9 @@ const COMISIONES = {
 
             try {
                 const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                const tomaFiltro = (document.getElementById('selectTomaE41') || {}).value || '';
+                const usuarioFiltro = (document.getElementById('selectUsuarioE41') || {}).value || '';
+
                 const [resultadoSiembra, resultadoPadronA1] = await Promise.all([
                     CusshmiDatos.cargarRegistrosSiembraParaExportar(comisionKey),
                     CusshmiDatos.cargarPadronOficialA1CompletoParaExportar(comisionKey),
@@ -4344,12 +4358,20 @@ const COMISIONES = {
                     return;
                 }
 
+                let registrosFiltrados = resultadoSiembra.registros;
+                if (tomaFiltro) registrosFiltrados = registrosFiltrados.filter((r) => r.toma_nombre === tomaFiltro);
+                if (usuarioFiltro) registrosFiltrados = registrosFiltrados.filter((r) => r.apellidos_nombres === usuarioFiltro);
+                if (registrosFiltrados.length === 0) {
+                    alert('No hay declaraciones confirmadas para lo seleccionado.');
+                    return;
+                }
+
                 const comisionNombre = (COMISIONES[comisionKey] && COMISIONES[comisionKey].nombre) || comisionKey;
                 const fecha = new Date().toISOString().split('T')[0];
                 const padronA1 = resultadoPadronA1.ok ? resultadoPadronA1.resultados : [];
 
                 const imagenesE41 = await _cargarImagenesE41();
-                const porToma = _agruparPorToma(resultadoSiembra.registros);
+                const porToma = _agruparPorToma(registrosFiltrados);
                 const wb = new ExcelJS.Workbook();
                 let correlativo = 1;
                 for (const { toma, filas } of porToma) {
@@ -4373,10 +4395,15 @@ const COMISIONES = {
                     construirHojaE41(wb, toma, filas, filasPadronA1Toma, tipoRiego, usuarioNombre, correlativo, imagenesE41);
                     correlativo++;
                 }
-                await _descargarWorkbook(wb, `Formato_E41_${comisionKey}_${fecha}.xlsx`);
+                // Nombre de archivo distinto según el alcance elegido, para
+                // que calce con la carpeta "Por Toma" al guardarlo a mano.
+                let sufijoArchivo = comisionKey;
+                if (usuarioFiltro) sufijoArchivo = normalizarTextoHeader(usuarioFiltro).replace(/\s+/g, '_');
+                else if (tomaFiltro) sufijoArchivo = tomaFiltro.replace(/[^A-Za-z0-9.]+/g, '_');
+                await _descargarWorkbook(wb, `Formato_E41_${sufijoArchivo}_${fecha}.xlsx`);
 
                 alert('✅ Exportado el Formato E-4.1 con ' + (correlativo - 1) + ' toma(s).\n\n' +
-                    'La sección de usuario no agrario y el volumen mensual autorizado quedaron en blanco — se completan manualmente, como hoy.');
+                    'La sección de usuario no agrario queda en blanco para completar manualmente — el volumen mensual autorizado ya se calcula solo.');
             } catch (e) {
                 console.error('Error al exportar Formato E-4.1:', e);
                 alert('No se pudo generar el archivo: ' + (e.message || e));
@@ -5422,9 +5449,53 @@ function cerrarModalPadronA1() {
     if (modal) modal.classList.remove('active');
 }
 
-function abrirModalSiembraDIS() {
+let _registrosSiembraE41 = [];
+
+async function abrirModalSiembraDIS() {
     const modal = document.getElementById('modalSiembraDIS');
     if (modal) modal.classList.add('active');
+    await _cargarSelectoresE41();
+}
+
+// Carga las declaraciones confirmadas una sola vez al abrir el modal, y con
+// eso arma el selector de Toma (todas las que tengan al menos una
+// declaración). El selector de Usuario se arma reactivamente al elegir una
+// toma (ver alCambiarTomaE41), sin volver a consultar Supabase.
+async function _cargarSelectoresE41() {
+    const selectToma = document.getElementById('selectTomaE41');
+    const selectUsuario = document.getElementById('selectUsuarioE41');
+    selectToma.innerHTML = '<option value="">Cargando…</option>';
+    selectUsuario.innerHTML = '<option value="">Todos los usuarios de la toma (agregado)</option>';
+    selectUsuario.disabled = true;
+
+    if (!window.CusshmiDatos) { selectToma.innerHTML = '<option value="">Todas las tomas</option>'; return; }
+    const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+    const resultado = await CusshmiDatos.cargarRegistrosSiembraParaExportar(comisionKey);
+    _registrosSiembraE41 = resultado.ok ? resultado.registros : [];
+
+    const tomas = Array.from(new Set(_registrosSiembraE41.map((r) => r.toma_nombre).filter(Boolean)))
+        .sort((a, b) => compararOrdenTomas(a, b));
+
+    selectToma.innerHTML = '<option value="">Todas las tomas</option>' +
+        tomas.map((t) => '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + '</option>').join('');
+}
+
+function alCambiarTomaE41() {
+    const tomaSeleccionada = document.getElementById('selectTomaE41').value;
+    const selectUsuario = document.getElementById('selectUsuarioE41');
+    if (!tomaSeleccionada) {
+        selectUsuario.innerHTML = '<option value="">Todos los usuarios de la toma (agregado)</option>';
+        selectUsuario.disabled = true;
+        return;
+    }
+    const usuarios = _registrosSiembraE41
+        .filter((r) => r.toma_nombre === tomaSeleccionada)
+        .map((r) => r.apellidos_nombres)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, 'es'));
+    selectUsuario.innerHTML = '<option value="">Todos los usuarios de la toma (agregado)</option>' +
+        usuarios.map((n) => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
+    selectUsuario.disabled = false;
 }
 
 function cerrarModalSiembraDIS() {
