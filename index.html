@@ -3844,8 +3844,6 @@ const COMISIONES = {
             return mapa[(codigo || '').toUpperCase()] || null;
         }
 
-        const DIAS_POR_MES_E41 = [31, 30, 31, 30, 31, 31, 28, 31, 30, 31, 30, 31]; // AGO..JUL
-
         function _colLetraE41(n) {
             let s = '';
             while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
@@ -4258,24 +4256,13 @@ const COMISIONES = {
                     celda.alignment = { horizontal: c === 1 ? 'left' : 'center' };
                 }
             });
-            DIAS_POR_MES_E41.forEach((dias, idx) => {
-                const celda = ws.getCell(r, 2 + idx);
-                celda.value = dias;
-                celda.font = { size: 8, italic: true };
-                celda.alignment = { horizontal: 'center' };
-            });
             r += 2;
 
             filaTexto(1, 6, '_____________________');
             r++;
             const idImgFirma = wb.addImage({ buffer: imagenes.firmaJosephReyes.buffer, extension: imagenes.firmaJosephReyes.extension });
             ws.addImage(idImgFirma, { tl: { col: 3.5, row: r - 4.3 }, ext: { width: 170, height: 132 } });
-            r += 3;
-            filaTexto(1, 14, 'Aprobado por Jefe de Sub Sector de la CUSSHMI').alignment = { horizontal: 'center' };
-            r++;
-            const cIngNombre = filaTexto(1, 14, 'ING. JOSEPH JUNIOR REYES MAURICIO', { bold: true });
-            cIngNombre.alignment = { horizontal: 'center' };
-            r += 2;
+            r += 6;
 
             const cNota = ws.getCell(r, 1);
             ws.mergeCells(r, 1, r, NUM_COLS);
