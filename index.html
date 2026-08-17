@@ -3850,6 +3850,25 @@ const COMISIONES = {
         // → Diego Silva). Las tomas SD3–SD8 llevan a Franklin Saúl; SD8.1 en
         // adelante (incluidas SI*/otras no cubiertas explícitamente) llevan
         // a Diego Silva, el sectorista del tramo más reciente/más grande.
+        function _normUCE41(v) {
+            return (v || '').toString().trim().toUpperCase().replace(/\s+/g, '');
+        }
+
+        // Encuentra la fila del padrón oficial A-1 del usuario que se está
+        // exportando (por unidad catastral, o por nombre si no hay UC) —
+        // necesario porque filasPadronA1Toma trae TODOS los usuarios de la
+        // toma, no solo el que se está declarando en este documento.
+        function _emparejarPadronA1E41(padronA1Toma, unidadCatastral, nombre) {
+            const uc = _normUCE41(unidadCatastral);
+            if (uc) {
+                const porUC = padronA1Toma.find((p) => _normUCE41(p.unidad_catastral) === uc);
+                if (porUC) return porUC;
+            }
+            const nombreNorm = (nombre || '').toString().trim().toUpperCase();
+            if (!nombreNorm) return null;
+            return padronA1Toma.find((p) => (p.apellidos_nombres || '').toString().trim().toUpperCase() === nombreNorm) || null;
+        }
+
         function _obtenerSectoristaPorToma(tomaNombre) {
             const m = /^SD(\d+(?:\.\d+)?)$/.exec((tomaNombre || '').trim());
             if (m && parseFloat(m[1]) <= 8) {
@@ -3981,21 +4000,33 @@ const COMISIONES = {
             }
             r++;
 
+            // Datos del usuario declarante (unidad catastral, resolución,
+            // canal) salen del padrón oficial A-1 — filasPadronA1Toma trae
+            // a TODOS los usuarios de la toma, así que hay que encontrar la
+            // fila del usuario que se está exportando, no tomar cualquiera.
+            const usuarioA1 = (filasSiembraToma.length === 1)
+                ? _emparejarPadronA1E41(filasPadronA1Toma, filasSiembraToma[0].unidad_catastral, filasSiembraToma[0].apellidos_nombres)
+                : null;
+
             // "Área bajo riego" es el total real de la toma (padrón A-1,
             // todos los usuarios) — no la suma de lo declarado en el DIS,
             // que suele ser menor (no todos declaran cada campaña). Mismo
             // criterio que muestran los dos Formato E-4.1 reales ya
             // firmados (52.2 ha en SD14.1 con solo 47 ha declaradas; 410 ha
-            // en SD8 con solo 253 ha declaradas).
-            const areaBajoRiegoToma = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
-            filaTexto(1, 2, 'Unidad catastral:');
+            // en SD8 con solo 253 ha declaradas). Si el padrón no trae ese
+            // dato para ningún usuario de la toma, se cae al área del
+            // propio declarante (mejor un número real que un 0.0 vacío).
+            let areaBajoRiegoToma = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.area_bajo_riego_ha) || 0), 0);
+            if (!areaBajoRiegoToma && usuarioA1) areaBajoRiegoToma = parseFloat(usuarioA1.area_bajo_riego_ha) || 0;
+            filaTexto(1, 2, 'Unidad catastral: ' + (usuarioA1 ? (usuarioA1.unidad_catastral || '—') : '—'));
             filaTexto(3, 6, 'Área bajo riego (ha): ' + areaBajoRiegoToma.toFixed(1));
-            filaTexto(7, 9, 'Canal Secundario:');
+            filaTexto(7, 9, 'Canal Secundario: ' + (usuarioA1 ? (usuarioA1.canal_derivacion || '—') : '—'));
             filaTexto(10, 14, 'Nombre del bloque de riego: ' + (obtenerBloqueDeToma(tomaNombre) || '—'));
             r += 2;
 
             const volumenHm3 = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.volumen_m3) || 0), 0) / 1e6;
-            const claseDerecho = (filasPadronA1Toma.find((f) => f.clase_derecho) || {}).clase_derecho || '-';
+            const claseDerecho = (usuarioA1 && usuarioA1.clase_derecho) || (filasPadronA1Toma.find((f) => f.clase_derecho) || {}).clase_derecho || '-';
+            const numeroResolucion = (usuarioA1 && usuarioA1.numero_resolucion) || (filasPadronA1Toma.find((f) => f.numero_resolucion) || {}).numero_resolucion || '';
             const tipoRiegoEtiqueta = _tipoRiegoEtiqueta(tipoRiegoDominante);
 
             const rGrupoFuente = r;
@@ -4027,6 +4058,7 @@ const COMISIONES = {
             ws.getCell(rDatosFuente, 1).value = 'SUPERFICIAL';
             ws.getCell(rDatosFuente, 2).value = 'Rio Chira';
             ws.getCell(rDatosFuente, 3).value = claseDerecho;
+            ws.getCell(rDatosFuente, 4).value = numeroResolucion || '—';
             ws.getCell(rDatosFuente, 5).value = volumenHm3.toFixed(3);
             ws.getCell(rDatosFuente + 1, 1).value = 'SUBTERRÁNEA';
             ws.getCell(rDatosFuente + 2, 1).value = 'TOTAL';
