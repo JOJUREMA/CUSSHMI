@@ -4335,10 +4335,29 @@ const COMISIONES = {
             // desbordando a una 2da página (Excel/LibreOffice a veces
             // necesitan algo más de alto del que da la suma nominal de filas
             // para renderizar texto envuelto sin cortar).
-            const escalaPct = Math.max(30, Math.min(100, Math.floor(
+            // Tope superior en 400 (el máximo que admite Excel), NO en 100:
+            // una declaración corta (1-2 cultivos) necesita agrandarse bien
+            // por encima del 100% para llenar la hoja — limitarlo a 100 solo
+            // evitaba encoger, dejando esas hojas cortas chicas y con medio
+            // folio en blanco.
+            const escalaPct = Math.max(30, Math.min(400, Math.floor(
                 Math.min(anchoDisponiblePt / anchoTotalPt, altoDisponiblePt / altoTotalPt) * 100 * 0.88
             )));
             ws.pageSetup.scale = escalaPct;
+
+            // horizontalCentered/verticalCentered (OOXML) no siempre lo
+            // respeta el programa con el que el usuario imprime a PDF —ya
+            // detectado antes con Excel/LibreOffice—, así que el centrado
+            // real se fuerza acá con los márgenes: el espacio que sobra
+            // dentro del área imprimible (si el contenido escalado no la
+            // llena entera) se reparte igual a ambos lados, en vez de
+            // dejarlo todo pegado arriba-izquierda.
+            const anchoEscaladoPt = anchoTotalPt * (escalaPct / 100);
+            const altoEscaladoPt = altoTotalPt * (escalaPct / 100);
+            const sobranteHorizPt = Math.max(0, anchoDisponiblePt - anchoEscaladoPt);
+            const sobranteVertPt = Math.max(0, altoDisponiblePt - altoEscaladoPt);
+            ws.pageSetup.margins.left = ws.pageSetup.margins.right = 0.25 + (sobranteHorizPt / 2) / 72;
+            ws.pageSetup.margins.top = ws.pageSetup.margins.bottom = 0.3 + (sobranteVertPt / 2) / 72;
 
             return ws;
         }
