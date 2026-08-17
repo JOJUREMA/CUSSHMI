@@ -1069,6 +1069,7 @@
             apellidos_nombres: datos.apellidosNombres,
             unidad_catastral: datos.unidadCatastral || null,
             cultivos: Array.isArray(datos.cultivos) ? datos.cultivos : [],
+            tipo_riego: datos.tipoRiego || null,
             creado_por: usuarioId,
             actualizado_en: new Date().toISOString(),
         };
@@ -1191,7 +1192,7 @@
         while (true) {
             const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
                 (client) => client.from('siembra_intenciones')
-                    .select('toma_nombre, apellidos_nombres, unidad_catastral, cultivos, confirmado')
+                    .select('toma_nombre, apellidos_nombres, unidad_catastral, cultivos, tipo_riego, confirmado')
                     .eq('comision_id', comisionId)
                     .eq('confirmado', true)
                     .order('toma_nombre', { ascending: true })

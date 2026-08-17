@@ -211,6 +211,16 @@
                 <label for="inputUnidadCatastral">Unidad catastral (UC)</label>
                 <input type="text" id="inputUnidadCatastral" autocomplete="off">
             </div>
+            <div class="campo" style="width:100%; max-width:420px;">
+                <label for="selectTipoRiego">Tipo de riego</label>
+                <select id="selectTipoRiego">
+                    <option value="">Selecciona…</option>
+                    <option value="Gravedad">Gravedad</option>
+                    <option value="Aspersión">Aspersión</option>
+                    <option value="Goteo">Goteo</option>
+                    <option value="Otro">Otro</option>
+                </select>
+            </div>
 
             <div class="seccion-titulo">Cultivos a sembrar (campaña 2026-2027)</div>
             <div class="estado-busqueda" id="estadoCultivosPrecargados" style="max-width:420px;"></div>
@@ -285,6 +295,30 @@
 
         function normalizarUC(valor) {
             return (valor || '').toString().trim().toUpperCase().replace(/\s+/g, '');
+        }
+
+        // Padrón oficial A-1 — se carga una sola vez por sesión (mismo
+        // patrón que Identificación y registro) y se usa solo para LEER la
+        // Resolución Administrativa en la pantalla de confirmación; nunca se
+        // edita desde este módulo.
+        var padronA1Promesa = null;
+        function obtenerPadronA1() {
+            if (!padronA1Promesa) {
+                padronA1Promesa = CusshmiDatos.cargarPadronOficialA1(comisionKeyActual)
+                    .then(function (r) { return (r.ok && r.resultados) ? r.resultados : []; });
+            }
+            return padronA1Promesa;
+        }
+
+        function emparejarConPadronA1(padronA1, unidadCatastral, nombre) {
+            var uc = normalizarUC(unidadCatastral);
+            if (uc) {
+                var porUC = padronA1.find(function (p) { return normalizarUC(p.unidad_catastral) === uc; });
+                if (porUC) return porUC;
+            }
+            var nombreNorm = (nombre || '').toString().trim().toUpperCase();
+            if (!nombreNorm) return null;
+            return padronA1.find(function (p) { return (p.apellidos_nombres || '').toString().trim().toUpperCase() === nombreNorm; }) || null;
         }
 
         // Mismo criterio que Identificación y registro: por UC primero, si
@@ -515,6 +549,11 @@
                 apellidosNombres: padronUsuario ? (padronUsuario.nombre || '') : '',
                 unidadCatastral: padronUsuario ? (padronUsuario.unidad_catastral || '') : '',
                 cultivos: [],
+                // No se precarga desde padron_usuarios.tipo_riego (viene
+                // como código abreviado "G"/"A"/"GT" del Excel de PDA, no
+                // como el texto que usa este selector) — el sectorista lo
+                // marca a propósito como parte de SU declaración.
+                tipoRiego: '',
                 confirmado: false,
                 solicitudEdicion: false,
                 solicitudEdicionPorNombre: '',
@@ -550,6 +589,7 @@
                     apellidosNombres: r.apellidos_nombres || '',
                     unidadCatastral: r.unidad_catastral || '',
                     cultivos: Array.isArray(r.cultivos) && r.cultivos.length > 0 ? r.cultivos.map(function (c) { return { cultivo: c.cultivo, area: c.area }; }) : [{ cultivo: '', area: '' }],
+                    tipoRiego: r.tipo_riego || '',
                     confirmado: !!r.confirmado,
                     solicitudEdicion: !!r.solicitud_edicion,
                     solicitudEdicionPorNombre: r.solicitud_edicion_por_nombre || '',
@@ -695,6 +735,7 @@
         function pintarFormularioDesdeRegistro() {
             document.getElementById('inputApellidosNombres').value = registroActual.apellidosNombres;
             document.getElementById('inputUnidadCatastral').value = registroActual.unidadCatastral;
+            document.getElementById('selectTipoRiego').value = registroActual.tipoRiego || '';
             renderizarFilasCultivo();
 
             var bloqueado = registroActual.confirmado;
@@ -702,7 +743,7 @@
             document.getElementById('estadoGuardadoFormulario').textContent = '';
             document.getElementById('btnContinuarConfirmacion').textContent = bloqueado ? 'Ver confirmación →' : 'Continuar →';
             document.getElementById('btnAgregarCultivo').style.display = bloqueado ? 'none' : 'block';
-            ['inputApellidosNombres', 'inputUnidadCatastral'].forEach(function (id) {
+            ['inputApellidosNombres', 'inputUnidadCatastral', 'selectTipoRiego'].forEach(function (id) {
                 document.getElementById(id).disabled = bloqueado;
             });
         }
@@ -723,6 +764,10 @@
         });
         document.getElementById('inputUnidadCatastral').addEventListener('input', function (e) {
             registroActual.unidadCatastral = e.target.value;
+            autoguardar();
+        });
+        document.getElementById('selectTipoRiego').addEventListener('change', function (e) {
+            registroActual.tipoRiego = e.target.value;
             autoguardar();
         });
 
@@ -762,7 +807,7 @@
                 '<span class="valor-resumen">' + escapeHtml(valor || '-') + '</span></div>';
         }
 
-        function mostrarConfirmacion() {
+        async function mostrarConfirmacion() {
             document.getElementById('vistaFormulario').style.display = 'none';
             document.getElementById('vistaConfirmacion').style.display = 'flex';
 
@@ -771,12 +816,23 @@
             html += filaResumen('Toma', r.tomaNombre);
             html += filaResumen('Apellidos y nombres', r.apellidosNombres);
             html += filaResumen('Unidad catastral', r.unidadCatastral);
+            html += filaResumen('Tipo de riego', r.tipoRiego);
+
+            // Resolución Administrativa — se lee del padrón oficial A-1
+            // (dato que ya tiene ese módulo, no se declara acá); si el
+            // usuario no tiene una fila en el A-1 o no tiene resolución
+            // registrada, filaResumen ya muestra "-" por su cuenta.
+            var padronA1 = await obtenerPadronA1();
+            var coincidenciaA1 = emparejarConPadronA1(padronA1, r.unidadCatastral, r.apellidosNombres);
+            html += filaResumen('Resolución Administrativa', coincidenciaA1 ? coincidenciaA1.numero_resolucion : null);
 
             var areaTotal = 0, demandaTotal = 0, hayIncompletos = false;
             r.cultivos.filter(function (c) { return c.cultivo && parseFloat(c.area) > 0; }).forEach(function (c) {
                 var area = parseFloat(c.area) || 0;
                 var ref = obtenerReferenciaCultivo(c.cultivo);
-                var detalle = ref ? (area.toFixed(2) + ' ha') : (area.toFixed(2) + ' ha — sin referencia de módulo');
+                var detalle = ref
+                    ? (area.toFixed(2) + ' ha · módulo ' + ref.moduloM3Ha + ' m³/ha')
+                    : (area.toFixed(2) + ' ha — sin referencia de módulo');
                 html += filaResumen(c.cultivo, detalle);
                 areaTotal += area;
                 if (ref) demandaTotal += calcularDemandaHm3(ref, area); else hayIncompletos = true;

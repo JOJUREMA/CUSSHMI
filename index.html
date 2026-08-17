@@ -3841,7 +3841,12 @@ const COMISIONES = {
 
         function _tipoRiegoEtiqueta(codigo) {
             const mapa = { G: 'GRAVEDAD', A: 'ASPERSIÓN', GT: 'GOTEO', GO: 'GOTEO' };
-            return mapa[(codigo || '').toUpperCase()] || null;
+            const valor = (codigo || '').toUpperCase();
+            // Acepta tanto el código abreviado del padrón operativo (G/A/GT/GO)
+            // como la palabra completa que ya declara el propio usuario en la
+            // Declaración de Intención de Siembra (siembra_intenciones.tipo_riego).
+            if (['GRAVEDAD', 'ASPERSIÓN', 'GOTEO', 'OTRO'].includes(valor)) return valor;
+            return mapa[valor] || null;
         }
 
         function _colLetraE41(n) {
@@ -4361,7 +4366,11 @@ const COMISIONES = {
                     // comisión cuando la hoja junta a más de un usuario de esa
                     // toma en un mismo documento (caso poco común).
                     const usuarioNombre = filas.length === 1 ? filas[0].apellidos_nombres : comisionNombre;
-                    construirHojaE41(wb, toma, filas, filasPadronA1Toma, tipoRiegoDominante, usuarioNombre, correlativo, imagenesE41);
+                    // Si es la declaración de un solo usuario, prioriza el
+                    // tipo de riego que ÉL marcó en su propia Declaración de
+                    // Intención de Siembra sobre el agregado de toda la toma.
+                    const tipoRiego = (filas.length === 1 && filas[0].tipo_riego) ? filas[0].tipo_riego : tipoRiegoDominante;
+                    construirHojaE41(wb, toma, filas, filasPadronA1Toma, tipoRiego, usuarioNombre, correlativo, imagenesE41);
                     correlativo++;
                 }
                 await _descargarWorkbook(wb, `Formato_E41_${comisionKey}_${fecha}.xlsx`);
