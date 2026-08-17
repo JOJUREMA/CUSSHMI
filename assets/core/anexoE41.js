@@ -311,7 +311,6 @@ function _construirAnexoE41Pagina(datos, rutaImagenes) {
             ${filaSeccion3('TOTAL (Hm³) Demanda neta', s3.demandaNetaPorMes, s3.totalDemandaNeta, true, false)}
             ${filaSeccion3('TOTAL (m³/seg/sem)', s3.m3segPorMes, null, false, false)}
             ${filaSeccion3('TOTAL (Hm³) Demanda Bruta', s3.demandaBrutaPorMes, s3.totalDemandaBruta, true, true)}
-            <tr>${['<td class="e41-izq"></td>'].concat(s3.diasPorMes.map((n) => '<td><i>' + n + '</i></td>')).join('')}<td></td></tr>
         </table>
 
         <div class="e41-firma-wrap">

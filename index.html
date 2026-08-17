@@ -4499,7 +4499,14 @@ const COMISIONES = {
                 overlay.style.cssText = 'position:fixed; inset:0; background:#fff; z-index:99998;';
                 document.body.appendChild(overlay);
                 contenedor = document.createElement('div');
-                contenedor.style.cssText = 'position:relative; z-index:99999; background:#fff;';
+                // display:inline-block: sin esto, un <div> en flujo normal
+                // se estira al ancho completo del body/viewport (variable
+                // según la ventana del usuario) en vez de ajustarse al
+                // ancho real del contenido (.e41-pagina, fijo en CSS) — eso
+                // hacía que html2canvas capturara con un ancho ajeno al
+                // documento, forzando una reducción de escala mayor a la
+                // necesaria y dejando franjas en blanco arriba/abajo.
+                contenedor.style.cssText = 'position:relative; z-index:99999; background:#fff; display:inline-block;';
                 document.body.appendChild(contenedor);
 
                 // Cada toma se dibuja a mano como UNA página completa (nunca
