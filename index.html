@@ -4022,8 +4022,11 @@ const COMISIONES = {
             // Si el padrón no trae el canal de derivación real, se usa
             // "PRINCIPAL TOMA <nombre>" como texto por defecto (pedido
             // explícito) en vez de dejarlo en blanco/guión.
-            filaTexto(7, 9, 'Canal Secundario: ' + ((usuarioA1 && usuarioA1.canal_derivacion) || ('PRINCIPAL TOMA ' + tomaNombre)));
-            filaTexto(10, 14, 'Nombre del bloque de riego: ' + (obtenerBloqueDeToma(tomaNombre) || '—'));
+            // Canal Secundario con una columna más de ancho (7-10 en vez de
+            // 7-9): el texto por defecto "PRINCIPAL TOMA <nombre>" es más
+            // largo que un guión y quedaba muy pegado al bloque de riego.
+            filaTexto(7, 10, 'Canal Secundario: ' + ((usuarioA1 && usuarioA1.canal_derivacion) || ('PRINCIPAL TOMA ' + tomaNombre)));
+            filaTexto(11, 14, 'Nombre del bloque de riego: ' + (obtenerBloqueDeToma(tomaNombre) || '—'));
             r += 2;
 
             const volumenHm3 = filasPadronA1Toma.reduce((s, f) => s + (parseFloat(f.volumen_m3) || 0), 0) / 1e6;
@@ -4559,15 +4562,12 @@ const COMISIONES = {
         // assets/core/modulosRiego.js que usa el Excel — nunca se
         // reimplementa acá.
         async function exportarFormatoE41PDF() {
-            if (!window.html2pdf) { alert('Librería PDF no disponible'); return; }
             if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
 
             const btn = document.getElementById('btnExportarE41');
             const textoOriginal = btn ? btn.textContent : '';
             if (btn) { btn.disabled = true; btn.textContent = '📊 Generando…'; }
 
-            let contenedor = null;
-            let overlay = null;
             try {
                 const datos = await _recopilarDatosExportE41();
                 if (!datos.ok) { alert(datos.error); return; }
@@ -4577,148 +4577,73 @@ const COMISIONES = {
                 const porToma = _agruparPorToma(registrosFiltrados).filter((t) => t.toma !== 'SIN TOMA IDENTIFICADA');
                 if (!porToma.length) { alert('No hay tomas para exportar.'); return; }
 
-                // El contenedor va en el flujo normal del documento (nunca
-                // position:fixed/absolute) — comprobado con html2canvas en
-                // esta versión: un elemento con position:fixed captura con
-                // ALTO CERO (canvas en blanco) aunque su offsetHeight real
-                // sea correcto; en flujo normal captura bien. Se cubre con
-                // un overlay para que no se vea el contenido "saltar" en la
-                // pantalla mientras se genera.
-                overlay = document.createElement('div');
-                overlay.style.cssText = 'position:fixed; inset:0; background:#fff; z-index:99998;';
-                document.body.appendChild(overlay);
-                contenedor = document.createElement('div');
-                // display:inline-block: sin esto, un <div> en flujo normal
-                // se estira al ancho completo del body/viewport (variable
-                // según la ventana del usuario) en vez de ajustarse al
-                // ancho real del contenido (.e41-pagina, fijo en CSS) — eso
-                // hacía que html2canvas capturara con un ancho ajeno al
-                // documento, forzando una reducción de escala mayor a la
-                // necesaria y dejando franjas en blanco arriba/abajo.
-                contenedor.style.cssText = 'position:relative; z-index:99999; background:#fff; display:inline-block;';
-                document.body.appendChild(contenedor);
-
-                // Cada toma se dibuja a mano como UNA página completa (nunca
-                // se deja que el paginado automático de html2pdf decida):
-                // se captura su canvas por separado y se coloca centrada
-                // horizontal y verticalmente en la hoja A4, escalada para
-                // que quepa entera sin cortarse — mismo criterio "una hoja
-                // por toma" ya usado en el Excel.
-                let pdf = null;
+                // Impresión nativa del navegador en vez de html2canvas: el
+                // mismo patrón ya usado en el resto del sistema (ver
+                // mostrarAnexoG2Consolidado y otros — window.open('', '_blank')
+                // + document.write + window.print()). Se abandona
+                // html2canvas/html2pdf para este export porque, tras varias
+                // rondas de depuración, seguía cortando el documento y
+                // recortando el ancho en ciertos navegadores reales — un
+                // bug de esa librería rasterizando contenido de alto
+                // variable, no del propio contenido. La impresión nativa no
+                // rasteriza nada: es el mismo motor que ya usa el navegador
+                // para imprimir cualquier página, así que no arrastra ese
+                // problema, y de paso el diálogo de impresión YA es la
+                // vista previa pedida (todo navegador moderno la muestra
+                // antes de imprimir o guardar como PDF).
+                let paginasHtml = '';
                 let correlativo = 1;
-                const advertenciasCaptura = [];
                 for (const { toma, filas } of porToma) {
                     const { filasPadronA1Toma, tipoRiego, usuarioNombre } = await _prepararTomaE41(comisionKey, toma, filas, padronA1, comisionNombre);
                     const datosCalc = calcularDatosE41(toma, filas, filasPadronA1Toma, tipoRiego, usuarioNombre, correlativo);
-                    const paginaHtml = _construirAnexoE41Pagina(datosCalc, 'assets/img/e41/');
-                    contenedor.innerHTML = _estilosAnexoE41() + paginaHtml;
-                    await _esperarImagenesListasE41(contenedor);
-                    // Espera a que las fuentes terminen de cargar/aplicarse
-                    // antes de medir — si el texto todavía está con la
-                    // fuente de respaldo del navegador cuando se mide el
-                    // alto, el reflujo al llegar la fuente real puede
-                    // cambiar cuánto ocupa el texto, y la captura de
-                    // html2canvas queda corta.
-                    if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (e) {} }
-                    await _esperarRepintadoE41();
-                    // Fuerza un reflow real justo antes de medir/capturar
-                    // (algunos navegadores no terminan de aplicar el layout
-                    // hasta que algo lo consulta).
-                    void contenedor.offsetHeight;
-                    const anchoCaptura = contenedor.scrollWidth;
-                    const altoCaptura = contenedor.scrollHeight;
-
-                    const worker = html2pdf().set({
-                        margin: 5,
-                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                        // width Y height SÍ se fuerzan explícitos: sin esto,
-                        // html2canvas puede usar su propia detección (poco
-                        // confiable — ya se confirmó antes con el ancho,
-                        // que por defecto usaba ~756px en vez del real) y
-                        // terminar capturando una altura menor a la real,
-                        // cortando el documento antes de la tabla de
-                        // volumen/firma. windowWidth NO se fuerza: forzarlo
-                        // a un valor angosto obliga a html2canvas a
-                        // re-acomodar TODA la app dentro de esa ventana
-                        // angosta para poder capturar, lo que desplaza el
-                        // contenedor respecto a su posición real y corta el
-                        // lado izquierdo — ya no hace falta con el
-                        // contenedor ajustado a su ancho real
-                        // (display:inline-block).
-                        html2canvas: { scale: 2, useCORS: true, width: anchoCaptura, height: altoCaptura },
-                    }).from(contenedor);
-                    const canvas = await worker.toCanvas().get('canvas');
-                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-
-                    // Diagnóstico: si el canvas capturado sale claramente
-                    // más bajo de lo que medimos justo antes (menos del
-                    // 90%), algo cortó el contenido durante la captura —
-                    // se avisa en el mensaje final en vez de fallar en
-                    // silencio, para poder confirmar la causa si vuelve a
-                    // pasar.
-                    const altoEsperadoPx = altoCaptura * 2; // scale:2
-                    if (canvas.height < altoEsperadoPx * 0.9) {
-                        advertenciasCaptura.push(toma + ': se esperaba ~' + altoEsperadoPx + 'px de alto y se capturaron ' + canvas.height + 'px — el PDF de esta toma puede salir incompleto.');
-                    }
-
-                    if (!pdf) {
-                        // Página 1 real: se obtiene la instancia jsPDF a
-                        // partir de una hoja semilla en blanco (10x10px) en
-                        // vez de dejar que toPdf() procese el contenido real
-                        // — así se garantiza 1 sola página aunque el
-                        // contenido sea más alto de lo esperado (el
-                        // paginado automático de html2pdf podría partirlo
-                        // en 2+ páginas antes de que lo reescalemos acá).
-                        const seed = document.createElement('div');
-                        seed.style.cssText = 'width:10px;height:10px;';
-                        document.body.appendChild(seed);
-                        pdf = await html2pdf().set({ margin: 5, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } }).from(seed).toPdf().get('pdf');
-                        document.body.removeChild(seed);
-                    } else {
-                        pdf.addPage();
-                    }
-
-                    const pageWmm = pdf.internal.pageSize.getWidth();
-                    const pageHmm = pdf.internal.pageSize.getHeight();
-                    const margenMm = 5;
-                    const usableWmm = pageWmm - margenMm * 2;
-                    const usableHmm = pageHmm - margenMm * 2;
-                    const pxAMm = 25.4 / 96 / 2; // /2 porque scale:2 duplicó los píxeles
-                    let wMm = canvas.width * pxAMm;
-                    let hMm = canvas.height * pxAMm;
-                    const factorEscala = Math.min(usableWmm / wMm, usableHmm / hMm);
-                    wMm *= factorEscala; hMm *= factorEscala;
-                    const x = margenMm + (usableWmm - wMm) / 2;
-                    const y = margenMm + (usableHmm - hMm) / 2;
-                    pdf.addImage(imgData, 'JPEG', x, y, wMm, hMm);
-
+                    paginasHtml += _construirAnexoE41Pagina(datosCalc, 'assets/img/e41/');
                     correlativo++;
                 }
+                if (!paginasHtml) { alert('No hay tomas para exportar.'); return; }
 
                 let sufijoArchivo = comisionKey;
                 if (usuarioFiltro) sufijoArchivo = normalizarTextoHeader(usuarioFiltro).replace(/\s+/g, '_');
                 else if (tomaFiltro) sufijoArchivo = tomaFiltro.replace(/[^A-Za-z0-9.]+/g, '_');
-                pdf.setProperties({ title: `Formato_E41_${sufijoArchivo}_${fecha}` });
 
-                // Vista previa en vez de descarga directa: se abre el PDF en
-                // una pestaña nueva (visor nativo del navegador) para que el
-                // usuario vea exactamente cómo va a quedar ANTES de decidir
-                // si lo imprime o lo descarga — desde esa misma pestaña ya
-                // tiene los botones de imprimir/descargar del visor.
-                const urlVistaPrevia = pdf.output('bloburl');
-                const ventana = window.open(urlVistaPrevia, '_blank');
-                if (!ventana) {
-                    alert('El navegador bloqueó la ventana de vista previa (revisa el bloqueador de pop-ups). El PDF ya se generó — habilita las ventanas emergentes para este sitio e inténtalo de nuevo.');
+                const ventanaImpresion = window.open('', '_blank', 'width=900,height=1000');
+                if (!ventanaImpresion) {
+                    alert('El navegador bloqueó la ventana de vista previa (revisa el bloqueador de pop-ups) e inténtalo de nuevo.');
+                    return;
                 }
-                if (advertenciasCaptura.length) {
-                    alert('⚠️ Aviso de captura:\n\n' + advertenciasCaptura.join('\n') + '\n\nSi el PDF sale cortado, avisa a soporte con este mensaje.');
-                }
+                const htmlCompleto = `<!DOCTYPE html>
+                <html lang="es">
+                <head>
+                <meta charset="UTF-8">
+                <title>Formato_E41_${sufijoArchivo}_${fecha}</title>
+                ${_estilosAnexoE41()}
+                <style>
+                    body { background:#e8e8e8; margin:0; padding:20px 0; }
+                    .e41-pagina { margin: 0 auto 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+                    .no-print { position: sticky; top: 0; text-align: center; padding: 10px; background:#fff; border-bottom:1px solid #ccc; margin-bottom:16px; }
+                    .btn-print { background:#0070c0; color:#fff; border:none; padding:10px 30px; font-size:14px; cursor:pointer; border-radius:6px; }
+                    @media print {
+                        body { background:#fff; padding:0; }
+                        .no-print { display:none; }
+                        .e41-pagina { margin:0; box-shadow:none; page-break-after: always; }
+                        .e41-pagina:last-child { page-break-after: auto; }
+                        @page { size: A4 portrait; margin: 8mm; }
+                    }
+                </style>
+                </head>
+                <body>
+                    <div class="no-print">
+                        <button class="btn-print" onclick="window.print();">🖨️ Imprimir / Guardar como PDF</button>
+                        <p style="font-size:11px; color:#666; margin-top:8px;">Para guardar como PDF, elige "Guardar como PDF" en el destino de la impresión. Esto es la vista previa — nada se envía a imprimir hasta que confirmes en ese diálogo.</p>
+                    </div>
+                    ${paginasHtml}
+                </body>
+                </html>`;
+                ventanaImpresion.document.write(htmlCompleto);
+                ventanaImpresion.document.close();
             } catch (e) {
                 console.error('Error al exportar Formato E-4.1 en PDF:', e);
                 alert('No se pudo generar el PDF: ' + (e.message || e));
             } finally {
-                if (overlay) document.body.removeChild(overlay);
-                if (contenedor) document.body.removeChild(contenedor);
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
             }
         }

@@ -171,7 +171,7 @@ function _estilosAnexoE41() {
         .e41-barra { display: flex; background: #9DC3E6; font-weight: bold; font-size: 12px; margin: 8px 0 4px; }
         .e41-barra div { padding: 3px 6px; }
         .e41-barra div:first-child { width: 40%; }
-        .e41-linea2 { display: flex; font-size: 11px; margin-bottom: 8px; }
+        .e41-linea2 { display: flex; font-size: 11px; margin-bottom: 8px; gap: 14px; }
         .e41-linea2 span { flex: 1; }
         .e41-gris th { background: #D9D9D9; font-size: 10px; }
         .e41-centrado { text-align: center; }
