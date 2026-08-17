@@ -4528,11 +4528,17 @@ const COMISIONES = {
                     const worker = html2pdf().set({
                         margin: 5,
                         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                        // width/windowWidth explícitos: sin esto, html2canvas
-                        // captura con el ancho de página (~756px) en vez del
-                        // ancho real del contenedor, cortando las columnas
-                        // de la derecha de la tabla.
-                        html2canvas: { scale: 2, useCORS: true, width: contenedor.scrollWidth, windowWidth: contenedor.scrollWidth },
+                        // width SÍ se fuerza (sin esto html2pdf usa ~756px
+                        // por defecto — el ancho de página en px, no el del
+                        // documento — y corta el lado derecho). windowWidth
+                        // NO se fuerza: forzarlo a un valor angosto obliga a
+                        // html2canvas a re-acomodar TODA la app dentro de esa
+                        // ventana angosta para poder capturar, lo que
+                        // desplaza el contenedor respecto a su posición real
+                        // y corta el lado izquierdo — ya no hace falta con
+                        // el contenedor ajustado a su ancho real
+                        // (display:inline-block).
+                        html2canvas: { scale: 2, useCORS: true, width: contenedor.scrollWidth },
                     }).from(contenedor);
                     const canvas = await worker.toCanvas().get('canvas');
                     const imgData = canvas.toDataURL('image/jpeg', 0.95);
