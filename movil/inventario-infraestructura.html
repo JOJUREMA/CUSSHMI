@@ -935,6 +935,19 @@
             return parseInt(m[1], 10) + '+' + parseFloat(m[2]).toFixed(2);
         }
 
+        // Tolera la diferencia de convención entre el KMZ ("CANAL PRINCIPAL
+        // SD-3", "DREN BANANEROS - SANTA CLARA") y el Excel sincronizado
+        // ("Principal SD3", sin la palabra CANAL/DREN ni guion) — quita esas
+        // palabras COMPLETAS (límite de palabra, no substring: no rompe
+        // nombres que las contengan en otra posición, ej. "CANALIZACION")
+        // y los guiones, en ambos lados de la comparación por igual.
+        function _normNombreLibre(v) {
+            var s = _normMatch(v);
+            s = s.replace(/\bCANAL\b/g, ' ').replace(/\bDREN\b/g, ' ');
+            s = s.replace(/-/g, '');
+            return s.replace(/\s+/g, ' ').trim();
+        }
+
         function _numOrNull(v) {
             var n = parseFloat(v);
             return Number.isFinite(n) ? n : null;
@@ -947,11 +960,11 @@
         // entre el Excel y el GIS.
         function _buscarRegistroParaFigura(registros, figura, claves) {
             var canalFuenteKmz = claves.canalFuenteKey ? _normMatch(figura.campos[claves.canalFuenteKey]) : '';
-            var nombreCanalKmz = _normMatch(figura.campos[claves.nombreCanalKey]);
+            var nombreCanalKmz = _normNombreLibre(figura.campos[claves.nombreCanalKey]);
             var progresivaKmz = _normProgresiva(figura.campos[claves.progresivaKey]);
             return registros.find(function (r) {
                 return (!claves.canalFuenteKey || _normMatch(r.canal_fuente) === canalFuenteKmz) &&
-                    _normMatch(r.nombre_canal) === nombreCanalKmz &&
+                    _normNombreLibre(r.nombre_canal) === nombreCanalKmz &&
                     _normProgresiva(r.progresiva_km) === progresivaKmz;
             }) || null;
         }
@@ -1300,7 +1313,7 @@
             }
             var claves = CLAVES_KMZ_POR_TIPO.canal_lateral;
             var figuraMatch = capaGisCache.canal_lateral.find(function (f) {
-                return _normMatch(f.campos[claves.nombreCanalKey]) === _normMatch(r.nombreCanal) &&
+                return _normNombreLibre(f.campos[claves.nombreCanalKey]) === _normNombreLibre(r.nombreCanal) &&
                     _normProgresiva(f.campos[claves.progresivaKey]) === _normProgresiva(r.progresivaKm);
             });
             return (figuraMatch && figuraMatch.color) || '#00bcd4';

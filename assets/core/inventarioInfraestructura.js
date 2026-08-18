@@ -567,7 +567,7 @@ const CLAVES_KMZ_POR_TIPO = {
     sifon_invertido: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
     canal_lateral: { canalFuenteKey: 'CANAL_FUEN', nombreCanalKey: 'NOMBRE', progresivaKey: 'PROGRESIVA', esteIniKey: 'ESTE_INI', norteIniKey: 'NORTE_INI', esteFinKey: 'ESTE_FIN', norteFinKey: 'NORTE_FIN' },
     dren_principal: { canalFuenteKey: null, nombreCanalKey: 'NOMBRE DE DREN COLECTOR', progresivaKey: 'PROGRESIVA (Km)', esteIniKey: 'ESTE INICIO', norteIniKey: 'NORTE INICIO', esteFinKey: 'ESTE FINAL', norteFinKey: 'NORTE FINAL' },
-    dren_secundario: { canalFuenteKey: null, nombreCanalKey: 'NOMBRE DE DREN COLECTOR', progresivaKey: 'PROGRESIVA (Km)', esteIniKey: 'ESTE INICIO', norteIniKey: 'NORTE INICIO', esteFinKey: 'ESTE FINAL', norteFinKey: 'NORTE FINAL' },
+    dren_secundario: { canalFuenteKey: null, nombreCanalKey: 'NOMBRE DE DREN SECUNDARIO', progresivaKey: 'PROGRESIVA (Km)', esteIniKey: 'ESTE INICIO', norteIniKey: 'NORTE INICIO', esteFinKey: 'ESTE FINAL', norteFinKey: 'NORTE FINAL' },
 };
 
 // Tipos cuya geometría real en el KMZ es una línea (LineString), no un

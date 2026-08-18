@@ -1602,8 +1602,8 @@
         const fila = {
             comision_id: comisionId,
             toma_nombre: datos.tomaNombre || null,
-            canal_fuente: datos.canalFuente,
-            nombre_canal: datos.nombreCanal,
+            canal_fuente: _normCanalGuardado(datos.canalFuente),
+            nombre_canal: _normCanalGuardado(datos.nombreCanal),
             progresiva_km: datos.progresivaKm || null,
             zona_utm: datos.zonaUtm || null,
             este: Number.isFinite(parseFloat(datos.este)) ? parseFloat(datos.este) : null,
@@ -1643,8 +1643,8 @@
         const fila = {
             comision_id: comisionId,
             toma_nombre: datos.tomaNombre || null,
-            canal_fuente: datos.canalFuente,
-            nombre_canal: datos.nombreCanal,
+            canal_fuente: _normCanalGuardado(datos.canalFuente),
+            nombre_canal: _normCanalGuardado(datos.nombreCanal),
             orden_compuerta: datos.ordenCompuerta || null,
             progresiva_km: datos.progresivaKm || null,
             zona_utm: datos.zonaUtm || null,
@@ -1746,6 +1746,21 @@
     function rechazarSolicitudEdicionInventarioToma(id) { return _rechazarSolicitudEdicionInventario('inventario_tomas', id); }
     function rechazarSolicitudEdicionInventarioCompuerta(id) { return _rechazarSolicitudEdicionInventario('inventario_compuertas', id); }
 
+    // Normaliza canal_fuente/nombre_canal antes de cualquier escritura a
+    // las 3 tablas de inventario (sync masivo Y guardado individual desde
+    // el móvil) — evita duplicados por diferencias de mayúsculas/espacios
+    // entre corridas sucesivas del Excel o ediciones manuales. Misma
+    // lógica que _normCanal (assets/core/inventarioInfraestructura.js),
+    // copiada acá en vez de reutilizarla: datos.js lo cargan 9 pantallas
+    // del móvil que NO cargan ese archivo (movil/index.html,
+    // orden-riego.html, seguimiento.html, notificaciones.html,
+    // identificacion-registro.html, siembra-intencion.html,
+    // pda-programado.html, sinceramiento-areas.html, condicion-usuario.html)
+    // — depender del global rompería con un ReferenceError en esas pantallas.
+    function _normCanalGuardado(valor) {
+        return (valor || '').toString().trim().replace(/\s+/g, ' ').toUpperCase();
+    }
+
     // Sincronización masiva desde escritorio (parser del Excel de ANA,
     // ver Sistema_Riego_CUSSHMI_14.html). `filasEntrada` ya viene con
     // `tomaNombre` resuelto (assets/core/inventarioInfraestructura.js,
@@ -1766,6 +1781,10 @@
         const usuarioId = sessionData?.session?.user?.id || null;
 
         const filas = filasEntrada.map((f) => mapearFila(f, comisionId, usuarioId));
+        filas.forEach((fila) => {
+            fila.canal_fuente = _normCanalGuardado(fila.canal_fuente);
+            fila.nombre_canal = _normCanalGuardado(fila.nombre_canal);
+        });
         const filasPorClave = new Map();
         filas.forEach((fila) => {
             filasPorClave.set(fila.canal_fuente + '|' + fila.nombre_canal + '|' + (fila.progresiva_km || ''), fila);
@@ -1790,8 +1809,8 @@
         return _sincronizarInventario('inventario_tomas', comisionKey, filasEntrada, (f, comisionId, usuarioId) => ({
             comision_id: comisionId,
             toma_nombre: f.tomaNombre || null,
-            canal_fuente: f.canalFuente,
-            nombre_canal: f.nombreCanal,
+            canal_fuente: _normCanalGuardado(f.canalFuente),
+            nombre_canal: _normCanalGuardado(f.nombreCanal),
             progresiva_km: f.progresivaKm || null,
             zona_utm: f.zonaUtm || null,
             este: Number.isFinite(parseFloat(f.este)) ? parseFloat(f.este) : null,
@@ -1973,7 +1992,7 @@
         const usuarioId = sessionData?.session?.user?.id || null;
         const fila = {
             comision_id: comisionId, tipo_estructura: datos.tipoEstructura, toma_nombre: datos.tomaNombre || null,
-            canal_fuente: datos.canalFuente, nombre_canal: datos.nombreCanal, progresiva_km: datos.progresivaKm || null,
+            canal_fuente: _normCanalGuardado(datos.canalFuente), nombre_canal: _normCanalGuardado(datos.nombreCanal), progresiva_km: datos.progresivaKm || null,
             nombre_obra: datos.nombreObra || null,
             este: Number.isFinite(parseFloat(datos.este)) ? parseFloat(datos.este) : null,
             norte: Number.isFinite(parseFloat(datos.norte)) ? parseFloat(datos.norte) : null,
@@ -2035,8 +2054,8 @@
             comision_id: comisionId,
             tipo_estructura: tipoEstructura,
             toma_nombre: f.tomaNombre || null,
-            canal_fuente: f.canalFuente,
-            nombre_canal: f.nombreCanal,
+            canal_fuente: _normCanalGuardado(f.canalFuente),
+            nombre_canal: _normCanalGuardado(f.nombreCanal),
             progresiva_km: f.progresivaKm || null,
             nombre_obra: f.nombreObra || null,
             zona_utm: f.zonaUtm || null,
