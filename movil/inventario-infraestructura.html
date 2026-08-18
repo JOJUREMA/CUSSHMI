@@ -1026,9 +1026,17 @@
                 var capa;
                 if (esLineal && f.geom && f.geom.type === 'LineString') {
                     // Canal Lateral respeta el color real del KMZ (simboliza
-                    // el orden de riego, L1..L5) — Drenes conservan su color
-                    // fijo por subtipo, ya asignado en pintarDrenColor.
-                    var colorLinea = (tipo === 'canal_lateral' && f.color) ? f.color : colorEstado;
+                    // el orden de riego, L1..L5). Drenes: verificado contra
+                    // el KMZ original que su <LineStyle><color> es negro fijo
+                    // (ff000000) para el 100% de las figuras, sin variar por
+                    // tipo/orden — se replica ese negro tal cual en vez del
+                    // color por Estado (que sí se conserva como respaldo
+                    // cuando falta información del formato oficial, mismo
+                    // criterio ya usado para el resto de tipos).
+                    var colorLinea;
+                    if (tipo === 'canal_lateral' && f.color) colorLinea = f.color;
+                    else if (esDren) colorLinea = incompleto ? '#c0392b' : '#000000';
+                    else colorLinea = colorEstado;
                     capa = L.polyline(f.geom.coords, { color: colorLinea, weight: 4, opacity: 0.9, dashArray: incompleto ? '2,6' : null }).addTo(mapaInventarioLeaflet);
                 } else if (esPuntualConIcono && f.geom && f.geom.type === 'Point') {
                     // Ícono real del KMZ (respeta la simbología original) +
@@ -1302,8 +1310,12 @@
         // orden de riego (L1..L5), verificado 1:1 contra el KMZ real; se
         // preserva tal cual en vez de un cian genérico. Respaldo neutro si
         // no se encuentra (no debería pasar salvo un canal recién creado a
-        // mano, sin figura de origen en el KMZ).
+        // mano, sin figura de origen en el KMZ). Drenes: su KMZ original
+        // usa un negro fijo (ff000000) para todas las figuras, sin variar
+        // por tipo — se replica ese negro directo, sin buscar en ningún
+        // JSON (no hay nada que buscar, es constante).
         async function _colorRealDeCanal(r) {
+            if (r.tipo === 'dren_principal' || r.tipo === 'dren_secundario') return '#000000';
             if (r.tipo !== 'canal_lateral') return '#00bcd4';
             if (!capaGisCache.canal_lateral) {
                 try {

@@ -4460,7 +4460,10 @@ const COMISIONES = {
                             if (c.esteInicio == null || c.norteInicio == null || c.esteFinal == null || c.norteFinal == null) return;
                             var pIni = utm17SALatLon(Number(c.esteInicio), Number(c.norteInicio));
                             var pFin = utm17SALatLon(Number(c.esteFinal), Number(c.norteFinal));
-                            var colorLinea = tipo === 'canal_lateral' ? _colorRealCanalLateralEsc(r, figurasCanalLateral) : _colorPorEstadoInventarioEsc(r.estado);
+                            // Drenes: su KMZ original usa negro fijo
+                            // (ff000000) para el 100% de las figuras, sin
+                            // variar por tipo/orden — se replica tal cual.
+                            var colorLinea = tipo === 'canal_lateral' ? _colorRealCanalLateralEsc(r, figurasCanalLateral) : '#000000';
                             var estiloIdLinea = 'linea_' + tipo + '_' + colorLinea.replace('#', '');
                             asegurarEstiloLinea(estiloIdLinea, colorLinea);
                             placemarksTipo.push(construirPlacemarkLinea(nombre, [[pIni.lat, pIni.lon], [pFin.lat, pFin.lon]], estiloIdLinea, camposComunes));
