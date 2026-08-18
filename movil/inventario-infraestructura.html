@@ -924,6 +924,17 @@
             return (v || '').toString().trim().replace(/\s+/g, ' ').toUpperCase();
         }
 
+        // El Excel oficial y el KMZ traen la progresiva con formato distinto
+        // a veces (ej. "07+899.00" vs "7+899" vs "7+899.00") — se normaliza
+        // a km+metros con 2 decimales fijos para que ambas fuentes calcen
+        // aunque difieran en ceros a la izquierda o decimales.
+        function _normProgresiva(v) {
+            var s = (v || '').toString().trim().toUpperCase();
+            var m = s.match(/^(\d+)\s*\+\s*(\d+(?:\.\d+)?)$/);
+            if (!m) return s.replace(/\s+/g, '');
+            return parseInt(m[1], 10) + '+' + parseFloat(m[2]).toFixed(2);
+        }
+
         function _numOrNull(v) {
             var n = parseFloat(v);
             return Number.isFinite(n) ? n : null;
@@ -932,15 +943,16 @@
         // Empareja una figura del KMZ contra los registros de Supabase ya
         // cargados, por la misma clave natural que ya usa la sincronización
         // (canal fuente + nombre del canal + progresiva), normalizada para
-        // tolerar diferencias de mayúsculas/espacios entre el Excel y el GIS.
+        // tolerar diferencias de mayúsculas/espacios/formato de progresiva
+        // entre el Excel y el GIS.
         function _buscarRegistroParaFigura(registros, figura, claves) {
             var canalFuenteKmz = claves.canalFuenteKey ? _normMatch(figura.campos[claves.canalFuenteKey]) : '';
             var nombreCanalKmz = _normMatch(figura.campos[claves.nombreCanalKey]);
-            var progresivaKmz = _normMatch(figura.campos[claves.progresivaKey]);
+            var progresivaKmz = _normProgresiva(figura.campos[claves.progresivaKey]);
             return registros.find(function (r) {
                 return (!claves.canalFuenteKey || _normMatch(r.canal_fuente) === canalFuenteKmz) &&
                     _normMatch(r.nombre_canal) === nombreCanalKmz &&
-                    _normMatch(r.progresiva_km) === progresivaKmz;
+                    _normProgresiva(r.progresiva_km) === progresivaKmz;
             }) || null;
         }
 
@@ -1241,11 +1253,17 @@
             inicializarMapaFichaSiHaceFalta();
             mapaFichaLeaflet.eachLayer(function (l) { if (l.esCapaFicha) mapaFichaLeaflet.removeLayer(l); });
 
+            // El mapa de la ficha muestra ÚNICAMENTE la estructura abierta
+            // — nunca los polígonos de predios (a pedido explícito del
+            // usuario, tanto para puntuales como para Canales/Drenes: acá
+            // se viene a ver/editar UNA obra, no el padrón de la toma; eso
+            // ya tiene su propia pantalla en "Usuarios de esta toma").
             var capasFicha = [];
             if (esLineal) {
                 var pIni = utm17SALatLon(Number(esteIni), Number(norteIni));
                 var pFin = utm17SALatLon(Number(esteFin), Number(norteFin));
-                var linea = L.polyline([[pIni.lat, pIni.lon], [pFin.lat, pFin.lon]], { color: '#00bcd4', weight: 4 }).addTo(mapaFichaLeaflet);
+                var colorLinea = await _colorRealDeCanal(r);
+                var linea = L.polyline([[pIni.lat, pIni.lon], [pFin.lat, pFin.lon]], { color: colorLinea, weight: 5 }).addTo(mapaFichaLeaflet);
                 linea.esCapaFicha = true;
                 capasFicha.push(linea);
             } else {
@@ -1262,48 +1280,30 @@
                 capasFicha.push(punto);
             }
 
-            // Predios de los usuarios de la toma — reusa tal cual el parser
-            // y el cruce ya escritos en assets/core/mapa.js (KML_POR_TOMA/
-            // parsearKmlATomas/filtrarPorToma/cruzarPredioConPadron/
-            // _colorPorCultivo), sin inventar un criterio visual nuevo. Se
-            // omite para los tipos puntuales (Toma y afines) — el usuario
-            // pidió quitarlos ahí, quedan solo en Canales/Drenes.
-            if (r.tomaNombre && TIPOS_PUNTUALES_GIS.indexOf(r.tipo) === -1) {
-                var archivosKml = KML_POR_TOMA[normalizarNombreToma(r.tomaNombre)];
-                if (archivosKml) {
-                    var listaArchivos = Array.isArray(archivosKml) ? archivosKml : [archivosKml];
-                    var padronResultado = await CusshmiDatos.cargarPadronToma(comisionKeyActual, r.tomaNombre);
-                    var filasPadron = padronResultado.ok ? (padronResultado.resultados || []) : [];
-                    for (var i = 0; i < listaArchivos.length; i++) {
-                        try {
-                            var respKml = await fetch('../mapas/' + listaArchivos[i]);
-                            if (!respKml.ok) continue;
-                            var textoKml = await respKml.text();
-                            var predios = filtrarPorToma(parsearKmlATomas(textoKml), r.tomaNombre);
-                            predios.forEach(function (predio) {
-                                var predioCruzado = cruzarPredioConPadron(predio, filasPadron);
-                                if (!predioCruzado.coordenadas || predioCruzado.coordenadas.length < 3) return;
-                                var latlngs = predioCruzado.coordenadas.map(function (par) { return [par[1], par[0]]; });
-                                var cultivoPrincipal = (predioCruzado.cultivos && predioCruzado.cultivos[0] && predioCruzado.cultivos[0].cultivo) || '';
-                                var colorCultivo = cultivoPrincipal ? _colorPorCultivo(cultivoPrincipal) : COLOR_SIN_CRUZAR;
-                                var poligono = L.polygon(latlngs, {
-                                    color: colorCultivo.border, fillColor: colorCultivo.bg, weight: 1.5, fillOpacity: 0.5
-                                }).addTo(mapaFichaLeaflet);
-                                poligono.esCapaFicha = true;
-                                poligono.bindPopup('<b>' + escapeHtml(predioCruzado.usuario || '-') + '</b><br>' + escapeHtml(cultivoPrincipal || 'Sin cultivo cruzado'));
-                                capasFicha.push(poligono);
-                            });
-                        } catch (e) { /* KML de predios no disponible — el mapa igual muestra la estructura sola */ }
-                    }
-                }
-            }
-
-            if (TIPOS_PUNTUALES_GIS.indexOf(r.tipo) !== -1) {
-                elEstado.textContent = '';
-            } else {
-                elEstado.textContent = capasFicha.length > 1 ? (capasFicha.length - 1) + ' predio(s) abastecido(s) por esta toma.' : 'Sin predios mapeados para esta toma todavía.';
-            }
+            elEstado.textContent = '';
             if (capasFicha.length) mapaFichaLeaflet.fitBounds(L.featureGroup(capasFicha).getBounds(), { padding: [24, 24], maxZoom: 17 });
+        }
+
+        // Busca en el KMZ (mismo archivo/caché ya usado por el mapa
+        // general) el color real del canal abierto — el color simboliza el
+        // orden de riego (L1..L5), verificado 1:1 contra el KMZ real; se
+        // preserva tal cual en vez de un cian genérico. Respaldo neutro si
+        // no se encuentra (no debería pasar salvo un canal recién creado a
+        // mano, sin figura de origen en el KMZ).
+        async function _colorRealDeCanal(r) {
+            if (r.tipo !== 'canal_lateral') return '#00bcd4';
+            if (!capaGisCache.canal_lateral) {
+                try {
+                    var resp = await fetch('../mapas/inventario_gis/canal_lateral.json');
+                    capaGisCache.canal_lateral = await resp.json();
+                } catch (e) { return '#00bcd4'; }
+            }
+            var claves = CLAVES_KMZ_POR_TIPO.canal_lateral;
+            var figuraMatch = capaGisCache.canal_lateral.find(function (f) {
+                return _normMatch(f.campos[claves.nombreCanalKey]) === _normMatch(r.nombreCanal) &&
+                    _normProgresiva(f.campos[claves.progresivaKey]) === _normProgresiva(r.progresivaKm);
+            });
+            return (figuraMatch && figuraMatch.color) || '#00bcd4';
         }
 
         // ═══ Editor de ubicación a pantalla completa — mismo esqueleto que
