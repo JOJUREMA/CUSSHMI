@@ -43,6 +43,38 @@
             margin: 10px 0;
         }
         #mapaFichaUbicacion { height: 34vh; }
+        /* Editor de ubicación a pantalla completa — mismo patrón que
+           .editor-poligono en movil/sinceramiento-areas.html. */
+        .editor-poligono {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            background: #001830;
+            flex-direction: column;
+        }
+        .editor-poligono-header, .editor-poligono-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            flex-shrink: 0;
+        }
+        .editor-poligono-header { color: #ffffff; font-weight: 700; font-size: 13px; }
+        .editor-poligono-footer { flex-direction: column; gap: 6px; }
+        .editor-poligono-footer .estado-busqueda { color: #ffffff; opacity: 0.85; }
+        .editor-poligono-mapa { flex: 1; min-height: 0; }
+        .marcador-vertice-editor {
+            background: #003876;
+            color: #ffffff;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
         .foto-miniatura { display: inline-block; position: relative; margin: 6px; }
         .foto-miniatura img {
             width: 90px;
@@ -233,6 +265,30 @@
             <div class="resultados" id="listaUsuariosToma"></div>
         </div>
 
+        <!-- ── Editor de ubicación a pantalla completa (punto o línea según
+             el tipo) — mismo patrón que el editor de polígono de
+             Sinceramiento de Áreas (movil/sinceramiento-areas.html), pero
+             para 1 punto o 2 extremos en vez de un polígono cerrado, con
+             ubicación GPS en vivo en vez de un solo tiro. ── -->
+        <div id="vistaEditorEstructura" class="editor-poligono" style="display:none;">
+            <div class="editor-poligono-header">
+                <button class="boton-secundario" id="btnCerrarEditorEstructura" type="button" style="max-width:none; padding:8px 14px; font-size:12.5px;">✕ Cerrar</button>
+                <span id="tituloEditorEstructura">Editar ubicación</span>
+                <button class="boton" id="btnFinalizarEditorEstructura" type="button" style="max-width:none; padding:8px 14px; font-size:12.5px;">✔ Finalizar</button>
+            </div>
+            <div id="mapaEditorEstructura" class="editor-poligono-mapa"></div>
+            <div class="editor-poligono-footer">
+                <div class="estado-busqueda" id="estadoEditorEstructura" style="max-width:none;"></div>
+                <div class="fila-doble" id="filaFijarPuntualEditor" style="max-width:420px; display:none;">
+                    <button type="button" class="boton" id="btnFijarPuntualEditor" style="flex:1;" disabled>📍 Fijar con mi ubicación</button>
+                </div>
+                <div class="fila-doble" id="filaFijarLinealEditor" style="max-width:420px; display:none;">
+                    <button type="button" class="boton" id="btnFijarInicioEditor" style="flex:1;" disabled>📍 Fijar Inicio aquí</button>
+                    <button type="button" class="boton" id="btnFijarFinEditor" style="flex:1;" disabled>📍 Fijar Fin aquí</button>
+                </div>
+            </div>
+        </div>
+
         <!-- ── Pantalla 4: formulario ── -->
         <div id="vistaFormulario" style="display:none; width:100%; flex-direction:column; align-items:center;">
             <button class="boton-secundario" id="btnVolverALista" style="max-width:420px;">← Volver a la lista</button>
@@ -265,45 +321,37 @@
             <div class="estado-busqueda" id="textoTomaAsignada" style="max-width:420px;"></div>
             <button type="button" class="boton-secundario" id="btnVerUsuariosToma" style="max-width:420px; margin-bottom:10px;">👥 Usuarios de esta toma — ver quiénes son</button>
 
-            <div class="seccion-titulo">Ubicación (UTM WGS84)</div>
-            <div class="fila-doble">
-                <div class="campo">
-                    <label for="inputZonaUtm">Zona</label>
-                    <input type="text" id="inputZonaUtm" autocomplete="off">
+            <!-- Toma/Compuerta (formulario propio, sin cambios de esta
+                 vuelta) muestran Zona/Margen/Este/Norte acá; los 12 tipos
+                 genéricos los muestran dentro de la lista única tocar-para-
+                 editar de más abajo (Margen si el tipo lo trae, Este/Norte
+                 o las 4 coordenadas de inicio/final). -->
+            <div id="seccionUbicacionComun" style="width:100%; display:flex; flex-direction:column; align-items:center;">
+                <div class="seccion-titulo">Ubicación (UTM WGS84)</div>
+                <div class="fila-doble">
+                    <div class="campo">
+                        <label for="inputZonaUtm">Zona</label>
+                        <input type="text" id="inputZonaUtm" autocomplete="off">
+                    </div>
+                    <div class="campo">
+                        <label for="selectMargen">Margen</label>
+                        <select id="selectMargen"></select>
+                    </div>
                 </div>
-                <div class="campo">
-                    <label for="selectMargen">Margen</label>
-                    <select id="selectMargen"></select>
-                </div>
-            </div>
-            <div class="fila-doble" id="filaEsteNorteUnico">
-                <div class="campo">
-                    <label for="inputEste">Este</label>
-                    <input type="number" step="0.01" id="inputEste">
-                </div>
-                <div class="campo">
-                    <label for="inputNorte">Norte</label>
-                    <input type="number" step="0.01" id="inputNorte">
-                </div>
-            </div>
-
-            <div id="seccionGpsFicha" style="width:100%; display:none; flex-direction:column; align-items:center;">
-                <div class="seccion-titulo">📍 Ubicación en tiempo real</div>
-                <div class="estado-busqueda" id="estadoGpsFicha" style="max-width:420px;">Toca "Iniciar" para ver qué tan cerca estás.</div>
-                <div class="fila-doble" style="max-width:420px;">
-                    <button type="button" class="boton-secundario" id="btnIniciarGps" style="flex:1;">▶ Iniciar ubicación en vivo</button>
-                    <button type="button" class="boton-secundario" id="btnDetenerGps" style="flex:1; display:none;">⏸ Detener</button>
-                </div>
-                <div class="fila-doble" id="filaFijarPuntual" style="max-width:420px; display:none;">
-                    <button type="button" class="boton" id="btnFijarPuntual" style="flex:1;" disabled>📍 Fijar aquí</button>
-                </div>
-                <div class="fila-doble" id="filaFijarLineal" style="max-width:420px; display:none;">
-                    <button type="button" class="boton" id="btnFijarInicio" style="flex:1;" disabled>📍 Fijar Inicio</button>
-                    <button type="button" class="boton" id="btnFijarFin" style="flex:1;" disabled>📍 Fijar Fin</button>
+                <div class="fila-doble" id="filaEsteNorteUnico">
+                    <div class="campo">
+                        <label for="inputEste">Este</label>
+                        <input type="number" step="0.01" id="inputEste">
+                    </div>
+                    <div class="campo">
+                        <label for="inputNorte">Norte</label>
+                        <input type="number" step="0.01" id="inputNorte">
+                    </div>
                 </div>
             </div>
 
-            <div id="mapaFichaUbicacion" style="display:none;"></div>
+            <button type="button" class="boton-secundario" id="btnAbrirEditorEstructura" style="width:100%; max-width:420px; display:none; margin-top:8px;">⛶ Editar ubicación a pantalla completa</button>
+            <div id="mapaFichaUbicacion" style="display:none; cursor:pointer;" title="Tocar para editar a pantalla completa"></div>
             <div class="estado-busqueda" id="estadoMapaFicha" style="max-width:420px;"></div>
 
             <!-- Campos específicos de Tomas -->
@@ -363,26 +411,14 @@
             </div>
 
             <!-- Campos genéricos (Fase 2: los 12 tipos de obra restantes) —
-                 solo lectura, vienen del levantamiento de ingeniería del
-                 Excel; el sectorista en campo solo confirma Estado/Observación,
-                 salvo los campos marcados `editable` en TIPOS_ESTRUCTURA_GENERICOS
-                 (ej. Tipo/Longitud de un Canal Lateral que se revistió). -->
+                 datos del levantamiento de ingeniería del Excel, mostrados
+                 tal cual; cada fila se toca para corregirla si el
+                 sectorista en campo considera que está mal (mismo criterio
+                 en todo el formulario, sin distinguir "solo lectura" de
+                 "editable" — la decisión de qué corregir es del sectorista). -->
             <div id="camposGenericos" style="width:100%; display:none; flex-direction:column; align-items:center;">
-                <div class="seccion-titulo">Nombre de la obra</div>
-                <div class="campo" style="width:100%; max-width:420px;">
-                    <label for="inputNombreObraGenerico">Nombre</label>
-                    <input type="text" id="inputNombreObraGenerico" autocomplete="off">
-                </div>
-                <div class="seccion-titulo">Datos de referencia (ingeniería)</div>
+                <div class="seccion-titulo">Datos de la obra (toca un valor para corregirlo)</div>
                 <div class="tarjeta" style="max-width:420px; width:100%;" id="listaCamposGenericos"></div>
-            </div>
-
-            <div id="seccionCamposGenericosEditables" style="width:100%; display:none; flex-direction:column; align-items:center;">
-                <div class="seccion-titulo">Corregir orden / coordenadas / longitud (obra)</div>
-                <div class="estado-busqueda" style="max-width:420px; opacity:0.75;">
-                    Corrige acá si la obra cambió físicamente (ej. se revistió un tramo) o si la ubicación real difiere de la registrada — la corrección actualiza el inventario.
-                </div>
-                <div id="listaCamposGenericosEditables" style="width:100%; display:flex; flex-direction:column; align-items:center;"></div>
             </div>
 
             <div id="seccionDibujoEstructura" style="width:100%; display:none; flex-direction:column; align-items:center;">
@@ -1270,15 +1306,13 @@
             if (capasFicha.length) mapaFichaLeaflet.fitBounds(L.featureGroup(capasFicha).getBounds(), { padding: [24, 24], maxZoom: 17 });
         }
 
-        // ═══ Ubicación en tiempo real (GPS continuo) — puntuales: cuánto
-        // falta para llegar a la coordenada registrada, + "Fijar aquí".
-        // Canal Lateral/Drenes: "Fijar Inicio"/"Fijar Fin" caminando a cada
-        // extremo. Seguimiento continuo (watchPosition), no un solo tiro —
-        // a diferencia del GPS de Sinceramiento de Áreas (un punto a la
-        // vez), acá se pidió ver la distancia en vivo mientras se camina. ═══
-        var watchIdFicha = null;
-        var posicionActualFicha = null;
-
+        // ═══ Editor de ubicación a pantalla completa — mismo esqueleto que
+        // el editor de polígono de Sinceramiento de Áreas
+        // (movil/sinceramiento-areas.html: abrirEditorPoligono/
+        // redibujarEditor/construirVertice), adaptado a 1 punto o 2
+        // extremos (línea abierta) en vez de un polígono cerrado de N
+        // vértices, con ubicación GPS en vivo (watchPosition) en vez de un
+        // solo tiro. ═══
         function iniciarSeguimientoGps(onActualizar, onError) {
             if (!navigator.geolocation) { onError(new Error('Este dispositivo no soporta geolocalización.')); return null; }
             return navigator.geolocation.watchPosition(onActualizar, onError, { enableHighAccuracy: true, maximumAge: 2000 });
@@ -1286,80 +1320,202 @@
         function detenerSeguimientoGps(watchId) {
             if (watchId != null && navigator.geolocation) navigator.geolocation.clearWatch(watchId);
         }
-        function _distanciaUtmMetros(este1, norte1, este2, norte2) {
-            var de = Number(este1) - Number(este2), dn = Number(norte1) - Number(norte2);
-            return Math.sqrt(de * de + dn * dn);
+
+        var mapaEditorEstructura = null;
+        var watchIdEditor = null;
+        var marcadorGpsEditor = null;
+        var posicionGpsEditorActual = null; // {easting, northing}
+        var edicionEstructuraTemp = null; // { esLineal, punto:{este,norte}|null, inicio, fin }
+        var marcadorPuntoEditor = null, marcadorInicioEditor = null, marcadorFinEditor = null, capaLineaEditor = null;
+
+        function _iconoEditorEstructura(letra) {
+            return L.divIcon({ className: 'marcador-vertice-editor', html: letra, iconSize: [26, 26], iconAnchor: [13, 13] });
         }
 
-        function actualizarSeccionGpsFicha() {
-            var r = registroActual;
-            var esPuntual = TIPOS_PUNTUALES_GIS.indexOf(r.tipo) !== -1;
-            var esLineal = TIPOS_LINEALES_GIS.indexOf(r.tipo) !== -1;
-            document.getElementById('seccionGpsFicha').style.display = (esPuntual || esLineal) ? 'flex' : 'none';
-            document.getElementById('filaFijarPuntual').style.display = esPuntual ? 'flex' : 'none';
-            document.getElementById('filaFijarLineal').style.display = esLineal ? 'flex' : 'none';
-            detenerSeguimientoGps(watchIdFicha);
-            watchIdFicha = null;
-            posicionActualFicha = null;
-            document.getElementById('btnIniciarGps').style.display = 'inline-block';
-            document.getElementById('btnDetenerGps').style.display = 'none';
-            document.getElementById('btnFijarPuntual').disabled = true;
-            document.getElementById('btnFijarInicio').disabled = true;
-            document.getElementById('btnFijarFin').disabled = true;
-            document.getElementById('estadoGpsFicha').textContent = 'Toca "Iniciar" para ver qué tan cerca estás.';
+        function _utmAmbosValidos(este, norte) {
+            return este != null && este !== '' && norte != null && norte !== '' && Number.isFinite(Number(este)) && Number.isFinite(Number(norte));
         }
 
-        document.getElementById('btnIniciarGps').addEventListener('click', function () {
-            var elEstado = document.getElementById('estadoGpsFicha');
-            elEstado.textContent = 'Obteniendo ubicación…';
-            watchIdFicha = iniciarSeguimientoGps(function (pos) {
-                posicionActualFicha = latLonAUtm17S(pos.coords.latitude, pos.coords.longitude);
-                var esPuntual = TIPOS_PUNTUALES_GIS.indexOf(registroActual.tipo) !== -1;
-                if (esPuntual) {
-                    var esteRef = document.getElementById('inputEste').value, norteRef = document.getElementById('inputNorte').value;
-                    if (esteRef && norteRef) {
-                        var dist = _distanciaUtmMetros(posicionActualFicha.easting, posicionActualFicha.northing, esteRef, norteRef);
-                        elEstado.textContent = 'A ' + dist.toFixed(0) + ' m de la coordenada registrada (±' + Math.round(pos.coords.accuracy) + ' m de precisión GPS).';
-                    } else {
-                        elEstado.textContent = 'Sin coordenada previa para comparar — toca "Fijar aquí" para registrar esta.';
-                    }
-                    document.getElementById('btnFijarPuntual').disabled = false;
-                } else {
-                    elEstado.textContent = 'Ubicación lista (±' + Math.round(pos.coords.accuracy) + ' m). Camina a cada extremo del canal y toca "Fijar Inicio"/"Fijar Fin".';
-                    document.getElementById('btnFijarInicio').disabled = false;
-                    document.getElementById('btnFijarFin').disabled = false;
+        function inicializarMapaEditorEstructuraSiHaceFalta() {
+            if (mapaEditorEstructura) return;
+            mapaEditorEstructura = L.map('mapaEditorEstructura', { preferCanvas: true }).setView([-4.9, -80.6], 12);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            }).addTo(mapaEditorEstructura);
+            mapaEditorEstructura.on('click', function (e) {
+                var t = edicionEstructuraTemp;
+                if (!t) return;
+                if (!t.esLineal) {
+                    if (!t.punto) t.punto = {};
+                    Object.assign(t.punto, latLonAUtm17S(e.latlng.lat, e.latlng.lng), { lat: e.latlng.lat, lon: e.latlng.lng });
+                } else if (!t.inicio) {
+                    t.inicio = Object.assign(latLonAUtm17S(e.latlng.lat, e.latlng.lng), { lat: e.latlng.lat, lon: e.latlng.lng });
+                } else if (!t.fin) {
+                    t.fin = Object.assign(latLonAUtm17S(e.latlng.lat, e.latlng.lng), { lat: e.latlng.lat, lon: e.latlng.lng });
                 }
-            }, function (err) {
-                elEstado.textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '.';
+                redibujarEditorEstructura();
             });
-            document.getElementById('btnIniciarGps').style.display = 'none';
-            document.getElementById('btnDetenerGps').style.display = 'inline-block';
+        }
+
+        function redibujarEditorEstructura() {
+            setTimeout(function () { mapaEditorEstructura.invalidateSize(); }, 50);
+            var t = edicionEstructuraTemp;
+            [marcadorPuntoEditor, marcadorInicioEditor, marcadorFinEditor, capaLineaEditor].forEach(function (capa) {
+                if (capa) mapaEditorEstructura.removeLayer(capa);
+            });
+            marcadorPuntoEditor = marcadorInicioEditor = marcadorFinEditor = capaLineaEditor = null;
+
+            var capasParaEncuadrar = [];
+            if (!t.esLineal) {
+                if (t.punto) {
+                    marcadorPuntoEditor = L.marker([t.punto.lat, t.punto.lon], { draggable: true, icon: _iconoEditorEstructura('📍') }).addTo(mapaEditorEstructura);
+                    marcadorPuntoEditor.on('dragend', function (e) {
+                        var ll = e.target.getLatLng();
+                        Object.assign(t.punto, latLonAUtm17S(ll.lat, ll.lng), { lat: ll.lat, lon: ll.lng });
+                        actualizarEstadoEditorEstructura();
+                    });
+                    capasParaEncuadrar.push(marcadorPuntoEditor);
+                }
+            } else {
+                if (t.inicio) {
+                    marcadorInicioEditor = L.marker([t.inicio.lat, t.inicio.lon], { draggable: true, icon: _iconoEditorEstructura('I') }).addTo(mapaEditorEstructura);
+                    marcadorInicioEditor.on('dragend', function (e) {
+                        var ll = e.target.getLatLng();
+                        Object.assign(t.inicio, latLonAUtm17S(ll.lat, ll.lng), { lat: ll.lat, lon: ll.lng });
+                        if (capaLineaEditor && t.fin) capaLineaEditor.setLatLngs([[t.inicio.lat, t.inicio.lon], [t.fin.lat, t.fin.lon]]);
+                        actualizarEstadoEditorEstructura();
+                    });
+                    capasParaEncuadrar.push(marcadorInicioEditor);
+                }
+                if (t.fin) {
+                    marcadorFinEditor = L.marker([t.fin.lat, t.fin.lon], { draggable: true, icon: _iconoEditorEstructura('F') }).addTo(mapaEditorEstructura);
+                    marcadorFinEditor.on('dragend', function (e) {
+                        var ll = e.target.getLatLng();
+                        Object.assign(t.fin, latLonAUtm17S(ll.lat, ll.lng), { lat: ll.lat, lon: ll.lng });
+                        if (capaLineaEditor && t.inicio) capaLineaEditor.setLatLngs([[t.inicio.lat, t.inicio.lon], [t.fin.lat, t.fin.lon]]);
+                        actualizarEstadoEditorEstructura();
+                    });
+                    capasParaEncuadrar.push(marcadorFinEditor);
+                }
+                if (t.inicio && t.fin) {
+                    capaLineaEditor = L.polyline([[t.inicio.lat, t.inicio.lon], [t.fin.lat, t.fin.lon]], { color: '#00bcd4', weight: 4 }).addTo(mapaEditorEstructura);
+                    capasParaEncuadrar.push(capaLineaEditor);
+                }
+            }
+            if (capasParaEncuadrar.length) {
+                mapaEditorEstructura.fitBounds(L.featureGroup(capasParaEncuadrar).getBounds(), { padding: [40, 40], maxZoom: 19 });
+            }
+            actualizarEstadoEditorEstructura();
+        }
+
+        function actualizarEstadoEditorEstructura() {
+            var t = edicionEstructuraTemp;
+            var elEstado = document.getElementById('estadoEditorEstructura');
+            if (!t.esLineal) {
+                elEstado.textContent = t.punto
+                    ? 'Punto colocado — arrástralo para ajustar, o usa "Fijar con mi ubicación".'
+                    : 'Toca el mapa para colocar el punto, o usa "Fijar con mi ubicación".';
+                document.getElementById('btnFijarPuntualEditor').disabled = !posicionGpsEditorActual;
+            } else {
+                var faltan = [];
+                if (!t.inicio) faltan.push('Inicio');
+                if (!t.fin) faltan.push('Fin');
+                elEstado.textContent = faltan.length
+                    ? 'Toca el mapa para colocar: ' + faltan.join(' y ') + '.'
+                    : 'Inicio y Fin colocados — arrastra para ajustar.';
+                document.getElementById('btnFijarInicioEditor').disabled = !posicionGpsEditorActual;
+                document.getElementById('btnFijarFinEditor').disabled = !posicionGpsEditorActual;
+            }
+        }
+
+        function abrirEditorEstructura() {
+            if (!registroActual || registroActual.confirmado) return;
+            var r = registroActual;
+            var esLineal = TIPOS_LINEALES_GIS.indexOf(r.tipo) !== -1;
+            edicionEstructuraTemp = esLineal
+                ? {
+                    esLineal: true,
+                    inicio: _utmAmbosValidos(r.campos.esteInicio, r.campos.norteInicio)
+                        ? Object.assign(utm17SALatLon(Number(r.campos.esteInicio), Number(r.campos.norteInicio)), { easting: Number(r.campos.esteInicio), northing: Number(r.campos.norteInicio) })
+                        : null,
+                    fin: _utmAmbosValidos(r.campos.esteFinal, r.campos.norteFinal)
+                        ? Object.assign(utm17SALatLon(Number(r.campos.esteFinal), Number(r.campos.norteFinal)), { easting: Number(r.campos.esteFinal), northing: Number(r.campos.norteFinal) })
+                        : null,
+                }
+                : {
+                    esLineal: false,
+                    punto: _utmAmbosValidos(r.este, r.norte)
+                        ? Object.assign(utm17SALatLon(Number(r.este), Number(r.norte)), { easting: Number(r.este), northing: Number(r.norte) })
+                        : null,
+                };
+
+            document.getElementById('tituloEditorEstructura').textContent = esLineal ? 'Editar Inicio/Fin' : 'Editar ubicación';
+            document.getElementById('filaFijarPuntualEditor').style.display = esLineal ? 'none' : 'flex';
+            document.getElementById('filaFijarLinealEditor').style.display = esLineal ? 'flex' : 'none';
+            document.getElementById('vistaFormulario').style.display = 'none';
+            document.getElementById('vistaEditorEstructura').style.display = 'flex';
+            inicializarMapaEditorEstructuraSiHaceFalta();
+            redibujarEditorEstructura();
+
+            posicionGpsEditorActual = null;
+            watchIdEditor = iniciarSeguimientoGps(function (pos) {
+                posicionGpsEditorActual = latLonAUtm17S(pos.coords.latitude, pos.coords.longitude);
+                posicionGpsEditorActual.lat = pos.coords.latitude; posicionGpsEditorActual.lon = pos.coords.longitude;
+                if (marcadorGpsEditor) mapaEditorEstructura.removeLayer(marcadorGpsEditor);
+                marcadorGpsEditor = L.circleMarker([pos.coords.latitude, pos.coords.longitude], {
+                    radius: 8, color: '#ffffff', weight: 2, fillColor: '#2563eb', fillOpacity: 0.9
+                }).addTo(mapaEditorEstructura).bindTooltip('Tu ubicación (±' + Math.round(pos.coords.accuracy) + ' m)');
+                actualizarEstadoEditorEstructura();
+            }, function (err) {
+                document.getElementById('estadoEditorEstructura').textContent = '⚠️ GPS: ' + (err.message || 'no se pudo obtener ubicación') + '.';
+            });
+        }
+
+        function cerrarEditorEstructura() {
+            detenerSeguimientoGps(watchIdEditor);
+            watchIdEditor = null;
+            marcadorGpsEditor = null;
+            document.getElementById('vistaEditorEstructura').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'flex';
+        }
+
+        document.getElementById('btnCerrarEditorEstructura').addEventListener('click', cerrarEditorEstructura);
+
+        document.getElementById('btnFinalizarEditorEstructura').addEventListener('click', function () {
+            var t = edicionEstructuraTemp;
+            var r = registroActual;
+            if (!t.esLineal && t.punto) {
+                r.este = Number(t.punto.easting.toFixed(2));
+                r.norte = Number(t.punto.northing.toFixed(2));
+            } else if (t.esLineal) {
+                r.campos = r.campos || {};
+                if (t.inicio) { r.campos.esteInicio = Number(t.inicio.easting.toFixed(2)); r.campos.norteInicio = Number(t.inicio.northing.toFixed(2)); }
+                if (t.fin) { r.campos.esteFinal = Number(t.fin.easting.toFixed(2)); r.campos.norteFinal = Number(t.fin.northing.toFixed(2)); }
+            }
+            cerrarEditorEstructura();
+            pintarFormularioDesdeRegistro();
         });
-        document.getElementById('btnDetenerGps').addEventListener('click', function () {
-            detenerSeguimientoGps(watchIdFicha);
-            watchIdFicha = null;
-            document.getElementById('btnIniciarGps').style.display = 'inline-block';
-            document.getElementById('btnDetenerGps').style.display = 'none';
+
+        document.getElementById('btnFijarPuntualEditor').addEventListener('click', function () {
+            if (!posicionGpsEditorActual) return;
+            edicionEstructuraTemp.punto = Object.assign({}, posicionGpsEditorActual);
+            redibujarEditorEstructura();
         });
-        document.getElementById('btnFijarPuntual').addEventListener('click', function () {
-            if (!posicionActualFicha) return;
-            document.getElementById('inputEste').value = posicionActualFicha.easting.toFixed(2);
-            document.getElementById('inputNorte').value = posicionActualFicha.northing.toFixed(2);
-            document.getElementById('estadoGpsFicha').textContent = '✅ Coordenadas fijadas — toca "Continuar" para guardar.';
+        document.getElementById('btnFijarInicioEditor').addEventListener('click', function () {
+            if (!posicionGpsEditorActual) return;
+            edicionEstructuraTemp.inicio = Object.assign({}, posicionGpsEditorActual);
+            redibujarEditorEstructura();
         });
-        document.getElementById('btnFijarInicio').addEventListener('click', function () {
-            if (!posicionActualFicha) return;
-            var i1 = document.getElementById('campoGenerico_esteInicio'), i2 = document.getElementById('campoGenerico_norteInicio');
-            if (i1) i1.value = posicionActualFicha.easting.toFixed(2);
-            if (i2) i2.value = posicionActualFicha.northing.toFixed(2);
-            document.getElementById('estadoGpsFicha').textContent = '✅ Inicio fijado — toca "Continuar" para guardar.';
+        document.getElementById('btnFijarFinEditor').addEventListener('click', function () {
+            if (!posicionGpsEditorActual) return;
+            edicionEstructuraTemp.fin = Object.assign({}, posicionGpsEditorActual);
+            redibujarEditorEstructura();
         });
-        document.getElementById('btnFijarFin').addEventListener('click', function () {
-            if (!posicionActualFicha) return;
-            var i1 = document.getElementById('campoGenerico_esteFinal'), i2 = document.getElementById('campoGenerico_norteFinal');
-            if (i1) i1.value = posicionActualFicha.easting.toFixed(2);
-            if (i2) i2.value = posicionActualFicha.northing.toFixed(2);
-            document.getElementById('estadoGpsFicha').textContent = '✅ Fin fijado — toca "Continuar" para guardar.';
+
+        document.getElementById('btnAbrirEditorEstructura').addEventListener('click', abrirEditorEstructura);
+        document.getElementById('mapaFichaUbicacion').addEventListener('click', function () {
+            if (document.getElementById('btnAbrirEditorEstructura').style.display !== 'none') abrirEditorEstructura();
         });
 
         // ═══ Dibujo esquemático (SVG) — solo Canal Lateral y Drenes. Los 9
@@ -1436,6 +1592,69 @@
             pintarFormularioDesdeRegistro();
         }
 
+        // Fila "etiqueta: valor" donde el valor es tocable — al tocarlo se
+        // reemplaza por un <select> (si hay diccionario) o un <input>, y al
+        // perder foco o Enter llama onGuardar(nuevoValor) y vuelve a
+        // mostrarse como texto. Reemplaza la vieja distinción "solo lectura"
+        // / "editable aparte": ahora cualquier dato mostrado se corrige
+        // tocándolo, sin una sección de formulario separada — a pedido
+        // explícito del usuario (él decide qué corregir, no la app).
+        function _filaCampoEditable(etiqueta, valorActual, diccionario, tipoInput, onGuardar) {
+            var fila = document.createElement('div');
+            fila.className = 'resumen-fila';
+            var elEtiqueta = document.createElement('span');
+            elEtiqueta.className = 'etiqueta-resumen';
+            elEtiqueta.textContent = etiqueta;
+            fila.appendChild(elEtiqueta);
+
+            function textoMostrado(valor) {
+                if (valor === undefined || valor === null || valor === '') return '— (tocar para editar)';
+                if (diccionario && diccionario[valor]) return valor + ' — ' + diccionario[valor];
+                return String(valor);
+            }
+
+            var elValor = document.createElement('button');
+            elValor.type = 'button';
+            elValor.className = 'valor-resumen';
+            elValor.style.cssText = 'background:none; border:none; color:inherit; text-decoration:underline dotted; cursor:pointer; font:inherit; padding:0; text-align:right;';
+            elValor.textContent = textoMostrado(valorActual);
+            elValor.addEventListener('click', function () {
+                if (registroActual.confirmado) return;
+                var input;
+                if (diccionario) {
+                    input = document.createElement('select');
+                    var optVacio = document.createElement('option'); optVacio.value = ''; optVacio.textContent = '—'; input.appendChild(optVacio);
+                    Object.keys(diccionario).forEach(function (codigo) {
+                        var opt = document.createElement('option'); opt.value = codigo; opt.textContent = codigo + ' — ' + diccionario[codigo]; input.appendChild(opt);
+                    });
+                    input.value = valorActual || '';
+                } else {
+                    input = document.createElement('input');
+                    input.type = tipoInput === 'number' ? 'number' : 'text';
+                    if (tipoInput === 'number') input.step = '0.01';
+                    input.value = valorActual != null ? valorActual : '';
+                }
+                input.style.cssText = 'max-width:170px; padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.95); color:#002555; font-size:13px;';
+                fila.replaceChild(input, elValor);
+                input.focus();
+                var yaConfirmado = false;
+                function confirmar() {
+                    if (yaConfirmado) return;
+                    yaConfirmado = true;
+                    var nuevo = input.value === '' ? null : (tipoInput === 'number' ? parseFloat(input.value) : input.value);
+                    valorActual = nuevo;
+                    onGuardar(nuevo);
+                    elValor.textContent = textoMostrado(nuevo);
+                    if (fila.contains(input)) fila.replaceChild(elValor, input);
+                }
+                input.addEventListener('blur', confirmar);
+                input.addEventListener('keydown', function (e) { if (e.key === 'Enter') input.blur(); });
+                if (input.tagName === 'SELECT') input.addEventListener('change', confirmar);
+            });
+            fila.appendChild(elValor);
+            return fila;
+        }
+
         function pintarFormularioDesdeRegistro() {
             var r = registroActual;
             var def = FUNCIONES_POR_TIPO[r.tipo];
@@ -1450,16 +1669,18 @@
             document.getElementById('inputOrdenCompuerta').value = r.ordenCompuerta;
             document.getElementById('textoTomaAsignada').textContent = r.tomaNombre ? ('Toma asignada: ' + r.tomaNombre) : 'Sin toma asignada — no se pudo resolver el canal fuente al sincronizar.';
 
-            document.getElementById('inputZonaUtm').value = r.zonaUtm;
-            document.getElementById('selectMargen').value = r.margen;
-            document.getElementById('inputEste').value = r.este;
-            document.getElementById('inputNorte').value = r.norte;
-            // Los tipos lineales (Canal Lateral, Drenes) no tienen un solo
-            // punto — se ocultan estos dos y se usan las 4 coordenadas de
-            // inicio/final de la sección "Corregir orden / coordenadas" de
-            // más abajo (mismo mecanismo de campos `editable`).
             var esLineal = TIPOS_LINEALES_GIS.indexOf(r.tipo) !== -1;
-            document.getElementById('filaEsteNorteUnico').style.display = esLineal ? 'none' : 'flex';
+            // Zona/Margen/Este/Norte "clásicos" son solo para Toma/Compuerta
+            // — los 12 tipos genéricos los muestran (junto con todo lo
+            // demás) en la lista única tocar-para-editar de más abajo.
+            document.getElementById('seccionUbicacionComun').style.display = esGenerico ? 'none' : 'flex';
+            if (!esGenerico) {
+                document.getElementById('inputZonaUtm').value = r.zonaUtm;
+                document.getElementById('selectMargen').value = r.margen;
+                document.getElementById('inputEste').value = r.este;
+                document.getElementById('inputNorte').value = r.norte;
+                document.getElementById('filaEsteNorteUnico').style.display = 'flex';
+            }
             // "Usuarios de esta toma" solo tiene sentido para Canal Lateral
             // (y Drenes) — los 9 tipos puntuales y Toma/Compuerta no traen
             // una lista de usuarios propia en el formato oficial.
@@ -1469,7 +1690,6 @@
             document.getElementById('camposToma').style.display = (r.tipo === 'toma') ? 'flex' : 'none';
             document.getElementById('camposCompuerta').style.display = (r.tipo === 'compuerta') ? 'flex' : 'none';
             document.getElementById('camposGenericos').style.display = esGenerico ? 'flex' : 'none';
-            if (esGenerico) document.getElementById('inputNombreObraGenerico').value = r.nombreObra || '';
 
             if (r.tipo === 'toma') {
                 document.getElementById('selectMaterialToma').value = r.material;
@@ -1487,23 +1707,38 @@
                 document.getElementById('inputMarcoH').value = r.marcoH;
                 document.getElementById('inputBloqueRiego').value = r.bloqueRiego;
             } else if (esGenerico) {
+                // Una sola lista tocar-para-editar: Nombre de la obra,
+                // ubicación, y TODO lo que trae camposReferencia (ya sin
+                // distinguir "solo lectura" de "editable" — cualquier dato
+                // mostrado se corrige tocándolo, decisión del sectorista en
+                // campo, no de la app).
+                r.campos = r.campos || {};
                 var cont = document.getElementById('listaCamposGenericos');
                 cont.innerHTML = '';
-                if (r.bloqueRiego) cont.innerHTML += filaResumen('Bloque de Riego', r.bloqueRiego);
+                cont.appendChild(_filaCampoEditable('Nombre de la obra', r.nombreObra, null, 'text', function (v) { r.nombreObra = v; }));
+                if (esLineal) {
+                    cont.appendChild(_filaCampoEditable('Este inicio', r.campos.esteInicio, null, 'number', function (v) { r.campos.esteInicio = v; }));
+                    cont.appendChild(_filaCampoEditable('Norte inicio', r.campos.norteInicio, null, 'number', function (v) { r.campos.norteInicio = v; }));
+                    cont.appendChild(_filaCampoEditable('Este final', r.campos.esteFinal, null, 'number', function (v) { r.campos.esteFinal = v; }));
+                    cont.appendChild(_filaCampoEditable('Norte final', r.campos.norteFinal, null, 'number', function (v) { r.campos.norteFinal = v; }));
+                } else {
+                    cont.appendChild(_filaCampoEditable('Este', r.este, null, 'number', function (v) { r.este = v; }));
+                    cont.appendChild(_filaCampoEditable('Norte', r.norte, null, 'number', function (v) { r.norte = v; }));
+                }
+                if (r.bloqueRiego !== undefined) cont.appendChild(_filaCampoEditable('Bloque de Riego', r.bloqueRiego, null, 'text', function (v) { r.bloqueRiego = v; }));
+
                 (def.definicion.camposReferencia || []).forEach(function (c) {
-                    if (c.editable) return; // se pinta aparte, como campo editable
+                    // Ya mostradas arriba con su propio par de coordenadas.
+                    if (esLineal && ['esteInicio', 'norteInicio', 'esteFinal', 'norteFinal'].indexOf(c.clave) !== -1) return;
                     // "Número Total de Usuarios" de un Canal Lateral se pinta
                     // aparte, como botón clickeable (abre la lista real y
-                    // permite reasignar) — no como texto plano.
+                    // permite reasignar) — no como texto tocar-para-editar.
                     if (r.tipo === 'canal_lateral' && c.clave === 'numeroUsuarios') return;
-                    var valorCrudo = (r.campos || {})[c.clave];
-                    if (valorCrudo === undefined || valorCrudo === null || valorCrudo === '') return;
-                    var valorMostrado = valorCrudo;
-                    if (c.diccionario && c.diccionario[valorCrudo]) valorMostrado = valorCrudo + ' — ' + c.diccionario[valorCrudo];
-                    cont.innerHTML += filaResumen(c.etiqueta, valorMostrado);
+                    cont.appendChild(_filaCampoEditable(c.etiqueta, r.campos[c.clave], c.diccionario, 'text', function (v) { r.campos[c.clave] = v; }));
                 });
+
                 if (r.tipo === 'canal_lateral') {
-                    var nUsuariosCanal = (r.campos || {}).numeroUsuarios;
+                    var nUsuariosCanal = r.campos.numeroUsuarios;
                     var filaUsuarios = document.createElement('div');
                     filaUsuarios.className = 'resumen-fila';
                     filaUsuarios.innerHTML = '<span class="etiqueta-resumen">Número Total de Usuarios</span>';
@@ -1516,50 +1751,6 @@
                     filaUsuarios.appendChild(btnValorUsuarios);
                     cont.appendChild(filaUsuarios);
                 }
-                if (!cont.innerHTML) cont.innerHTML = '<div class="estado-busqueda">Sin datos de referencia — vuelve a sincronizar desde escritorio.</div>';
-
-                // Campos editables (ej. Tipo/Longitud de un Canal Lateral que
-                // se revistió) — a diferencia del resto, se guardan de vuelta
-                // en `campos` (ver guardarRegistroInventarioEstructura).
-                var contEditables = document.getElementById('listaCamposGenericosEditables');
-                contEditables.innerHTML = '';
-                var camposEditables = (def.definicion.camposReferencia || []).filter(function (c) { return c.editable; });
-                document.getElementById('seccionCamposGenericosEditables').style.display = camposEditables.length ? 'flex' : 'none';
-                camposEditables.forEach(function (c) {
-                    var valorActual = (r.campos || {})[c.clave];
-                    var divCampo = document.createElement('div');
-                    divCampo.className = 'campo';
-                    divCampo.style.cssText = 'width:100%; max-width:420px;';
-                    var label = document.createElement('label');
-                    label.textContent = c.etiqueta;
-                    label.setAttribute('for', 'campoGenerico_' + c.clave);
-                    divCampo.appendChild(label);
-                    var input;
-                    if (c.diccionario) {
-                        input = document.createElement('select');
-                        var optVacio = document.createElement('option');
-                        optVacio.value = ''; optVacio.textContent = '—';
-                        input.appendChild(optVacio);
-                        Object.keys(c.diccionario).forEach(function (codigo) {
-                            var opt = document.createElement('option');
-                            opt.value = codigo;
-                            opt.textContent = codigo + ' — ' + c.diccionario[codigo];
-                            input.appendChild(opt);
-                        });
-                        input.value = valorActual || '';
-                    } else {
-                        input = document.createElement('input');
-                        input.type = 'number';
-                        input.step = '0.01';
-                        input.value = valorActual != null ? valorActual : '';
-                    }
-                    input.id = 'campoGenerico_' + c.clave;
-                    input.disabled = r.confirmado;
-                    divCampo.appendChild(input);
-                    contEditables.appendChild(divCampo);
-                });
-            } else {
-                document.getElementById('seccionCamposGenericosEditables').style.display = 'none';
             }
 
             document.getElementById('selectEstado').value = r.estado;
@@ -1570,24 +1761,26 @@
             document.getElementById('estadoGuardadoFormulario').textContent = '';
             document.getElementById('btnContinuarConfirmacion').textContent = bloqueado ? 'Ver confirmación →' : 'Continuar →';
 
-            // Los 12 tipos genéricos (Fase 2) siguen siendo de solo lectura
-            // en su identidad de canal (Canal Fuente/Nombre del Canal/
-            // Progresiva/Zona/Margen — vienen del Excel oficial, no se
-            // tocan desde el móvil) — pero Nombre de la obra, Este/Norte
-            // (tipos puntuales) y Orden/Coordenadas de inicio-final (tipos
-            // lineales, más abajo) sí son editables a pedido del usuario.
-            var idsCamposEditables = ['selectEstado', 'inputObservacion', 'inputEste', 'inputNorte'];
-            if (esGenerico) idsCamposEditables.push('inputNombreObraGenerico');
-            var idsCamposSoloLecturaGenerico = ['inputCanalFuente', 'inputNombreCanal', 'inputProgresivaKm', 'inputOrdenCompuerta', 'inputZonaUtm', 'selectMargen',
+            // Identidad de canal (Canal Fuente/Nombre del Canal/Progresiva)
+            // sigue de solo lectura para los 12 genéricos — es la clave
+            // natural usada para emparejar con el KMZ y con la sincronización
+            // desde Excel; tocarla generaría duplicados o registros
+            // huérfanos. Todo lo demás de los genéricos ya se edita tocando
+            // el dato (arriba) — acá solo quedan Estado/Observación y,
+            // para Toma/Compuerta, sus campos propios de siempre.
+            var idsCamposEditables = ['selectEstado', 'inputObservacion'];
+            var idsCamposSoloLecturaGenerico = ['inputCanalFuente', 'inputNombreCanal', 'inputProgresivaKm', 'inputOrdenCompuerta'];
+            var idsCamposTomaCompuerta = ['inputZonaUtm', 'selectMargen', 'inputEste', 'inputNorte',
                 'selectMaterialToma', 'selectTipoToma', 'inputDimensionA', 'inputDimensionH', 'inputDimensionD',
                 'inputTipoCompuerta', 'selectMaterialCompuerta', 'selectOperacion', 'inputHojaA', 'inputHojaH', 'inputMarcoA', 'inputMarcoH',
                 'inputBloqueRiego'];
             idsCamposEditables.forEach(function (id) { document.getElementById(id).disabled = bloqueado; });
             idsCamposSoloLecturaGenerico.forEach(function (id) { document.getElementById(id).disabled = bloqueado || esGenerico; });
+            if (!esGenerico) idsCamposTomaCompuerta.forEach(function (id) { document.getElementById(id).disabled = bloqueado; });
 
+            document.getElementById('btnAbrirEditorEstructura').style.display = bloqueado ? 'none' : 'block';
             pintarMapaFicha();
             pintarDibujoEstructura();
-            actualizarSeccionGpsFicha();
             cargarFotosDeRegistro();
         }
 
@@ -1786,31 +1979,12 @@
                     r.marcoH = document.getElementById('inputMarcoH').value;
                     r.bloqueRiego = document.getElementById('inputBloqueRiego').value;
                 }
-            } else {
-                // Nombre de la obra y Este/Norte (tipos puntuales) son
-                // editables para los 12 genéricos igual que para Tomas/
-                // Compuertas — la identidad de canal (Canal Fuente/Nombre
-                // del Canal/Progresiva) sigue de solo lectura.
-                r.nombreObra = document.getElementById('inputNombreObraGenerico').value;
-                if (TIPOS_LINEALES_GIS.indexOf(r.tipo) === -1) {
-                    r.este = document.getElementById('inputEste').value;
-                    r.norte = document.getElementById('inputNorte').value;
-                }
-                // Campos genéricos editables (ej. Tipo/Longitud de un Canal
-                // Lateral, u Orden/coordenadas de inicio-final) — el resto de
-                // `r.campos` queda intacto, tal como se cargó del servidor.
-                r.campos = r.campos || {};
-                (def.definicion.camposReferencia || []).forEach(function (c) {
-                    if (!c.editable) return;
-                    var el = document.getElementById('campoGenerico_' + c.clave);
-                    if (!el) return;
-                    if (el.tagName === 'SELECT') {
-                        r.campos[c.clave] = el.value || null;
-                    } else {
-                        r.campos[c.clave] = el.value === '' ? null : parseFloat(el.value);
-                    }
-                });
             }
+            // Nada que leer para los 12 tipos genéricos acá: cada fila de
+            // _filaCampoEditable ya escribió su valor directo en
+            // r.nombreObra/r.este/r.norte/r.campos[...] al tocarla — este
+            // "leer" quedaba pensado para un formulario con inputs
+            // permanentes que ya no existe.
             r.estado = document.getElementById('selectEstado').value;
             r.observacion = document.getElementById('inputObservacion').value;
         }
