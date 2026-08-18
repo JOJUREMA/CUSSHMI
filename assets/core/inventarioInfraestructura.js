@@ -496,11 +496,15 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
         },
         colEstado: 18,
         camposReferencia: [
-            { indice: 5, clave: 'ordenLateral', etiqueta: 'Orden del Lateral' },
-            { indice: 7, clave: 'esteInicio', etiqueta: 'Este inicio' },
-            { indice: 8, clave: 'norteInicio', etiqueta: 'Norte inicio' },
-            { indice: 9, clave: 'esteFinal', etiqueta: 'Este final' },
-            { indice: 10, clave: 'norteFinal', etiqueta: 'Norte final' },
+            // Orden y coordenadas de inicio/final se marcan `editable` a
+            // pedido explícito del usuario (el mapa GIS ya trae la
+            // geometría real — este/norte inicio/final son lo que el
+            // sectorista puede corregir en campo si difiere).
+            { indice: 5, clave: 'ordenLateral', etiqueta: 'Orden del Lateral', editable: true },
+            { indice: 7, clave: 'esteInicio', etiqueta: 'Este inicio', editable: true },
+            { indice: 8, clave: 'norteInicio', etiqueta: 'Norte inicio', editable: true },
+            { indice: 9, clave: 'esteFinal', etiqueta: 'Este final', editable: true },
+            { indice: 10, clave: 'norteFinal', etiqueta: 'Norte final', editable: true },
             { indice: 11, clave: 'margen', etiqueta: 'Margen', diccionario: MARGEN_INVENTARIO },
             { indice: 12, clave: 'tipoUso', etiqueta: 'Tipo de Uso', diccionario: TIPO_USO_LATERAL },
             { indice: 13, clave: 'numeroUsuarios', etiqueta: 'Número Total de Usuarios' },
@@ -539,3 +543,35 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
         ],
     },
 };
+
+// Nombres reales de columna de cada KMZ del levantamiento GIS (ver
+// mapas/inventario_gis/*.json) — permite normalizar cada figura del mapa
+// y emparejarla contra su fila real de Supabase por la misma clave
+// natural que ya usa la sincronización (canal_fuente + nombre_canal +
+// progresiva_km). Los 11 tipos puntuales comparten el mismo esquema de
+// columnas (CANAL FUENTE/CANAL LATERAL/PROGRESIVA + COORDENADA ESTE/
+// NORTE); Canales Laterales y Drenes usan sus propios nombres de columna
+// (verificados contra el KMZ real, no supuestos) y traen inicio/final en
+// vez de un solo punto.
+const CLAVES_KMZ_POR_TIPO = {
+    toma: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    compuerta: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    acueducto: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    alcantarilla: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    caida: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    medidor: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERALES', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    pase_peatonal: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    pase_vehicular: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    rapida: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    repartidor: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    sifon_invertido: { canalFuenteKey: 'CANAL FUENTE', nombreCanalKey: 'CANAL LATERAL', progresivaKey: 'PROGRESIVA', esteKey: 'COORDENADA ESTE', norteKey: 'COORDENADA NORTE' },
+    canal_lateral: { canalFuenteKey: 'CANAL_FUEN', nombreCanalKey: 'NOMBRE', progresivaKey: 'PROGRESIVA', esteIniKey: 'ESTE_INI', norteIniKey: 'NORTE_INI', esteFinKey: 'ESTE_FIN', norteFinKey: 'NORTE_FIN' },
+    dren_principal: { canalFuenteKey: null, nombreCanalKey: 'NOMBRE DE DREN COLECTOR', progresivaKey: 'PROGRESIVA (Km)', esteIniKey: 'ESTE INICIO', norteIniKey: 'NORTE INICIO', esteFinKey: 'ESTE FINAL', norteFinKey: 'NORTE FINAL' },
+    dren_secundario: { canalFuenteKey: null, nombreCanalKey: 'NOMBRE DE DREN COLECTOR', progresivaKey: 'PROGRESIVA (Km)', esteIniKey: 'ESTE INICIO', norteIniKey: 'NORTE INICIO', esteFinKey: 'ESTE FINAL', norteFinKey: 'NORTE FINAL' },
+};
+
+// Tipos cuya geometría real en el KMZ es una línea (LineString), no un
+// punto — determina si la ficha muestra Este/Norte único o las 4
+// coordenadas de inicio/final, y si el mapa dibuja L.polyline o
+// L.circleMarker.
+const TIPOS_LINEALES_GIS = ['canal_lateral', 'dren_principal', 'dren_secundario'];

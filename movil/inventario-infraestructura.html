@@ -31,52 +31,18 @@
     <script src="../assets/core/coordenadasUtm.js"></script>
     <script src="../assets/core/capturaOffline.js"></script>
     <script src="../assets/core/inventarioInfraestructura.js"></script>
+    <script src="../assets/core/dibujoEstructura.js"></script>
     <script src="vendor/leaflet.js"></script>
 
     <style>
-        #mapaInventario {
+        #mapaInventario, #mapaFichaUbicacion {
             width: 100%;
             max-width: 420px;
             height: 60vh;
             border-radius: 10px;
             margin: 10px 0;
         }
-        .chk-gis {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            width: 100%;
-            max-width: 420px;
-            margin-top: 8px;
-            padding: 8px 10px;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 8px;
-            font-size: 13px;
-            cursor: pointer;
-        }
-        .chk-gis input { width: 17px; height: 17px; cursor: pointer; }
-        .gis-popup table { border-collapse: collapse; font-size: 11px; margin-top: 4px; }
-        .gis-popup td { padding: 1px 6px 1px 0; vertical-align: top; }
-        .gis-popup td:first-child { color: #666; white-space: nowrap; }
-        #mapaDrenes {
-            width: 100%;
-            max-width: 420px;
-            height: 60vh;
-            border-radius: 10px;
-            margin: 10px 0;
-        }
-        .leyenda-drenes {
-            display: flex;
-            gap: 16px;
-            width: 100%;
-            max-width: 420px;
-            margin-top: 8px;
-            font-size: 13px;
-        }
-        .leyenda-drenes label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-        .leyenda-drenes input { width: 16px; height: 16px; cursor: pointer; }
-        .leyenda-drenes .swatch { width: 14px; height: 4px; border-radius: 2px; display: inline-block; }
+        #mapaFichaUbicacion { height: 34vh; }
         .foto-miniatura { display: inline-block; position: relative; margin: 6px; }
         .foto-miniatura img {
             width: 90px;
@@ -226,7 +192,6 @@
         <!-- ── Pantalla 2: selección de toma ── -->
         <div id="vistaTomas" style="width:100%; display:flex; flex-direction:column; align-items:center;">
             <button class="boton" id="btnVerSolicitudes" style="max-width:420px; display:none; margin-bottom:14px; background:#c0392b;">🔔 Solicitudes de edición pendientes</button>
-            <button class="boton-secundario" id="btnVerMapaDrenes" style="max-width:420px; margin-bottom:14px;">🌊 Ver Drenes (mapa general — cruzan varias tomas)</button>
             <div class="estado-busqueda" id="estadoTomas">Cargando tomas…</div>
             <div class="resultados" id="listaTomas"></div>
         </div>
@@ -250,31 +215,22 @@
             <div class="resultados" id="listaEstructuras"></div>
         </div>
 
-        <!-- ── Pantalla: mapa satelital de la infraestructura ── -->
+        <!-- ── Pantalla: mapa satelital de la infraestructura (geometría
+             real del levantamiento GIS — no ya la aproximación por
+             conversión UTM) ── -->
         <div id="vistaMapaInventario" style="display:none; width:100%; flex-direction:column; align-items:center;">
             <button class="boton-secundario" id="btnVolverAListaDesdeMapa" style="max-width:420px;">← Volver a la lista</button>
             <h1 id="tituloMapaInventario" style="margin-top:14px; font-size:16px;"></h1>
             <div class="estado-busqueda" id="estadoMapaInventario"></div>
-            <label class="chk-gis" for="chkCapaGis">
-                <input type="checkbox" id="chkCapaGis">
-                🛰️ Mostrar infraestructura real (GIS)
-            </label>
-            <div class="estado-busqueda" id="estadoCapaGis" style="display:none;"></div>
             <div id="mapaInventario"></div>
         </div>
 
-        <!-- ── Pantalla: mapa general de Drenes (independiente de toma — un
-             dren real puede atravesar dos o más tomas, así que no tiene
-             sentido acotarlo a la que esté seleccionada) ── -->
-        <div id="vistaMapaDrenes" style="display:none; width:100%; flex-direction:column; align-items:center;">
-            <button class="boton-secundario" id="btnVolverATomasDesdeDrenes" style="max-width:420px;">← Volver a las tomas</button>
-            <h1 style="margin-top:14px; font-size:16px;">🌊 Drenes — toda la comisión</h1>
-            <div class="estado-busqueda" id="estadoMapaDrenes"></div>
-            <div class="leyenda-drenes">
-                <label><input type="checkbox" id="chkDrenPrincipal" checked><span class="swatch" style="background:#ff9800;"></span> Dren Principal</label>
-                <label><input type="checkbox" id="chkDrenSecundario" checked><span class="swatch" style="background:#9c27b0;"></span> Dren Secundario</label>
-            </div>
-            <div id="mapaDrenes"></div>
+        <!-- ── Pantalla: usuarios de la toma de la estructura abierta ── -->
+        <div id="vistaUsuariosToma" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverDesdeUsuariosToma" style="max-width:420px;">← Volver</button>
+            <h1 id="tituloUsuariosToma" style="margin-top:14px; font-size:16px;"></h1>
+            <div class="estado-busqueda" id="estadoUsuariosToma"></div>
+            <div class="resultados" id="listaUsuariosToma"></div>
         </div>
 
         <!-- ── Pantalla 4: formulario ── -->
@@ -305,6 +261,7 @@
                 </div>
             </div>
             <div class="estado-busqueda" id="textoTomaAsignada" style="max-width:420px;"></div>
+            <button type="button" class="boton-secundario" id="btnVerUsuariosToma" style="max-width:420px; margin-bottom:10px;">👥 Usuarios de esta toma — ver quiénes son</button>
 
             <div class="seccion-titulo">Ubicación (UTM WGS84)</div>
             <div class="fila-doble">
@@ -317,7 +274,7 @@
                     <select id="selectMargen"></select>
                 </div>
             </div>
-            <div class="fila-doble">
+            <div class="fila-doble" id="filaEsteNorteUnico">
                 <div class="campo">
                     <label for="inputEste">Este</label>
                     <input type="number" step="0.01" id="inputEste">
@@ -327,6 +284,9 @@
                     <input type="number" step="0.01" id="inputNorte">
                 </div>
             </div>
+
+            <div id="mapaFichaUbicacion" style="display:none;"></div>
+            <div class="estado-busqueda" id="estadoMapaFicha" style="max-width:420px;"></div>
 
             <!-- Campos específicos de Tomas -->
             <div id="camposToma" style="width:100%; display:flex; flex-direction:column; align-items:center;">
@@ -390,16 +350,26 @@
                  salvo los campos marcados `editable` en TIPOS_ESTRUCTURA_GENERICOS
                  (ej. Tipo/Longitud de un Canal Lateral que se revistió). -->
             <div id="camposGenericos" style="width:100%; display:none; flex-direction:column; align-items:center;">
+                <div class="seccion-titulo">Nombre de la obra</div>
+                <div class="campo" style="width:100%; max-width:420px;">
+                    <label for="inputNombreObraGenerico">Nombre</label>
+                    <input type="text" id="inputNombreObraGenerico" autocomplete="off">
+                </div>
                 <div class="seccion-titulo">Datos de referencia (ingeniería)</div>
                 <div class="tarjeta" style="max-width:420px; width:100%;" id="listaCamposGenericos"></div>
             </div>
 
             <div id="seccionCamposGenericosEditables" style="width:100%; display:none; flex-direction:column; align-items:center;">
-                <div class="seccion-titulo">Corregir tipo / longitud (obra)</div>
+                <div class="seccion-titulo">Corregir orden / coordenadas / longitud (obra)</div>
                 <div class="estado-busqueda" style="max-width:420px; opacity:0.75;">
-                    Corrige acá si la obra cambió físicamente (ej. se revistió un tramo) — la corrección actualiza el inventario.
+                    Corrige acá si la obra cambió físicamente (ej. se revistió un tramo) o si la ubicación real difiere de la registrada — la corrección actualiza el inventario.
                 </div>
                 <div id="listaCamposGenericosEditables" style="width:100%; display:flex; flex-direction:column; align-items:center;"></div>
+            </div>
+
+            <div id="seccionDibujoEstructura" style="width:100%; display:none; flex-direction:column; align-items:center;">
+                <div class="seccion-titulo">Esquema</div>
+                <div class="tarjeta" style="max-width:420px; width:100%; text-align:center;" id="contenidoDibujoEstructura"></div>
             </div>
 
             <div class="seccion-titulo">Estado</div>
@@ -520,6 +490,7 @@
                 generico: true, definicion: definicion,
                 avance: function (comisionKey) { return CusshmiDatos.obtenerAvanceInventarioEstructurasPorToma(comisionKey, tipoEstructura); },
                 listar: function (comisionKey, tomaNombre) { return CusshmiDatos.listarRegistrosInventarioEstructurasDeToma(comisionKey, tomaNombre, tipoEstructura); },
+                listarPorTipo: function (comisionKey) { return CusshmiDatos.listarRegistrosInventarioEstructurasPorTipo(comisionKey, tipoEstructura); },
                 cargar: CusshmiDatos.cargarRegistroInventarioEstructura,
                 guardar: CusshmiDatos.guardarRegistroInventarioEstructura,
                 confirmar: CusshmiDatos.confirmarRegistroInventarioEstructura,
@@ -867,7 +838,9 @@
             abrirFormularioDesdeRegistro(null);
         });
 
-        // ═══ Mapa satelital de la infraestructura (tipo + toma actuales) ═══
+        // ═══ Mapa satelital de la infraestructura — geometría real del
+        // levantamiento GIS (mapas/inventario_gis/*.json), no ya la
+        // aproximación por conversión UTM→lat/lon que se usaba antes.
         function _colorPorEstadoInventario(estado) {
             if (estado === 'B') return '#1e7e34';
             if (estado === 'R') return '#c8a84b';
@@ -888,44 +861,94 @@
             setTimeout(function () { mapaInventarioLeaflet.invalidateSize(); }, 50);
         }
 
-        function pintarMarcadoresInventario() {
+        var capaGisCache = {}; // tipo → array de figuras del KMZ ya parseado
+
+        function _normMatch(v) {
+            return (v || '').toString().trim().replace(/\s+/g, ' ').toUpperCase();
+        }
+
+        function _numOrNull(v) {
+            var n = parseFloat(v);
+            return Number.isFinite(n) ? n : null;
+        }
+
+        // Empareja una figura del KMZ contra los registros de Supabase ya
+        // cargados, por la misma clave natural que ya usa la sincronización
+        // (canal fuente + nombre del canal + progresiva), normalizada para
+        // tolerar diferencias de mayúsculas/espacios entre el Excel y el GIS.
+        function _buscarRegistroParaFigura(registros, figura, claves) {
+            var canalFuenteKmz = claves.canalFuenteKey ? _normMatch(figura.campos[claves.canalFuenteKey]) : '';
+            var nombreCanalKmz = _normMatch(figura.campos[claves.nombreCanalKey]);
+            var progresivaKmz = _normMatch(figura.campos[claves.progresivaKey]);
+            return registros.find(function (r) {
+                return (!claves.canalFuenteKey || _normMatch(r.canal_fuente) === canalFuenteKmz) &&
+                    _normMatch(r.nombre_canal) === nombreCanalKmz &&
+                    _normMatch(r.progresiva_km) === progresivaKmz;
+            }) || null;
+        }
+
+        async function pintarMarcadoresInventario() {
             marcadoresInventario.forEach(function (m) { mapaInventarioLeaflet.removeLayer(m); });
             marcadoresInventario = [];
+            var elEstado = document.getElementById('estadoMapaInventario');
+            var tipo = tipoActual;
+            var esLineal = TIPOS_LINEALES_GIS.indexOf(tipo) !== -1;
+            var claves = CLAVES_KMZ_POR_TIPO[tipo];
 
-            var registros = registrosPorTipo[tipoActual] || [];
-            var conCoordenadas = registros.filter(function (r) { return r.este != null && r.norte != null && r.este !== '' && r.norte !== ''; });
-            var sinCoordenadas = registros.length - conCoordenadas.length;
-
-            if (!registros.length) {
-                document.getElementById('estadoMapaInventario').textContent = 'No hay ' + FUNCIONES_POR_TIPO[tipoActual].etiquetaPlural.toLowerCase() + ' sincronizadas para esta toma todavía.';
-            } else if (!conCoordenadas.length) {
-                document.getElementById('estadoMapaInventario').textContent = 'Ninguna estructura de este tipo tiene coordenadas UTM registradas.';
-            } else {
-                document.getElementById('estadoMapaInventario').textContent = sinCoordenadas ? '(' + sinCoordenadas + ' sin coordenadas, no se muestran en el mapa)' : '';
+            elEstado.textContent = 'Cargando infraestructura…';
+            if (!capaGisCache[tipo]) {
+                try {
+                    var resp = await fetch('../mapas/inventario_gis/' + tipo + '.json');
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    capaGisCache[tipo] = await resp.json();
+                } catch (e) {
+                    elEstado.textContent = 'No se pudo cargar el mapa: ' + e.message;
+                    return;
+                }
             }
 
-            conCoordenadas.forEach(function (r) {
-                var latlon = utm17SALatLon(Number(r.este), Number(r.norte));
-                var titulo = r.nombre_obra || r.nombre_canal || '-';
-                var estadoTexto = r.estado ? (ESTADO_INVENTARIO[r.estado] || r.estado) : 'sin revisar';
-                var marcador = L.circleMarker([latlon.lat, latlon.lon], {
-                    radius: 8, color: '#002555', weight: 1.5, fillColor: _colorPorEstadoInventario(r.estado), fillOpacity: 0.9
-                }).addTo(mapaInventarioLeaflet);
+            // Los Drenes cruzan varias tomas y su KMZ no trae ese dato
+            // resuelto — se muestran completos, sin importar la toma
+            // seleccionada (mismo criterio ya verificado con el usuario).
+            var esDren = (tipo === 'dren_principal' || tipo === 'dren_secundario');
+            var figuras = capaGisCache[tipo].filter(function (f) {
+                return esDren || f.toma === tomaSeleccionada;
+            });
 
-                var popupDiv = document.createElement('div');
-                popupDiv.innerHTML = '<b>' + escapeHtml(titulo) + '</b><br>Estado: ' + escapeHtml(estadoTexto) + '<br>';
-                var btnVerFicha = document.createElement('button');
-                btnVerFicha.type = 'button';
-                btnVerFicha.textContent = 'Ver ficha';
-                btnVerFicha.style.cssText = 'margin-top:6px; padding:6px 10px; border:none; border-radius:6px; background:#003876; color:#fff; font-weight:600; cursor:pointer;';
-                btnVerFicha.addEventListener('click', function () {
-                    mapaInventarioLeaflet.closePopup();
+            if (!figuras.length) {
+                elEstado.textContent = esDren
+                    ? 'No hay ' + FUNCIONES_POR_TIPO[tipo].etiquetaPlural.toLowerCase() + ' en el levantamiento GIS.'
+                    : 'El levantamiento GIS no trae ' + FUNCIONES_POR_TIPO[tipo].etiquetaPlural.toLowerCase() + ' identificadas para esta toma.';
+                return;
+            }
+            elEstado.textContent = esDren ? figuras.length + ' — cruzan varias tomas, no se filtran por la toma seleccionada.' : '';
+
+            // Para pintar el color por Estado y saber a qué ficha abrir al
+            // tocar, se empareja contra Supabase: los 13 tipos normales ya
+            // están cargados en registrosPorTipo (Pantalla 3); los Drenes,
+            // al no tener toma resuelta, se traen sin filtro de toma.
+            var registrosParaEmparejar = registrosPorTipo[tipo] || [];
+            if (esDren) {
+                var resultadoTipo = await FUNCIONES_POR_TIPO[tipo].listarPorTipo(comisionKeyActual);
+                if (resultadoTipo.ok) registrosParaEmparejar = resultadoTipo.registros;
+            }
+
+            figuras.forEach(function (f) {
+                var match = _buscarRegistroParaFigura(registrosParaEmparejar, f, claves);
+                var color = match ? _colorPorEstadoInventario(match.estado) : '#888888';
+                var capa;
+                if (esLineal && f.geom && f.geom.type === 'LineString') {
+                    capa = L.polyline(f.geom.coords, { color: color, weight: 4, opacity: 0.9 }).addTo(mapaInventarioLeaflet);
+                } else if (!esLineal && f.geom && f.geom.type === 'Point') {
+                    capa = L.circleMarker(f.geom.coords, { radius: 8, color: '#002555', weight: 1.5, fillColor: color, fillOpacity: 0.9 }).addTo(mapaInventarioLeaflet);
+                } else {
+                    return;
+                }
+                capa.on('click', function () {
                     document.getElementById('vistaMapaInventario').style.display = 'none';
-                    abrirFormularioDesdeRegistro(r);
+                    abrirFichaDesdeFiguraGis(f, tipo, match);
                 });
-                popupDiv.appendChild(btnVerFicha);
-                marcador.bindPopup(popupDiv);
-                marcadoresInventario.push(marcador);
+                marcadoresInventario.push(capa);
             });
 
             if (marcadoresInventario.length) {
@@ -943,25 +966,6 @@
             document.getElementById('tituloMapaInventario').textContent = nombreToma + ' — ' + FUNCIONES_POR_TIPO[tipoActual].etiquetaPlural;
             inicializarMapaInventarioSiHaceFalta();
             pintarMarcadoresInventario();
-            limpiarCapaGisInventario();
-            document.getElementById('chkCapaGis').checked = false;
-            document.getElementById('estadoCapaGis').style.display = 'none';
-
-            // Los drenes reales cruzan dos o más tomas — no tiene sentido
-            // acotar su capa GIS a la toma que se esté viendo acá. Se
-            // deshabilita el checkbox de esta pantalla y se redirige al
-            // mapa general de Drenes (independiente de toma).
-            var esDrenAqui = (tipoActual === 'dren_principal' || tipoActual === 'dren_secundario');
-            document.getElementById('chkCapaGis').closest('label').style.display = esDrenAqui ? 'none' : 'flex';
-            if (esDrenAqui) {
-                var elEstado = document.getElementById('estadoCapaGis');
-                elEstado.style.display = 'block';
-                elEstado.innerHTML = 'Los drenes suelen cruzar varias tomas — usa <button type="button" id="btnIrAMapaDrenesDesdeToma" style="text-decoration:underline; background:none; border:none; color:inherit; font:inherit; cursor:pointer; padding:0;">🌊 Ver Drenes (mapa general)</button> en vez de esta capa.';
-                document.getElementById('btnIrAMapaDrenesDesdeToma').addEventListener('click', function () {
-                    document.getElementById('vistaMapaInventario').style.display = 'none';
-                    mostrarVistaMapaDrenes();
-                });
-            }
         }
 
         document.getElementById('btnVerMapaInventario').addEventListener('click', mostrarVistaMapaInventario);
@@ -970,165 +974,208 @@
             document.getElementById('vistaLista').style.display = 'flex';
         });
 
-        // ═══ Capa GIS real (KMZ del levantamiento) — geometría exacta tal
-        // cual el archivo GIS del usuario, superpuesta a los marcadores de
-        // Supabase de arriba (que usan la conversión UTM→lat/lon). Se carga
-        // bajo demanda (checkbox) para no descargar 1.3MB repartidos en 14
-        // archivos si nadie la pide. Cacheada en memoria por tipo — cambiar
-        // de toma dentro del mismo tipo no vuelve a descargar el JSON.
-        var capaGisCache = {}; // tipo → array de features ya parseado
-        var capaGisLayers = []; // leaflet layers actualmente pintados
+        // Al tocar una figura del mapa: si ya existe una fila de Supabase
+        // con la misma identidad, abre su ficha completa (editable,
+        // confirmable, con fotos) tal cual siempre existió. Si no existe
+        // todavía (la obra no estaba en el Excel sincronizado, o su nombre
+        // difiere levemente) se crea de inmediato con los datos del propio
+        // levantamiento GIS, para que quede editable ya mismo — no tiene
+        // sentido mostrar "no existe" cuando la estructura sí está ahí,
+        // visible en la imagen satelital.
+        async function abrirFichaDesdeFiguraGis(figura, tipo, matchYaResuelto) {
+            tipoActual = tipo;
+            var claves = CLAVES_KMZ_POR_TIPO[tipo];
+            var registros = registrosPorTipo[tipo] || [];
+            var match = matchYaResuelto !== undefined ? matchYaResuelto : _buscarRegistroParaFigura(registros, figura, claves);
 
-        function limpiarCapaGisInventario() {
-            capaGisLayers.forEach(function (l) { mapaInventarioLeaflet.removeLayer(l); });
-            capaGisLayers = [];
-        }
-
-        function _popupHtmlGis(nombre, campos) {
-            var filas = Object.keys(campos || {})
-                .filter(function (k) { return campos[k] !== '' && campos[k] != null; })
-                .map(function (k) { return '<tr><td>' + escapeHtml(k) + '</td><td>' + escapeHtml(campos[k]) + '</td></tr>'; })
-                .join('');
-            return '<div class="gis-popup"><b>🛰️ ' + escapeHtml(nombre || '(sin nombre)') + '</b>' +
-                (filas ? '<table>' + filas + '</table>' : '') + '</div>';
-        }
-
-        async function cargarCapaGisInventario() {
-            var tipo = tipoActual;
-            var elEstado = document.getElementById('estadoCapaGis');
-            elEstado.style.display = 'block';
-
-            if (!capaGisCache[tipo]) {
-                elEstado.textContent = 'Cargando infraestructura real (GIS)…';
-                try {
-                    var resp = await fetch('../mapas/inventario_gis/' + tipo + '.json');
-                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                    capaGisCache[tipo] = await resp.json();
-                } catch (e) {
-                    elEstado.textContent = 'No se pudo cargar la capa GIS de este tipo: ' + e.message;
-                    return;
-                }
-            }
-
-            limpiarCapaGisInventario();
-            // Los drenes (dren_principal/dren_secundario) nunca llegan acá —
-            // ver mostrarVistaMapaInventario(), que redirige a
-            // mostrarVistaMapaDrenes() para ese tipo — así que el filtro por
-            // toma siempre aplica sin excepción.
-            var features = capaGisCache[tipo].filter(function (f) {
-                return f.toma === tomaSeleccionada;
-            });
-
-            if (!features.length) {
-                elEstado.textContent = 'El archivo GIS no trae ' + FUNCIONES_POR_TIPO[tipo].etiquetaPlural.toLowerCase() + ' identificadas para esta toma.';
+            if (match) {
+                abrirFormularioDesdeRegistro(match);
                 return;
             }
 
-            features.forEach(function (f) {
-                if (f.geom && f.geom.type === 'Point') {
-                    var m = L.circleMarker(f.geom.coords, {
-                        radius: 6, color: '#ffffff', weight: 1, fillColor: '#00bcd4', fillOpacity: 0.9
-                    }).addTo(mapaInventarioLeaflet);
-                    m.bindPopup(_popupHtmlGis(f.nombre, f.campos));
-                    capaGisLayers.push(m);
-                } else if (f.geom && f.geom.type === 'LineString') {
-                    var linea = L.polyline(f.geom.coords, { color: '#00bcd4', weight: 3, opacity: 0.85 }).addTo(mapaInventarioLeaflet);
-                    linea.bindPopup(_popupHtmlGis(f.nombre, f.campos));
-                    capaGisLayers.push(linea);
-                }
-            });
+            registroActual = nuevoRegistroBase();
+            registroActual.tipo = tipo;
+            // Sin canalFuenteKey (Drenes) no hay con qué llenar el campo, y
+            // la columna es obligatoria en Supabase — se usa el propio
+            // nombre del canal como relleno técnico (el campo queda de
+            // solo lectura igual que siempre, no se le muestra al usuario
+            // como si fuera un dato real de canal fuente).
+            registroActual.canalFuente = claves.canalFuenteKey ? (figura.campos[claves.canalFuenteKey] || '') : (figura.campos[claves.nombreCanalKey] || '');
+            registroActual.nombreCanal = figura.campos[claves.nombreCanalKey] || '';
+            registroActual.progresivaKm = figura.campos[claves.progresivaKey] || '';
+            registroActual.tomaNombre = figura.toma || null;
+            registroActual.zonaUtm = '17';
+            registroActual.nombreObra = figura.nombre || '';
+            registroActual.campos = {};
 
-            elEstado.textContent = capaGisLayers.length + ' elemento(s) del levantamiento GIS.';
-
-            var grupo = L.featureGroup(capaGisLayers.concat(marcadoresInventario));
-            if (grupo.getLayers().length) {
-                mapaInventarioLeaflet.fitBounds(grupo.getBounds(), { padding: [30, 30], maxZoom: 17 });
+            if (TIPOS_LINEALES_GIS.indexOf(tipo) !== -1) {
+                registroActual.campos.esteInicio = _numOrNull(figura.campos[claves.esteIniKey]);
+                registroActual.campos.norteInicio = _numOrNull(figura.campos[claves.norteIniKey]);
+                registroActual.campos.esteFinal = _numOrNull(figura.campos[claves.esteFinKey]);
+                registroActual.campos.norteFinal = _numOrNull(figura.campos[claves.norteFinKey]);
+            } else {
+                registroActual.este = figura.campos[claves.esteKey] || '';
+                registroActual.norte = figura.campos[claves.norteKey] || '';
             }
+
+            document.getElementById('vistaLista').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'flex';
+
+            var resultado = await FUNCIONES_POR_TIPO[tipo].guardar(datosParaGuardar());
+            if (!resultado.ok) {
+                alert('No se pudo crear la estructura desde el levantamiento GIS: ' + resultado.error);
+                document.getElementById('vistaFormulario').style.display = 'none';
+                document.getElementById('vistaLista').style.display = 'flex';
+                return;
+            }
+            registroActual.id = resultado.id;
+            pintarFormularioDesdeRegistro();
+            document.getElementById('estadoGuardadoFormulario').textContent = 'Estructura nueva — no estaba en el Excel sincronizado, se creó desde el levantamiento GIS.';
         }
 
-        document.getElementById('chkCapaGis').addEventListener('change', function (e) {
-            if (e.target.checked) {
-                cargarCapaGisInventario();
-            } else {
-                limpiarCapaGisInventario();
-                document.getElementById('estadoCapaGis').style.display = 'none';
+        // ═══ Usuarios de la toma de la estructura abierta ═══
+        async function mostrarUsuariosDeToma() {
+            var tomaNombre = registroActual ? registroActual.tomaNombre : null;
+            document.getElementById('vistaFormulario').style.display = 'none';
+            document.getElementById('vistaUsuariosToma').style.display = 'flex';
+            document.getElementById('tituloUsuariosToma').textContent = tomaNombre ? ('Usuarios — Toma ' + tomaNombre) : 'Usuarios';
+            var elEstado = document.getElementById('estadoUsuariosToma');
+            var elLista = document.getElementById('listaUsuariosToma');
+            elLista.innerHTML = '';
+            if (!tomaNombre) {
+                elEstado.textContent = 'Esta estructura no tiene una toma asignada — no se puede listar usuarios.';
+                return;
             }
+            elEstado.textContent = 'Cargando…';
+            var resultado = await CusshmiDatos.cargarPadronOficialA1(comisionKeyActual);
+            if (!resultado.ok) { elEstado.textContent = resultado.error || 'No se pudo cargar el padrón.'; return; }
+            var usuarios = resultado.resultados.filter(function (u) { return u.toma_nombre === tomaNombre; });
+            if (!usuarios.length) { elEstado.textContent = 'No hay usuarios del padrón oficial A-1 registrados para esta toma.'; return; }
+            var areaTotal = 0;
+            usuarios.forEach(function (u) { areaTotal += Number(u.area_bajo_riego_ha) || 0; });
+            elEstado.textContent = usuarios.length + ' usuario(s) · ' + areaTotal.toFixed(2) + ' ha en total';
+            usuarios.forEach(function (u) {
+                var fila = document.createElement('div');
+                fila.className = 'fila-resultado';
+                fila.innerHTML = '<div class="nombre-resultado">' + escapeHtml(u.apellidos_nombres) + '</div>' +
+                    '<div class="detalle-resultado">UC ' + escapeHtml(u.unidad_catastral || '-') + ' · ' + (Number(u.area_bajo_riego_ha) || 0).toFixed(2) + ' ha</div>';
+                elLista.appendChild(fila);
+            });
+        }
+        document.getElementById('btnVerUsuariosToma').addEventListener('click', mostrarUsuariosDeToma);
+        document.getElementById('btnVolverDesdeUsuariosToma').addEventListener('click', function () {
+            document.getElementById('vistaUsuariosToma').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'flex';
         });
 
-        // ═══ Mapa general de Drenes (independiente de toma) ═══
-        var mapaDrenesLeaflet = null;
-        var capaDrenesLayers = { dren_principal: [], dren_secundario: [] };
-        var COLOR_DREN = { dren_principal: '#ff9800', dren_secundario: '#9c27b0' };
-
-        function inicializarMapaDrenesSiHaceFalta() {
-            if (mapaDrenesLeaflet) {
-                setTimeout(function () { mapaDrenesLeaflet.invalidateSize(); }, 50);
-                return;
-            }
-            mapaDrenesLeaflet = L.map('mapaDrenes', { preferCanvas: true }).setView([-4.9, -80.6], 12);
+        // ═══ Mapa de ubicación de la ficha — la estructura sola + los
+        // polígonos de los predios que abastece esa toma (mismos KML y
+        // funciones ya usados por movil/mapa.html: KML_POR_TOMA,
+        // parsearKmlATomas, filtrarPorToma, cruzarPredioConPadron). ═══
+        var mapaFichaLeaflet = null;
+        function inicializarMapaFichaSiHaceFalta() {
+            if (mapaFichaLeaflet) { setTimeout(function () { mapaFichaLeaflet.invalidateSize(); }, 50); return; }
+            mapaFichaLeaflet = L.map('mapaFichaUbicacion', { preferCanvas: true }).setView([-4.9, -80.6], 13);
             L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
                 attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
                 maxZoom: 19
-            }).addTo(mapaDrenesLeaflet);
-            setTimeout(function () { mapaDrenesLeaflet.invalidateSize(); }, 50);
+            }).addTo(mapaFichaLeaflet);
+            setTimeout(function () { mapaFichaLeaflet.invalidateSize(); }, 50);
         }
 
-        async function cargarSubtipoDren(subtipo) {
-            if (!capaGisCache[subtipo]) {
-                var resp = await fetch('../mapas/inventario_gis/' + subtipo + '.json');
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                capaGisCache[subtipo] = await resp.json();
+        async function pintarMapaFicha() {
+            var r = registroActual;
+            var elMapa = document.getElementById('mapaFichaUbicacion');
+            var elEstado = document.getElementById('estadoMapaFicha');
+            var esLineal = TIPOS_LINEALES_GIS.indexOf(r.tipo) !== -1;
+            var este = esLineal ? null : r.este, norte = esLineal ? null : r.norte;
+            var esteIni = esLineal ? (r.campos || {}).esteInicio : null, norteIni = esLineal ? (r.campos || {}).norteInicio : null;
+            var esteFin = esLineal ? (r.campos || {}).esteFinal : null, norteFin = esLineal ? (r.campos || {}).norteFinal : null;
+
+            var hayGeom = esLineal ? (esteIni && norteIni && esteFin && norteFin) : (este && norte);
+            if (!hayGeom) { elMapa.style.display = 'none'; elEstado.textContent = ''; return; }
+
+            elMapa.style.display = 'block';
+            elEstado.textContent = 'Cargando ubicación…';
+            inicializarMapaFichaSiHaceFalta();
+            mapaFichaLeaflet.eachLayer(function (l) { if (l.esCapaFicha) mapaFichaLeaflet.removeLayer(l); });
+
+            var capasFicha = [];
+            if (esLineal) {
+                var pIni = utm17SALatLon(Number(esteIni), Number(norteIni));
+                var pFin = utm17SALatLon(Number(esteFin), Number(norteFin));
+                var linea = L.polyline([[pIni.lat, pIni.lon], [pFin.lat, pFin.lon]], { color: '#00bcd4', weight: 4 }).addTo(mapaFichaLeaflet);
+                linea.esCapaFicha = true;
+                capasFicha.push(linea);
+            } else {
+                var p = utm17SALatLon(Number(este), Number(norte));
+                var punto = L.circleMarker([p.lat, p.lon], { radius: 9, color: '#002555', weight: 1.5, fillColor: '#00bcd4', fillOpacity: 0.95 }).addTo(mapaFichaLeaflet);
+                punto.esCapaFicha = true;
+                capasFicha.push(punto);
             }
-            capaDrenesLayers[subtipo].forEach(function (l) { mapaDrenesLeaflet.removeLayer(l); });
-            capaDrenesLayers[subtipo] = [];
-            capaGisCache[subtipo].forEach(function (f) {
-                if (!f.geom || f.geom.type !== 'LineString') return;
-                var linea = L.polyline(f.geom.coords, { color: COLOR_DREN[subtipo], weight: 3, opacity: 0.85 }).addTo(mapaDrenesLeaflet);
-                linea.bindPopup(_popupHtmlGis(f.nombre, f.campos));
-                capaDrenesLayers[subtipo].push(linea);
-            });
+
+            // Predios de los usuarios de la toma — reusa tal cual el parser
+            // y el cruce ya escritos en assets/core/mapa.js (KML_POR_TOMA/
+            // parsearKmlATomas/filtrarPorToma/cruzarPredioConPadron/
+            // _colorPorCultivo), sin inventar un criterio visual nuevo.
+            if (r.tomaNombre) {
+                var archivosKml = KML_POR_TOMA[normalizarNombreToma(r.tomaNombre)];
+                if (archivosKml) {
+                    var listaArchivos = Array.isArray(archivosKml) ? archivosKml : [archivosKml];
+                    var padronResultado = await CusshmiDatos.cargarPadronToma(comisionKeyActual, r.tomaNombre);
+                    var filasPadron = padronResultado.ok ? (padronResultado.resultados || []) : [];
+                    for (var i = 0; i < listaArchivos.length; i++) {
+                        try {
+                            var respKml = await fetch('../mapas/' + listaArchivos[i]);
+                            if (!respKml.ok) continue;
+                            var textoKml = await respKml.text();
+                            var predios = filtrarPorToma(parsearKmlATomas(textoKml), r.tomaNombre);
+                            predios.forEach(function (predio) {
+                                var predioCruzado = cruzarPredioConPadron(predio, filasPadron);
+                                if (!predioCruzado.coordenadas || predioCruzado.coordenadas.length < 3) return;
+                                var latlngs = predioCruzado.coordenadas.map(function (par) { return [par[1], par[0]]; });
+                                var cultivoPrincipal = (predioCruzado.cultivos && predioCruzado.cultivos[0] && predioCruzado.cultivos[0].cultivo) || '';
+                                var colorCultivo = cultivoPrincipal ? _colorPorCultivo(cultivoPrincipal) : COLOR_SIN_CRUZAR;
+                                var poligono = L.polygon(latlngs, {
+                                    color: colorCultivo.border, fillColor: colorCultivo.bg, weight: 1.5, fillOpacity: 0.5
+                                }).addTo(mapaFichaLeaflet);
+                                poligono.esCapaFicha = true;
+                                poligono.bindPopup('<b>' + escapeHtml(predioCruzado.usuario || '-') + '</b><br>' + escapeHtml(cultivoPrincipal || 'Sin cultivo cruzado'));
+                                capasFicha.push(poligono);
+                            });
+                        } catch (e) { /* KML de predios no disponible — el mapa igual muestra la estructura sola */ }
+                    }
+                }
+            }
+
+            elEstado.textContent = capasFicha.length > 1 ? (capasFicha.length - 1) + ' predio(s) abastecido(s) por esta toma.' : 'Sin predios mapeados para esta toma todavía.';
+            if (capasFicha.length) mapaFichaLeaflet.fitBounds(L.featureGroup(capasFicha).getBounds(), { padding: [24, 24], maxZoom: 17 });
         }
 
-        async function mostrarVistaMapaDrenes() {
-            document.getElementById('vistaTomas').style.display = 'none';
-            document.getElementById('vistaMapaDrenes').style.display = 'flex';
-            inicializarMapaDrenesSiHaceFalta();
-            var elEstado = document.getElementById('estadoMapaDrenes');
-            elEstado.textContent = 'Cargando drenes…';
-            try {
-                await Promise.all([cargarSubtipoDren('dren_principal'), cargarSubtipoDren('dren_secundario')]);
-            } catch (e) {
-                elEstado.textContent = 'No se pudo cargar la capa de drenes: ' + e.message;
+        // ═══ Dibujo esquemático (SVG) según el tipo de estructura ═══
+        function pintarDibujoEstructura() {
+            var r = registroActual;
+            var campos = r.campos || {};
+            var svg = null;
+            if (r.tipo === 'canal_lateral' || r.tipo === 'dren_principal' || r.tipo === 'dren_secundario') {
+                svg = dibujarSeccionTrapezoidal(campos.baseMayor, campos.baseMenor, campos.altura, campos.tirante);
+            } else if (r.tipo === 'compuerta') {
+                svg = dibujarCompuerta(r.hojaA, r.hojaH, r.marcoA, r.marcoH);
+            } else if (r.tipo === 'toma') {
+                svg = dibujarToma(r.dimensionA, r.dimensionH, r.dimensionD);
+            } else if (r.tipo === 'pase_vehicular' || r.tipo === 'pase_peatonal') {
+                svg = dibujarPlantaPuente(campos.longitud, campos.ancho);
+            }
+            var seccion = document.getElementById('seccionDibujoEstructura');
+            var cont = document.getElementById('contenidoDibujoEstructura');
+            var tiposConDibujo = ['canal_lateral', 'dren_principal', 'dren_secundario', 'compuerta', 'toma', 'pase_vehicular', 'pase_peatonal'];
+            if (tiposConDibujo.indexOf(r.tipo) === -1) {
+                seccion.style.display = 'none';
                 return;
             }
-            elEstado.textContent = capaDrenesLayers.dren_principal.length + ' dren(es) principal(es) · ' + capaDrenesLayers.dren_secundario.length + ' secundario(s) — no filtrados por toma.';
-            aplicarVisibilidadDrenes();
-            var todasLasLineas = capaDrenesLayers.dren_principal.concat(capaDrenesLayers.dren_secundario);
-            if (todasLasLineas.length) {
-                mapaDrenesLeaflet.fitBounds(L.featureGroup(todasLasLineas).getBounds(), { padding: [30, 30], maxZoom: 16 });
-            }
+            seccion.style.display = 'flex';
+            cont.innerHTML = svg || '<div class="estado-busqueda">Sin dimensiones suficientes para dibujar el esquema.</div>';
         }
-
-        function aplicarVisibilidadDrenes() {
-            var mostrarPrincipal = document.getElementById('chkDrenPrincipal').checked;
-            var mostrarSecundario = document.getElementById('chkDrenSecundario').checked;
-            capaDrenesLayers.dren_principal.forEach(function (l) {
-                if (mostrarPrincipal) { if (!mapaDrenesLeaflet.hasLayer(l)) l.addTo(mapaDrenesLeaflet); }
-                else { mapaDrenesLeaflet.removeLayer(l); }
-            });
-            capaDrenesLayers.dren_secundario.forEach(function (l) {
-                if (mostrarSecundario) { if (!mapaDrenesLeaflet.hasLayer(l)) l.addTo(mapaDrenesLeaflet); }
-                else { mapaDrenesLeaflet.removeLayer(l); }
-            });
-        }
-
-        document.getElementById('btnVerMapaDrenes').addEventListener('click', mostrarVistaMapaDrenes);
-        document.getElementById('btnVolverATomasDesdeDrenes').addEventListener('click', function () {
-            document.getElementById('vistaMapaDrenes').style.display = 'none';
-            document.getElementById('vistaTomas').style.display = 'flex';
-        });
-        document.getElementById('chkDrenPrincipal').addEventListener('change', aplicarVisibilidadDrenes);
-        document.getElementById('chkDrenSecundario').addEventListener('change', aplicarVisibilidadDrenes);
 
         // ═══ Pantalla 4 — formulario ═══
         function nuevoRegistroBase() {
@@ -1138,7 +1185,7 @@
                 zonaUtm: '17', este: '', norte: '', margen: '',
                 material: '', tipo_: '', estado: '', dimensionA: '', dimensionH: '', dimensionD: '',
                 operacion: '', hojaA: '', hojaH: '', marcoA: '', marcoH: '', bloqueRiego: '',
-                observacion: '', fotos: [],
+                observacion: '', fotos: [], nombreObra: '', campos: {},
                 confirmado: false, solicitudEdicion: false, solicitudEdicionPorNombre: '', solicitudEdicionEn: null,
             };
             return base;
@@ -1202,10 +1249,17 @@
             document.getElementById('selectMargen').value = r.margen;
             document.getElementById('inputEste').value = r.este;
             document.getElementById('inputNorte').value = r.norte;
+            // Los tipos lineales (Canal Lateral, Drenes) no tienen un solo
+            // punto — se ocultan estos dos y se usan las 4 coordenadas de
+            // inicio/final de la sección "Corregir orden / coordenadas" de
+            // más abajo (mismo mecanismo de campos `editable`).
+            var esLineal = TIPOS_LINEALES_GIS.indexOf(r.tipo) !== -1;
+            document.getElementById('filaEsteNorteUnico').style.display = esLineal ? 'none' : 'flex';
 
             document.getElementById('camposToma').style.display = (r.tipo === 'toma') ? 'flex' : 'none';
             document.getElementById('camposCompuerta').style.display = (r.tipo === 'compuerta') ? 'flex' : 'none';
             document.getElementById('camposGenericos').style.display = esGenerico ? 'flex' : 'none';
+            if (esGenerico) document.getElementById('inputNombreObraGenerico').value = r.nombreObra || '';
 
             if (r.tipo === 'toma') {
                 document.getElementById('selectMaterialToma').value = r.material;
@@ -1225,7 +1279,6 @@
             } else if (esGenerico) {
                 var cont = document.getElementById('listaCamposGenericos');
                 cont.innerHTML = '';
-                if (r.nombreObra) cont.innerHTML += filaResumen('Nombre', r.nombreObra);
                 if (r.bloqueRiego) cont.innerHTML += filaResumen('Bloque de Riego', r.bloqueRiego);
                 (def.definicion.camposReferencia || []).forEach(function (c) {
                     if (c.editable) return; // se pinta aparte, como campo editable
@@ -1289,16 +1342,23 @@
             document.getElementById('estadoGuardadoFormulario').textContent = '';
             document.getElementById('btnContinuarConfirmacion').textContent = bloqueado ? 'Ver confirmación →' : 'Continuar →';
 
-            // Los 12 tipos genéricos (Fase 2) son de solo lectura salvo
-            // Estado/Observación, siempre — no solo cuando está confirmado.
-            var idsCamposEditables = ['selectEstado', 'inputObservacion'];
-            var idsCamposIdentidadYTipo = ['inputCanalFuente', 'inputNombreCanal', 'inputProgresivaKm', 'inputOrdenCompuerta', 'inputZonaUtm', 'selectMargen',
-                'inputEste', 'inputNorte', 'selectMaterialToma', 'selectTipoToma', 'inputDimensionA', 'inputDimensionH', 'inputDimensionD',
+            // Los 12 tipos genéricos (Fase 2) siguen siendo de solo lectura
+            // en su identidad de canal (Canal Fuente/Nombre del Canal/
+            // Progresiva/Zona/Margen — vienen del Excel oficial, no se
+            // tocan desde el móvil) — pero Nombre de la obra, Este/Norte
+            // (tipos puntuales) y Orden/Coordenadas de inicio-final (tipos
+            // lineales, más abajo) sí son editables a pedido del usuario.
+            var idsCamposEditables = ['selectEstado', 'inputObservacion', 'inputEste', 'inputNorte'];
+            if (esGenerico) idsCamposEditables.push('inputNombreObraGenerico');
+            var idsCamposSoloLecturaGenerico = ['inputCanalFuente', 'inputNombreCanal', 'inputProgresivaKm', 'inputOrdenCompuerta', 'inputZonaUtm', 'selectMargen',
+                'selectMaterialToma', 'selectTipoToma', 'inputDimensionA', 'inputDimensionH', 'inputDimensionD',
                 'inputTipoCompuerta', 'selectMaterialCompuerta', 'selectOperacion', 'inputHojaA', 'inputHojaH', 'inputMarcoA', 'inputMarcoH',
                 'inputBloqueRiego'];
             idsCamposEditables.forEach(function (id) { document.getElementById(id).disabled = bloqueado; });
-            idsCamposIdentidadYTipo.forEach(function (id) { document.getElementById(id).disabled = bloqueado || esGenerico; });
+            idsCamposSoloLecturaGenerico.forEach(function (id) { document.getElementById(id).disabled = bloqueado || esGenerico; });
 
+            pintarMapaFicha();
+            pintarDibujoEstructura();
             cargarFotosDeRegistro();
         }
 
@@ -1466,9 +1526,18 @@
                     r.bloqueRiego = document.getElementById('inputBloqueRiego').value;
                 }
             } else {
+                // Nombre de la obra y Este/Norte (tipos puntuales) son
+                // editables para los 12 genéricos igual que para Tomas/
+                // Compuertas — la identidad de canal (Canal Fuente/Nombre
+                // del Canal/Progresiva) sigue de solo lectura.
+                r.nombreObra = document.getElementById('inputNombreObraGenerico').value;
+                if (TIPOS_LINEALES_GIS.indexOf(r.tipo) === -1) {
+                    r.este = document.getElementById('inputEste').value;
+                    r.norte = document.getElementById('inputNorte').value;
+                }
                 // Campos genéricos editables (ej. Tipo/Longitud de un Canal
-                // Lateral) — el resto de `r.campos` queda intacto, tal como
-                // se cargó del servidor.
+                // Lateral, u Orden/coordenadas de inicio-final) — el resto de
+                // `r.campos` queda intacto, tal como se cargó del servidor.
                 r.campos = r.campos || {};
                 (def.definicion.camposReferencia || []).forEach(function (c) {
                     if (!c.editable) return;
@@ -1493,10 +1562,25 @@
             var r = registroActual;
             var def = FUNCIONES_POR_TIPO[r.tipo];
             if (def && def.generico) {
-                // Los 12 tipos genéricos solo guardan Estado/Observación y los
-                // campos marcados `editable` (dentro de `campos`) — el resto
-                // de `campos` lo pone la sincronización desde el Excel.
-                return { id: r.id, estado: r.estado, observacion: r.observacion, campos: r.campos || {} };
+                // Los 12 tipos genéricos guardan Estado/Observación, Nombre
+                // de la obra, Este/Norte (tipos puntuales) y los campos
+                // marcados `editable` (Orden, coordenadas de inicio/final,
+                // Tipo/Longitud según el tipo) — el resto de `campos` lo
+                // pone la sincronización desde el Excel, sin tocarlo.
+                var datosGenerico = {
+                    id: r.id, estado: r.estado, observacion: r.observacion, campos: r.campos || {},
+                    nombreObra: r.nombreObra, este: r.este, norte: r.norte,
+                };
+                if (!r.id) {
+                    // Registro nuevo (creado desde el mapa GIS, ver
+                    // abrirFichaDesdeFiguraGis) — hace falta la identidad
+                    // completa para el insert.
+                    datosGenerico.comisionKey = r.comisionKey; datosGenerico.tipoEstructura = r.tipo;
+                    datosGenerico.tomaNombre = r.tomaNombre;
+                    datosGenerico.canalFuente = r.canalFuente; datosGenerico.nombreCanal = r.nombreCanal;
+                    datosGenerico.progresivaKm = r.progresivaKm;
+                }
+                return datosGenerico;
             }
             var datos = {
                 id: r.id, comisionKey: r.comisionKey, tomaNombre: r.tomaNombre,

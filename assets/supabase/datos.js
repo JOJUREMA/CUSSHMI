@@ -1856,6 +1856,24 @@
         return { ok: true, registros: data || [] };
     }
 
+    // Sin filtro de toma — usado para emparejar las figuras del mapa GIS
+    // contra su fila real en tipos que cruzan varias tomas (Drenes, que no
+    // tienen toma_nombre resuelto) o cuando la toma de la figura no
+    // coincide exactamente con la que el usuario tiene seleccionada.
+    async function listarRegistrosInventarioEstructurasPorTipo(comisionKey, tipoEstructura) {
+        if (!comisionKey || !tipoEstructura) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('inventario_estructuras')
+                .select('id, nombre_obra, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte, toma_nombre')
+                .eq('comision_id', comisionId).eq('tipo_estructura', tipoEstructura),
+            'listar registros de inventario_estructuras por tipo'
+        );
+        if (error) return { ok: false, registros: [], error: error.mensaje || 'No se pudo listar los registros.' };
+        return { ok: true, registros: data || [] };
+    }
+
     async function cargarRegistroInventarioEstructura(id) {
         if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
         const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
@@ -1876,16 +1894,49 @@
     // TIPOS_ESTRUCTURA_GENERICOS), nunca un parche parcial, así que un
     // reemplazo total es seguro y no pierde el resto de la referencia.
     async function guardarRegistroInventarioEstructura(datos) {
-        if (!datos || !datos.id) return { ok: false, error: 'Falta el identificador del registro.' };
+        if (!datos) return { ok: false, error: 'Faltan datos del registro.' };
         let client;
         try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
-        const cambios = { estado: datos.estado || null, observacion: datos.observacion || null, actualizado_en: new Date().toISOString() };
-        if (datos.campos && typeof datos.campos === 'object') cambios.campos = datos.campos;
-        const { error } = await client.from('inventario_estructuras')
-            .update(cambios)
-            .eq('id', datos.id);
+
+        if (datos.id) {
+            const cambios = { estado: datos.estado || null, observacion: datos.observacion || null, actualizado_en: new Date().toISOString() };
+            if (datos.campos && typeof datos.campos === 'object') cambios.campos = datos.campos;
+            if (datos.nombreObra !== undefined) cambios.nombre_obra = datos.nombreObra || null;
+            if (datos.este !== undefined) cambios.este = Number.isFinite(parseFloat(datos.este)) ? parseFloat(datos.este) : null;
+            if (datos.norte !== undefined) cambios.norte = Number.isFinite(parseFloat(datos.norte)) ? parseFloat(datos.norte) : null;
+            const { error } = await client.from('inventario_estructuras')
+                .update(cambios)
+                .eq('id', datos.id);
+            if (error) return { ok: false, error: error.message };
+            return { ok: true, id: datos.id };
+        }
+
+        // Sin id: registro nuevo — hoy solo lo dispara el mapa de Inventario
+        // cuando una figura del levantamiento GIS todavía no tiene fila
+        // sincronizada desde el Excel (ver abrirFichaDesdeFiguraGis, movil/
+        // inventario-infraestructura.html). Los 12 tipos genéricos no
+        // ofrecen "+ Agregar estructura nueva" en ningún otro punto del
+        // móvil — solo se sincronizan desde escritorio o se crean así.
+        if (!datos.comisionKey || !datos.tipoEstructura || !datos.canalFuente || !datos.nombreCanal) {
+            return { ok: false, error: 'Faltan datos obligatorios (comisión, tipo, canal fuente o nombre del canal).' };
+        }
+        const comisionId = await resolverComisionId(datos.comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + datos.comisionKey + '" no existe en Supabase.' };
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+        const fila = {
+            comision_id: comisionId, tipo_estructura: datos.tipoEstructura, toma_nombre: datos.tomaNombre || null,
+            canal_fuente: datos.canalFuente, nombre_canal: datos.nombreCanal, progresiva_km: datos.progresivaKm || null,
+            nombre_obra: datos.nombreObra || null,
+            este: Number.isFinite(parseFloat(datos.este)) ? parseFloat(datos.este) : null,
+            norte: Number.isFinite(parseFloat(datos.norte)) ? parseFloat(datos.norte) : null,
+            estado: datos.estado || null, observacion: datos.observacion || null,
+            campos: datos.campos && typeof datos.campos === 'object' ? datos.campos : {},
+            creado_por: usuarioId, actualizado_en: new Date().toISOString(),
+        };
+        const { data: creado, error } = await client.from('inventario_estructuras').insert(fila).select('id').single();
         if (error) return { ok: false, error: error.message };
-        return { ok: true, id: datos.id };
+        return { ok: true, id: creado.id };
     }
 
     function confirmarRegistroInventarioEstructura(id) { return _confirmarRegistroInventario('inventario_estructuras', id); }
@@ -2116,7 +2167,7 @@
         while (true) {
             const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
                 (client) => client.from('padron_oficial_a1')
-                    .select('id, apellidos_nombres, tipo_documento, numero_documento, unidad_catastral, area_total_ha, area_bajo_riego_ha, numero_resolucion, clase_derecho, tipo_uso, volumen_m3, origen')
+                    .select('id, apellidos_nombres, tipo_documento, numero_documento, unidad_catastral, area_total_ha, area_bajo_riego_ha, numero_resolucion, clase_derecho, tipo_uso, volumen_m3, origen, toma_nombre')
                     .eq('comision_id', comisionId)
                     .range(desde, desde + TAMANO_PAGINA - 1),
                 'cargar padrón oficial A-1'
@@ -2330,6 +2381,7 @@
         sincronizarInventarioCompuertas,
         obtenerAvanceInventarioEstructurasPorToma,
         listarRegistrosInventarioEstructurasDeToma,
+        listarRegistrosInventarioEstructurasPorTipo,
         cargarRegistroInventarioEstructura,
         guardarRegistroInventarioEstructura,
         confirmarRegistroInventarioEstructura,
