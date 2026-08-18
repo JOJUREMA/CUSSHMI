@@ -15390,7 +15390,117 @@ function mostrarAnexoG3(modoManual) {
         });
     });
 
+    // Relleno automático de huecos por cultivo: se ejecuta UNA sola vez, cada vez que el G-3
+    // se genera/recalcula desde cero (mostrarAnexoG3 es la única función que reconstruye
+    // toma.usuarios por primera vez), ANTES del primer render — para que la tabla ya salga con
+    // el orden optimizado y el ciclo normal de recálculo (recalcularProgramacionG3Desde, sin
+    // cambios) haga el resto tal como ya lo hace hoy. NO se llama desde moverFilaG3 ni desde
+    // editarCaudalTiempoG3/recalcularDesdeUsuario — esas son reordenamientos/ediciones
+    // manuales y explícitas del sectorista, re-planificar automáticamente después las pisaría.
+    tomasG3.forEach(planificarOrdenG3);
+
     renderizarG3(tomasG3, modoManual, window._tomaParaAbrirG3);
+}
+
+// ⚠️ Bug reportado (toma SD3, FRUTALES 33h/semana: 21h el martes antes de MELON, 12h el
+// miércoles antes de LIMON): la duración de un turno (volCorregido/caudal/3600) casi nunca
+// divide exacto las horas del día (8.15h, 8.56h...). Cuando el usuario EN TURNO no cabe en lo
+// que resta del tramo del día, recalcularProgramacionG3Desde mueve su turno COMPLETO al
+// siguiente día activo (por diseño: "no se parte el turno", ver saltarSiNoCabeEnElDia) — pero
+// nunca revisaba si algún OTRO usuario más adelante en la lista sí cabría justo en ese hueco.
+// Si además no quedaban más días con horas de ese cultivo esa semana, el turno bloqueado
+// saltaba directo a la semana siguiente, dejando el hueco sin regar y el usuario semanas
+// atrasado. Esta función se ejecuta ANTES del primer render (mostrarAnexoG3) y reordena
+// toma.usuarios: cuando el usuario en turno no cabe, busca en las filas siguientes el primer
+// usuario del MISMO cultivo que sí quepa en el hueco y lo adelanta — recalcularProgramacionG3Desde
+// queda intacto, simplemente recibe el array ya reordenado.
+function planificarOrdenG3(toma) {
+    if (!toma || !Array.isArray(toma.usuarios) || toma.usuarios.length === 0) return;
+
+    // Antes del primer render no existe ningún input de hora en el DOM (recién se crea en
+    // renderizarTomaG3) — a diferencia de recalcularProgramacionG3Desde, aquí siempre se usa
+    // el valor por defecto, igual que ya hace esa función cuando el input todavía no existe.
+    const [hIniBase, mIniBase] = HORA_MANIPULACION_TOMAS_DEFAULT.split(':').map(Number);
+    const horaInicioBaseMin = (hIniBase * 60) + (mIniBase || 0);
+    const diaInicioOffset = Number.isFinite(toma.diaInicioOffset) ? toma.diaInicioOffset : 0;
+    const inicioComunMin = (diaInicioOffset * 1440) + horaInicioBaseMin;
+
+    const vt = construirVentanasG3(toma, horaInicioBaseMin);
+    const caudalTotalM3s = (toma.caudalLs || 0) / 1000;
+
+    const cursorPorCultivo = {};
+    const inicializarCursor = (clave) => { if (!(clave in cursorPorCultivo)) cursorPorCultivo[clave] = inicioComunMin; };
+
+    // Réplica reducida (solo la fórmula, sin el bucle de reintento/DOM que usa
+    // recalcularProgramacionG3Desde en las líneas 17303-17327 originales) de cuánto duraría este
+    // usuario si su turno arrancara en inicioMinAbs. currentGroupLen=1 siempre aquí porque los
+    // checkboxes "paralelo_*" del DOM aún no existen a esta altura (se crean recién en
+    // renderizarTomaG3) — no hay grupos simultáneos que planificar todavía.
+    function tiempoHrsSiInicia(inicioMinAbs, claveCultivo, volCorregido) {
+        const diaOffsetUsuario = Math.floor((inicioMinAbs - horaInicioBaseMin) / 1440);
+        const diaSemanaUsuario = vt.offsetSemana(diaOffsetUsuario);
+        const mapaCultivoDelDia = toma.caudalPorCultivoPorDiaOffset ? toma.caudalPorCultivoPorDiaOffset[diaSemanaUsuario] : null;
+        const caudalCultivoUsuario = (mapaCultivoDelDia && Number.isFinite(mapaCultivoDelDia[claveCultivo]))
+            ? mapaCultivoDelDia[claveCultivo]
+            : null;
+        const caudalDelDia = (caudalCultivoUsuario !== null)
+            ? caudalCultivoUsuario
+            : ((toma.caudalPorDiaOffset && Number.isFinite(toma.caudalPorDiaOffset[diaSemanaUsuario]))
+                ? toma.caudalPorDiaOffset[diaSemanaUsuario]
+                : caudalTotalM3s);
+        return caudalDelDia > 0 ? volCorregido / caudalDelDia / 3600 : 0;
+    }
+
+    const usuarios = toma.usuarios;
+    const maxPasos = usuarios.length * usuarios.length + 20; // cota de seguridad
+    let pasos = 0;
+
+    for (let i = 0; i < usuarios.length; i++) {
+        if (++pasos > maxPasos) {
+            console.warn(`⚠️ planificarOrdenG3 [${toma.nombreToma}]: se alcanzó el límite de reintentos, se detiene el relleno de huecos (orden parcial).`);
+            break;
+        }
+
+        const u = usuarios[i];
+        const clave = _normCultivo(u.cultivo);
+        inicializarCursor(clave);
+
+        const inicioMinAbs = vt.ajustarADiaActivo(cursorPorCultivo[clave], clave);
+        let tiempoHrs = tiempoHrsSiInicia(inicioMinAbs, clave, u.volCorregido);
+        const cabe = vt.saltarSiNoCabeEnElDia(inicioMinAbs, tiempoHrs * 60, clave) === inicioMinAbs;
+
+        if (!cabe) {
+            // Buscar desde i+1 el primer usuario del MISMO cultivo cuya duración sí quepa en lo
+            // que resta del tramo actual (mismo inicioMinAbs/cursor para cualquier candidato de
+            // este cultivo, así que la comparación es directa).
+            let jEncontrado = -1;
+            for (let j = i + 1; j < usuarios.length; j++) {
+                if (_normCultivo(usuarios[j].cultivo) !== clave) continue;
+                const tHrsJ = tiempoHrsSiInicia(inicioMinAbs, clave, usuarios[j].volCorregido);
+                if (vt.saltarSiNoCabeEnElDia(inicioMinAbs, tHrsJ * 60, clave) === inicioMinAbs) {
+                    jEncontrado = j;
+                    break;
+                }
+            }
+            if (jEncontrado !== -1) {
+                const [uj] = usuarios.splice(jEncontrado, 1);
+                usuarios.splice(i, 0, uj);
+                i--; // el i++ del for cancela este i--: se reintenta la MISMA posición con uj ya ahí
+                continue;
+            }
+            // Nadie más del mismo cultivo cabe: se deja el comportamiento actual (el hueco queda
+            // sin llenar y recalcularProgramacionG3Desde saltará este usuario entero al siguiente
+            // día/tramo activo, tal como ya hace saltarSiNoCabeEnElDia hoy).
+        }
+
+        // Avanzar el cursor simulado de este cultivo (mismo criterio que el cierre de grupo en
+        // recalcularProgramacionG3Desde, con currentGroupLen=1).
+        const inicioFinal = cabe ? inicioMinAbs : vt.saltarSiNoCabeEnElDia(inicioMinAbs, tiempoHrs * 60, clave);
+        if (!cabe) tiempoHrs = tiempoHrsSiInicia(inicioFinal, clave, u.volCorregido);
+        cursorPorCultivo[clave] = inicioFinal + tiempoHrs * 60;
+    }
+
+    usuarios.forEach((u, idx) => { u.nOrden = idx + 1; }); // mismo patrón que moverFilaG3
 }
 
 
@@ -17049,58 +17159,7 @@ function mostrarAvisoCaudalCultivoG3(tomaIdx) {
 }
 
 
-function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) {
-    const toma = window._tomasG3Data[tomaIdx];
-    if (!toma || toma.usuarios.length === 0) return;
-
-    const caudalTotalM3s = toma.caudalLs / 1000;
-    const diasSemana = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
-
-    const horaInicioInp0 = document.getElementById('inicioHora_' + tomaIdx + '_0');
-    const [hIniBase, mIniBase] = (horaInicioInp0 ? horaInicioInp0.value : HORA_MANIPULACION_TOMAS_DEFAULT).split(':').map(Number);
-    const horaInicioBaseMin = (hIniBase * 60) + (mIniBase || 0);
-    const diaInicioOffset = Number.isFinite(toma.diaInicioOffset) ? toma.diaInicioOffset : 0;
-    const inicioComunMin = (diaInicioOffset * 1440) + horaInicioBaseMin;
-
-    // ⚠️ CADA CULTIVO corre en su propia línea de tiempo independiente, todas arrancando el mismo
-    // día/hora (inicioComunMin). Si compartieran un único cursor secuencial, el primer cultivo
-    // procesado podía consumir toda la semana programada y dejar a los cultivos siguientes
-    // agendados fuera del rango de días con caudal definido (causando caudal 0 o el caudal
-    // "total" de la toma en vez del propio de su cultivo). Esto replica cómo se declara el
-    // caudal del día: como la SUMA de los caudales de cada cultivo, es decir, cultivos que
-    // riegan en paralelo usando cada uno su propia porción del caudal total.
-    const cursorPorCultivo = {};
-    const inicializarCursor = (clave) => {
-        if (!(clave in cursorPorCultivo)) cursorPorCultivo[clave] = inicioComunMin;
-    };
-
-    if (startIdx > 0) {
-        // Recalculo parcial (por edición manual de un usuario): reconstruir el cursor de cada
-        // cultivo a partir de lo que ya está renderizado antes de startIdx.
-        for (let i = 0; i < startIdx; i++) {
-            const uPrev = toma.usuarios[i];
-            const clave = _normCultivo(uPrev.cultivo);
-            const elTD = document.getElementById('terminoDia_' + tomaIdx + '_' + i);
-            const terminoPrev = parseFloat(elTD?.getAttribute('data-minutos-termino'));
-            if (Number.isFinite(terminoPrev)) {
-                cursorPorCultivo[clave] = Math.max(cursorPorCultivo[clave] ?? inicioComunMin, terminoPrev);
-            } else {
-                inicializarCursor(clave);
-            }
-        }
-        if (typeof minutosInicioForzado === 'number' && Number.isFinite(minutosInicioForzado)) {
-            cursorPorCultivo[_normCultivo(toma.usuarios[startIdx].cultivo)] = minutosInicioForzado;
-        }
-    }
-
-    // Guardar el minuto de inicio de cada usuario para referencia de paralelos
-    const minutosInicio = new Array(toma.usuarios.length).fill(0);
-    for (let i = 0; i < startIdx; i++) {
-        const el = document.getElementById('inicioDia_' + tomaIdx + '_' + i);
-        const prev = parseInt(el?.getAttribute('data-minutos-inicio') || '0', 10);
-        minutosInicio[i] = Number.isFinite(prev) ? prev : 0;
-    }
-
+function construirVentanasG3(toma, horaInicioBaseMin) {
     // Días activos y horas asignadas por día (según "HORAS DE RIEGO POR DÍA"), para que la
     // programación salte automáticamente al siguiente día activo cuando se agoten las horas del día.
     const diasActivosOffsets = Array.isArray(toma.diasActivosOffsets) && toma.diasActivosOffsets.length
@@ -17258,6 +17317,72 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         if (siguiente === null) return inicioMinAbs; // el cultivo no tiene ningún día activo: se deja tal cual
         return siguiente * 1440 + horaInicioBaseMin;
     }
+
+    return {
+        offsetSemana,
+        siguienteDiaActivoAbs,
+        ventanaDiaCultivo,
+        ajustarADiaActivo,
+        finDelTramoContinuo,
+        saltarSiNoCabeEnElDia,
+        horasPorDiaOffset,
+    };
+}
+
+function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) {
+    const toma = window._tomasG3Data[tomaIdx];
+    if (!toma || toma.usuarios.length === 0) return;
+
+    const caudalTotalM3s = toma.caudalLs / 1000;
+    const diasSemana = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
+    const horaInicioInp0 = document.getElementById('inicioHora_' + tomaIdx + '_0');
+    const [hIniBase, mIniBase] = (horaInicioInp0 ? horaInicioInp0.value : HORA_MANIPULACION_TOMAS_DEFAULT).split(':').map(Number);
+    const horaInicioBaseMin = (hIniBase * 60) + (mIniBase || 0);
+    const diaInicioOffset = Number.isFinite(toma.diaInicioOffset) ? toma.diaInicioOffset : 0;
+    const inicioComunMin = (diaInicioOffset * 1440) + horaInicioBaseMin;
+
+    // ⚠️ CADA CULTIVO corre en su propia línea de tiempo independiente, todas arrancando el mismo
+    // día/hora (inicioComunMin). Si compartieran un único cursor secuencial, el primer cultivo
+    // procesado podía consumir toda la semana programada y dejar a los cultivos siguientes
+    // agendados fuera del rango de días con caudal definido (causando caudal 0 o el caudal
+    // "total" de la toma en vez del propio de su cultivo). Esto replica cómo se declara el
+    // caudal del día: como la SUMA de los caudales de cada cultivo, es decir, cultivos que
+    // riegan en paralelo usando cada uno su propia porción del caudal total.
+    const cursorPorCultivo = {};
+    const inicializarCursor = (clave) => {
+        if (!(clave in cursorPorCultivo)) cursorPorCultivo[clave] = inicioComunMin;
+    };
+
+    if (startIdx > 0) {
+        // Recalculo parcial (por edición manual de un usuario): reconstruir el cursor de cada
+        // cultivo a partir de lo que ya está renderizado antes de startIdx.
+        for (let i = 0; i < startIdx; i++) {
+            const uPrev = toma.usuarios[i];
+            const clave = _normCultivo(uPrev.cultivo);
+            const elTD = document.getElementById('terminoDia_' + tomaIdx + '_' + i);
+            const terminoPrev = parseFloat(elTD?.getAttribute('data-minutos-termino'));
+            if (Number.isFinite(terminoPrev)) {
+                cursorPorCultivo[clave] = Math.max(cursorPorCultivo[clave] ?? inicioComunMin, terminoPrev);
+            } else {
+                inicializarCursor(clave);
+            }
+        }
+        if (typeof minutosInicioForzado === 'number' && Number.isFinite(minutosInicioForzado)) {
+            cursorPorCultivo[_normCultivo(toma.usuarios[startIdx].cultivo)] = minutosInicioForzado;
+        }
+    }
+
+    // Guardar el minuto de inicio de cada usuario para referencia de paralelos
+    const minutosInicio = new Array(toma.usuarios.length).fill(0);
+    for (let i = 0; i < startIdx; i++) {
+        const el = document.getElementById('inicioDia_' + tomaIdx + '_' + i);
+        const prev = parseInt(el?.getAttribute('data-minutos-inicio') || '0', 10);
+        minutosInicio[i] = Number.isFinite(prev) ? prev : 0;
+    }
+
+    const _vt = construirVentanasG3(toma, horaInicioBaseMin);
+    const { offsetSemana, ajustarADiaActivo, saltarSiNoCabeEnElDia, horasPorDiaOffset } = _vt;
 
     let currentGroupLen = 1;
     const _logTiempoPorCultivo = {}; // acumulado de horas por cultivo, para el log de depuración
