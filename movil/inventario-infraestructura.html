@@ -2036,8 +2036,6 @@
         }
 
         async function volverALista() {
-            detenerSeguimientoGps(watchIdFicha);
-            watchIdFicha = null;
             document.getElementById('vistaFormulario').style.display = 'none';
             abrirToma(tomaSeleccionada); // refresca la lista para que los badges queden al día
         }
