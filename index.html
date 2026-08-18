@@ -18381,9 +18381,15 @@ async function exportarG3Excel() {
         const inpInicioHora = f.querySelector('input[id^="inicioHora_"]');
         const inpObs = f.querySelector('input[placeholder="Observaciones..."]');
 
+        // N° Orden y Usuario se leen del modelo (toma.usuarios[uIdx]), no del texto de la
+        // celda: celdas[0].textContent arrastra los botones ▲▼ de reordenar y celdas[1]
+        // arrastra el badge "No Apto" — ninguno de los dos debe aparecer en el Excel.
+        const uIdx = parseInt((f.id || '').split('-').pop(), 10);
+        const uModelo = Number.isFinite(uIdx) ? toma.usuarios[uIdx] : null;
+
         const valores = [
-            celdas[0]?.textContent?.trim() || '',
-            celdas[1]?.textContent?.trim() || '',
+            uModelo ? uModelo.nOrden : (celdas[0]?.textContent?.trim() || ''),
+            uModelo ? (uModelo.nombre || '') : (celdas[1]?.textContent?.trim() || ''),
             parseFloat(celdas[2]?.textContent) || 0,
             parseFloat(celdas[3]?.textContent) || 0,
             parseFloat(inpTiempo?.value) || 0,
