@@ -581,9 +581,9 @@ const TIPOS_LINEALES_GIS = ['canal_lateral', 'dren_principal', 'dren_secundario'
 // tiempo real, sin polígono de predios, sin dibujo esquemático ni
 // hipervínculo de usuarios (a pedido explícito del usuario — ninguno de
 // estos formatos oficiales trae una lista de usuarios propia). Alcantarilla
-// y Rápida no fueron mencionados en el pedido — quedan con el
-// comportamiento genérico anterior hasta que se confirme lo contrario.
-const TIPOS_PUNTUALES_GIS = ['toma', 'compuerta', 'pase_vehicular', 'pase_peatonal', 'caida', 'medidor', 'acueducto', 'repartidor', 'sifon_invertido'];
+// y Rápida sí tienen ícono real en mapas/inventario_gis/iconos/
+// (confirmado por el usuario) — incluidos.
+const TIPOS_PUNTUALES_GIS = ['toma', 'compuerta', 'pase_vehicular', 'pase_peatonal', 'caida', 'medidor', 'acueducto', 'repartidor', 'sifon_invertido', 'alcantarilla', 'rapida'];
 
 // Qué tan completa está una estructura respecto al Formato oficial de ANA
 // — "requerido" = Estado + todo campo de referencia NO editable (los
