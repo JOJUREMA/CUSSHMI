@@ -10473,7 +10473,50 @@ function buscarProgramacionGuardadaToma(nombreToma) {
     }) || null;
 }
 
-function restaurarFilaCultivoGuardada(fila, cultivoGuardado) {
+// ⚠️ El área semana que se guarda en consolidadoDemandas es un número plano, congelado en el
+// momento del guardado — no lleva la lista de usuarios que lo formaron. Si después de guardar
+// una programación se vuelve a cargar el Excel con datos distintos (áreas actualizadas, usuarios
+// que cambiaron), ese número queda desfasado del Área Total (que sí se recalcula en vivo desde
+// tomasData en cada render) y puede terminar mostrando un Área Semana MAYOR que el Área Total
+// del cultivo — matemáticamente imposible. En vez de confiar en el número congelado, se recalcula
+// en vivo sumando el área ACTUAL (tomasData de ahora) de los mismos usuarios (aptos + no aptos
+// programados) que quedaron guardados como "seleccionados" para este cultivo en
+// usuarios_g3_seleccionados — la fuente real de quién fue programado, no solo cuánto sumaba.
+async function recalcularAreaSemanaLiveDesdeSeleccion(comisionKey, nombreToma, semanaInicio, cultivo) {
+    if (!window.CusshmiDatos || !semanaInicio || !cultivo) return null;
+    const resultado = await CusshmiDatos.cargarUsuariosG3Seleccionados(comisionKey, nombreToma, semanaInicio, cultivo);
+    if (!resultado || !resultado.ok || !resultado.usuarios) return null;
+
+    // Formato guardado por confirmarSeleccionUsuariosG3: { seleccionados: [...], completo: [...] }
+    const seleccionados = Array.isArray(resultado.usuarios.seleccionados) ? resultado.usuarios.seleccionados : null;
+    if (!seleccionados) return null; // formato antiguo/desconocido: no se puede recalcular con seguridad
+
+    const usuariosToma = tomasData?.[nombreToma] || [];
+    const cultivoUpper = (cultivo || '').toString().trim().toUpperCase();
+    let areaSemana = 0;
+    let encontrados = 0;
+
+    seleccionados.forEach(sel => {
+        const nombreSel = (sel.nombre || '').toString().trim().toUpperCase();
+        const ucSel = (sel.unidadCatastral || '').toString().trim().toUpperCase();
+        const uActual = usuariosToma.find(u => {
+            const nombreU = (u.nombre || '').toString().trim().toUpperCase();
+            if (nombreU !== nombreSel) return false;
+            const ucU = (u.unidadCatastral || '').toString().trim().toUpperCase();
+            return !ucSel || ucSel === '-' || ucU === ucSel;
+        });
+        if (!uActual) return; // usuario ya no está en el Excel cargado ahora para esta toma
+        for (let n = 1; n <= 10; n++) {
+            const c = (uActual[`cultivo${n}`] || '').toString().trim().toUpperCase();
+            const a = parseFloat(uActual[`area${n}`]) || 0;
+            if (c === cultivoUpper && a > 0) { areaSemana += a; encontrados++; break; }
+        }
+    });
+
+    return { areaSemana, totalSeleccionados: seleccionados.length, encontrados };
+}
+
+async function restaurarFilaCultivoGuardada(fila, cultivoGuardado, contextoRecalculo) {
     if (!fila || !cultivoGuardado) return;
 
     const inputArea = fila.querySelector('.area-semana');
@@ -10481,12 +10524,40 @@ function restaurarFilaCultivoGuardada(fila, cultivoGuardado) {
     const inputModulo = fila.querySelector('.modulo');
     const inputEficiencia = fila.querySelector('.eficiencia');
 
-    const areaSemana = parseFloat(cultivoGuardado.areaSemana) || 0;
+    let areaSemana = parseFloat(cultivoGuardado.areaSemana) || 0;
+    let recalculo = null;
+    if (contextoRecalculo) {
+        try {
+            recalculo = await recalcularAreaSemanaLiveDesdeSeleccion(
+                contextoRecalculo.comisionKey, contextoRecalculo.nombreToma, contextoRecalculo.semanaInicio, cultivoGuardado.cultivo
+            );
+        } catch (e) {
+            console.warn('No se pudo recalcular el área semana en vivo para', cultivoGuardado.cultivo, e);
+        }
+        if (recalculo && recalculo.encontrados > 0) areaSemana = recalculo.areaSemana;
+    }
 
     if (inputArea) {
         inputArea.value = areaSemana.toFixed(2);
         inputArea.classList.remove('area-semana-sin-area', 'area-semana-con-area');
         inputArea.classList.add(areaSemana > 0 ? 'area-semana-con-area' : 'area-semana-sin-area');
+
+        // Aviso visual si, incluso tras recalcular, el área semana sigue superando el área total
+        // del cultivo (recalculada en vivo en la misma fila) — nunca debería pasar, pero si pasa
+        // (p. ej. usuarios duplicados, datos inconsistentes) se hace visible en vez de ocultarlo.
+        const areaTotalFila = parseFloat(fila.querySelector('.col-area-total')?.textContent) || 0;
+        const tdArea = inputArea.closest('td');
+        if (tdArea) {
+            if (areaTotalFila > 0 && areaSemana > areaTotalFila + 0.01) {
+                tdArea.title = `⚠️ Área semana (${areaSemana.toFixed(2)} ha) supera el área total del cultivo (${areaTotalFila.toFixed(2)} ha) — revisar usuarios seleccionados.`;
+                tdArea.style.backgroundColor = '#fdecea';
+            } else if (recalculo && recalculo.encontrados > 0) {
+                tdArea.title = `Recalculado en vivo con ${recalculo.encontrados} de ${recalculo.totalSeleccionados} usuario(s) programados originalmente.`;
+                tdArea.style.backgroundColor = '';
+            } else {
+                tdArea.style.backgroundColor = '';
+            }
+        }
     }
     if (inputPase && cultivoGuardado.pase) inputPase.value = cultivoGuardado.pase;
     if (inputModulo && cultivoGuardado.modulo) inputModulo.value = cultivoGuardado.modulo;
@@ -10497,17 +10568,25 @@ function restaurarFilaCultivoGuardada(fila, cultivoGuardado) {
         fila.classList.remove('totals-row');
     }
 
-    const volB = fila.querySelector('.volBruto');
-    const volC = fila.querySelector('.volCorregido');
-    const qT = fila.querySelector('.qTeorico');
-    if (volB) volB.innerText = (parseFloat(cultivoGuardado.volBruto) || 0).toFixed(2);
-    if (volC) volC.innerText = (parseFloat(cultivoGuardado.volCorregido) || 0).toFixed(2);
-    if (qT) qT.value = (parseFloat(cultivoGuardado.qTeorico) || 0).toFixed(3);
+    // Vol. Bruto/Corregido/Q Teórico se recalculan a partir del área ya corregida (recalcularAvance
+    // usa el input .area-semana que acaba de actualizarse) para que no queden desfasados si el
+    // área cambió respecto a lo guardado; si por algún motivo no hay módulo/eficiencia cargados
+    // todavía, se deja el valor guardado como respaldo.
+    if (inputArea && inputModulo?.value && inputEficiencia?.value) {
+        recalcularAvance(inputArea);
+    } else {
+        const volB = fila.querySelector('.volBruto');
+        const volC = fila.querySelector('.volCorregido');
+        const qT = fila.querySelector('.qTeorico');
+        if (volB) volB.innerText = (parseFloat(cultivoGuardado.volBruto) || 0).toFixed(2);
+        if (volC) volC.innerText = (parseFloat(cultivoGuardado.volCorregido) || 0).toFixed(2);
+        if (qT) qT.value = (parseFloat(cultivoGuardado.qTeorico) || 0).toFixed(3);
+    }
 }
 
 // Restaura en la tabla visible (individual o de grupo) los valores ya guardados en el Consolidado
 // para una toma específica. Devuelve el registro guardado (o null si no existía).
-function restaurarProgramacionTomaEnTabla(nombreToma) {
+async function restaurarProgramacionTomaEnTabla(nombreToma) {
     const guardado = buscarProgramacionGuardadaToma(nombreToma);
     if (!guardado) return null;
 
@@ -10517,11 +10596,14 @@ function restaurarProgramacionTomaEnTabla(nombreToma) {
         ? filasIndividual
         : document.querySelectorAll(`tr.fila-toma-${nombreToma}`);
 
-    (guardado.cultivos || []).forEach(cg => {
+    const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+    const contextoRecalculo = { comisionKey, nombreToma, semanaInicio: guardado.semanaInicio || semanaPDA?.fechaInicio };
+
+    await Promise.all((guardado.cultivos || []).map(cg => {
         const cultivoBuscado = (cg.cultivo || '').toString().trim();
         const fila = Array.from(filas).find(f => (f.getAttribute('data-cultivo') || '').toString().trim() === cultivoBuscado);
-        restaurarFilaCultivoGuardada(fila, cg);
-    });
+        return restaurarFilaCultivoGuardada(fila, cg, contextoRecalculo);
+    }));
 
     if (esIndividual) {
         actualizarTotalesFinales();
