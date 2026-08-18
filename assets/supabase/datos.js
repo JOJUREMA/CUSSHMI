@@ -1258,6 +1258,28 @@
         return { ok: true, registros: data || [] };
     }
 
+    // Listado completo (con vertices_utm/áreas) de una toma — a diferencia
+    // de listarRegistrosSinceramientoDeToma (select angosto, solo para
+    // badges de búsqueda), esta trae lo necesario para el panel de
+    // escritorio que compara el polígono original del KML contra el
+    // guardado en Supabase.
+    async function listarRegistrosSinceramientoCompletosDeToma(comisionKey, tomaNombre) {
+        if (!comisionKey || !tomaNombre) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('sinceramiento_areas')
+                .select('id, toma_nombre, apellidos_nombres, unidad_catastral, vertices_utm, area_medida_ha, area_declarada_ha, confirmado, actualizado_en')
+                .eq('comision_id', comisionId)
+                .eq('toma_nombre', tomaNombre)
+                .order('apellidos_nombres'),
+            'listar registros completos de sinceramiento de la toma'
+        );
+        if (error) return { ok: false, registros: [], error: error.mensaje || 'No se pudo listar los registros.' };
+        return { ok: true, registros: data || [] };
+    }
+
     async function cargarRegistroSinceramiento(id) {
         if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
         const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
@@ -2430,6 +2452,7 @@
         cargarRegistrosSiembraParaExportar,
         obtenerAvanceSinceramientoPorToma,
         listarRegistrosSinceramientoDeToma,
+        listarRegistrosSinceramientoCompletosDeToma,
         cargarRegistroSinceramiento,
         guardarRegistroSinceramiento,
         guardarRegistroSinceramientoDebounced,

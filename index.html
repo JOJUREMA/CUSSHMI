@@ -1095,10 +1095,16 @@
 <script src="assets/core/anexoG2.js"></script>
 <script src="assets/core/ordenRiego.js"></script>
 <script src="assets/core/mapa.js"></script>
+<script src="assets/core/coordenadasUtm.js"></script>
 <script src="assets/core/modulosRiego.js"></script>
 <script src="assets/core/inventarioInfraestructura.js"></script>
 <script src="assets/core/anexoE41.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<!-- Leaflet — primer uso en escritorio (panel de comparación de polígonos
+     de Sinceramiento de Áreas); vía CDN, el escritorio no es una PWA
+     offline como el móvil, no hace falta vendorizarlo. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
     
@@ -2372,6 +2378,343 @@ const COMISIONES = {
                 </table>`;
         }
 
+        // ── Panel "Sinceramiento de Áreas" (admin/programador) ───────────────
+        // Compara, por toma, el polígono ya mapeado en el SIG (KML) contra el
+        // guardado en Supabase por el sectorista en campo (vertices_utm de
+        // sinceramiento_areas) — la tabla no guarda el polígono original por
+        // separado, así que el "antes" se reconstruye del KML en vivo, mismo
+        // criterio visual que ya usa movil/sinceramiento-areas.html
+        // (mostrarComparacionPoligono: azul #1d4ed8 = SIG/antes, dorado
+        // #c8a84b = guardado/después), solo que lado a lado en vez de
+        // apilado (más espacio horizontal en escritorio).
+        var _sinceramientoEstado = { registros: [], predios: [], toma: null };
+        var prediosTomaKmlCacheEsc = {};
+
+        function _normalizarUcEsc(valor) {
+            return (valor || '').toString().trim().toUpperCase().replace(/\s+/g, '');
+        }
+        function _ucSinCerosIzqEsc(valor) {
+            return _normalizarUcEsc(valor).replace(/^0+/, '');
+        }
+        function _nombreSinComasEsc(valor) {
+            return (valor || '').toString().replace(/,/g, ' ').trim().toUpperCase().replace(/\s+/g, ' ');
+        }
+        function _encontrarPredioKmlEnListaEsc(predios, unidadCatastral, nombre) {
+            var uc = _ucSinCerosIzqEsc(unidadCatastral);
+            if (uc) {
+                var porUC = predios.find(function (p) { return _ucSinCerosIzqEsc(p.catastralKey) === uc; });
+                if (porUC) return porUC;
+            }
+            var nombreNorm = _nombreSinComasEsc(nombre);
+            if (!nombreNorm) return null;
+            return predios.find(function (p) { return _nombreSinComasEsc(p.usuario) === nombreNorm; }) || null;
+        }
+        // Porta obtenerPrediosDeToma() de movil/sinceramiento-areas.html —
+        // único cambio real: el fetch es relativo a la raíz del escritorio
+        // ('mapas/...'), no a movil/ ('../mapas/...').
+        async function obtenerPrediosDeTomaEsc(tomaNombre) {
+            if (prediosTomaKmlCacheEsc[tomaNombre]) return prediosTomaKmlCacheEsc[tomaNombre];
+            var archivos = (typeof KML_POR_TOMA !== 'undefined' && KML_POR_TOMA[tomaNombre]) || [];
+            if (archivos.length === 0) {
+                prediosTomaKmlCacheEsc[tomaNombre] = [];
+                return [];
+            }
+            var listas = await Promise.all(archivos.map(function (nombreArchivo) {
+                return fetch('mapas/' + nombreArchivo).then(function (resp) {
+                    if (!resp.ok) throw new Error('No se pudo descargar ' + nombreArchivo);
+                    return resp.text();
+                }).then(function (texto) { return parsearKmlATomas(texto); });
+            })).catch(function () { return []; });
+            var todos = [].concat.apply([], listas);
+            var predios = filtrarPorToma(todos, tomaNombre);
+            prediosTomaKmlCacheEsc[tomaNombre] = predios;
+            return predios;
+        }
+        function poligonoKmlComoVerticesEsc(predioKml) {
+            return predioKml.coordenadas.map(function (par) {
+                var utm = latLonAUtm17S(par[1], par[0]);
+                return { easting: utm.easting, northing: utm.northing, lat: par[1], lon: par[0] };
+            });
+        }
+        // Comparar solo área+cantidad de vértices no basta: una traslación
+        // (mismo polígono movido de sitio) conserva área y cantidad de
+        // vértices pero es un cambio real — compara vértice a vértice con
+        // una tolerancia en metros (asume mismo orden de vértices, que es
+        // el caso normal salvo que el sectorista haya vuelto a capturar
+        // el predio desde cero, lo cual ya cambia la cantidad).
+        function _poligonosDifierenEsc(verticesA, verticesB, toleranciaM) {
+            toleranciaM = toleranciaM || 1;
+            if (!verticesA || !verticesB || verticesA.length !== verticesB.length) return true;
+            for (var i = 0; i < verticesA.length; i++) {
+                var dx = (parseFloat(verticesA[i].easting) || 0) - (parseFloat(verticesB[i].easting) || 0);
+                var dy = (parseFloat(verticesA[i].northing) || 0) - (parseFloat(verticesB[i].northing) || 0);
+                if (Math.sqrt(dx * dx + dy * dy) > toleranciaM) return true;
+            }
+            return false;
+        }
+
+        function _cerrarPanelSinceramiento() {
+            const modal = document.getElementById('modalSinceramiento');
+            if (modal) modal.remove();
+            _mapaAntesSinceramientoEsc = null;
+            _mapaDespuesSinceramientoEsc = null;
+            _sinceramientoEstado = { registros: [], predios: [], toma: null };
+        }
+
+        async function mostrarPanelSinceramiento() {
+            const comisionKey = localStorage.getItem('cusshmi_comision');
+            if (!comisionKey) { alert('Selecciona una comisión primero.'); return; }
+
+            _cerrarPanelSinceramiento();
+
+            const modalHtml = `
+                <div id="modalSinceramiento" class="modal-overlay active" style="z-index:99998;background:rgba(0,20,50,0.85);">
+                    <div class="modal-container" style="max-width:1100px;max-height:90vh;overflow-y:auto;">
+                        <h3>📐 Sinceramiento de Áreas — ${COMISIONES[comisionKey]?.nombre || comisionKey}</h3>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+                            <div style="flex:1;min-width:180px;">
+                                <label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">Toma</label>
+                                <select id="selectTomaSinceramientoEsc" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:4px;">
+                                    <option value="">Elige una toma</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div id="indicadoresSinceramientoEsc" style="display:none;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;"></div>
+                        <div id="estadoSinceramientoEsc" style="font-size:13px;color:#666;margin-bottom:8px;">Elige una toma para ver sus registros.</div>
+                        <div id="contenedorTablaSinceramientoEsc" style="overflow-x:auto;"></div>
+
+                        <div id="seccionComparacionSinceramientoEsc" style="display:none;margin-top:18px;">
+                            <div style="font-size:13px;font-weight:700;color:#003876;margin-bottom:8px;" id="tituloComparacionSinceramientoEsc"></div>
+                            <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                                <div style="flex:1;min-width:320px;">
+                                    <div style="font-size:11px;color:#666;margin-bottom:4px;">Antes (SIG)</div>
+                                    <div id="contenedorMapaAntesSinceramientoEsc" style="height:360px;border-radius:8px;border:1px solid #ddd;overflow:hidden;">
+                                        <div id="mapaAntesSinceramientoEsc" style="width:100%;height:100%;"></div>
+                                    </div>
+                                </div>
+                                <div style="flex:1;min-width:320px;">
+                                    <div style="font-size:11px;color:#666;margin-bottom:4px;">Después (actualizado en campo)</div>
+                                    <div id="mapaDespuesSinceramientoEsc" style="height:360px;border-radius:8px;border:1px solid #ddd;"></div>
+                                </div>
+                            </div>
+                            <div id="textoDiferenciaSinceramientoEsc" style="font-size:13px;color:#333;margin-top:10px;"></div>
+                        </div>
+
+                        <div style="display:flex;gap:10px;margin-top:16px;">
+                            <button onclick="_cerrarPanelSinceramiento()"
+                                style="padding:9px 18px;background:#003876;color:white;border:none;border-radius:4px;font-weight:600;font-size:13px;cursor:pointer;">
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+
+            const div = document.createElement('div');
+            div.innerHTML = modalHtml;
+            document.body.appendChild(div.firstElementChild);
+
+            document.getElementById('selectTomaSinceramientoEsc').addEventListener('change', (e) => {
+                if (e.target.value) _cargarSinceramientoDeTomaEsc(comisionKey, e.target.value);
+                else _limpiarTablaSinceramientoEsc();
+            });
+
+            await _poblarTomasSinceramientoEsc(comisionKey);
+        }
+
+        async function _poblarTomasSinceramientoEsc(comisionKey) {
+            const select = document.getElementById('selectTomaSinceramientoEsc');
+            if (!select) return;
+            const resultado = await CusshmiDatos.obtenerAvanceSinceramientoPorToma(comisionKey);
+            if (!resultado.ok) return;
+            const tomas = Object.keys(resultado.avance).sort();
+            select.innerHTML = '<option value="">Elige una toma</option>';
+            tomas.forEach((toma) => {
+                const a = resultado.avance[toma];
+                const opt = document.createElement('option');
+                opt.value = toma;
+                opt.textContent = 'Toma ' + toma + ' (' + a.registrados + (a.totalPadron ? '/' + a.totalPadron : '') + ')';
+                select.appendChild(opt);
+            });
+        }
+
+        function _limpiarTablaSinceramientoEsc() {
+            _sinceramientoEstado = { registros: [], predios: [], toma: null };
+            const elIndicadores = document.getElementById('indicadoresSinceramientoEsc');
+            const elTabla = document.getElementById('contenedorTablaSinceramientoEsc');
+            const elComp = document.getElementById('seccionComparacionSinceramientoEsc');
+            if (elIndicadores) elIndicadores.style.display = 'none';
+            if (elTabla) elTabla.innerHTML = '';
+            if (elComp) elComp.style.display = 'none';
+            const elEstado = document.getElementById('estadoSinceramientoEsc');
+            if (elEstado) elEstado.textContent = 'Elige una toma para ver sus registros.';
+        }
+
+        async function _cargarSinceramientoDeTomaEsc(comisionKey, tomaNombre) {
+            _limpiarTablaSinceramientoEsc();
+            const elEstado = document.getElementById('estadoSinceramientoEsc');
+            elEstado.textContent = 'Cargando…';
+
+            const [resultadoRegistros, predios] = await Promise.all([
+                CusshmiDatos.listarRegistrosSinceramientoCompletosDeToma(comisionKey, tomaNombre),
+                obtenerPrediosDeTomaEsc(tomaNombre),
+            ]);
+            if (!resultadoRegistros.ok) {
+                elEstado.textContent = 'No se pudieron cargar los registros: ' + (resultadoRegistros.error || 'error desconocido');
+                return;
+            }
+
+            const registros = resultadoRegistros.registros.map((r) => {
+                const predioKml = _encontrarPredioKmlEnListaEsc(predios, r.unidad_catastral, r.apellidos_nombres);
+                let areaKmlOriginal = null, verticesKml = null;
+                if (predioKml) {
+                    verticesKml = poligonoKmlComoVerticesEsc(predioKml);
+                    areaKmlOriginal = calcularAreaPoligonoHa(verticesKml);
+                }
+                const verticesActuales = Array.isArray(r.vertices_utm) ? r.vertices_utm : [];
+                const areaActual = verticesActuales.length >= 3 ? calcularAreaPoligonoHa(verticesActuales) : (r.area_medida_ha != null ? parseFloat(r.area_medida_ha) : null);
+                const editado = predioKml
+                    ? _poligonosDifierenEsc(verticesActuales, verticesKml, 1)
+                    : null; // sin polígono del SIG con qué comparar
+                return Object.assign({}, r, { predioKml, areaKmlOriginal, areaActual, editado });
+            });
+
+            _sinceramientoEstado = { registros, predios, toma: tomaNombre };
+            elEstado.textContent = registros.length === 0 ? 'Sin registros de Sinceramiento para esta toma.' : '';
+            _renderizarSinceramientoEsc();
+        }
+
+        function _renderizarSinceramientoEsc() {
+            const elIndicadores = document.getElementById('indicadoresSinceramientoEsc');
+            const elTabla = document.getElementById('contenedorTablaSinceramientoEsc');
+            if (!elIndicadores || !elTabla) return;
+            const registros = _sinceramientoEstado.registros;
+            if (registros.length === 0) { elIndicadores.style.display = 'none'; elTabla.innerHTML = ''; return; }
+
+            const totalEditados = registros.filter((r) => r.editado === true).length;
+            const totalConfirmados = registros.filter((r) => r.confirmado).length;
+
+            elIndicadores.style.display = 'grid';
+            elIndicadores.innerHTML = `
+                <div style="background:#f0f4f8;border-radius:8px;padding:10px;text-align:center;">
+                    <div style="font-size:18px;font-weight:800;">${registros.length}</div>
+                    <div style="font-size:10px;color:#666;text-transform:uppercase;">Registros</div>
+                </div>
+                <div style="background:#fff7e6;border-radius:8px;padding:10px;text-align:center;">
+                    <div style="font-size:18px;font-weight:800;color:#a86b00;">${totalEditados}</div>
+                    <div style="font-size:10px;color:#666;text-transform:uppercase;">Editados</div>
+                </div>
+                <div style="background:#eafaf0;border-radius:8px;padding:10px;text-align:center;">
+                    <div style="font-size:18px;font-weight:800;color:#1a6e3c;">${totalConfirmados}</div>
+                    <div style="font-size:10px;color:#666;text-transform:uppercase;">Confirmados</div>
+                </div>`;
+
+            const filasHtml = registros.map((r, idx) => {
+                const areaKml = r.areaKmlOriginal != null ? r.areaKmlOriginal.toFixed(2) : '—';
+                const areaActual = r.areaActual != null ? r.areaActual.toFixed(2) : '—';
+                let diferenciaTxt = '—';
+                if (r.areaKmlOriginal != null && r.areaActual != null) {
+                    const dif = r.areaActual - r.areaKmlOriginal;
+                    const pct = r.areaKmlOriginal > 0 ? (dif / r.areaKmlOriginal) * 100 : 0;
+                    diferenciaTxt = (dif >= 0 ? '+' : '') + dif.toFixed(2) + ' ha (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)';
+                }
+                const editadoBadge = r.editado === null ? '<span title="Sin polígono en el SIG para comparar">—</span>'
+                    : r.editado ? '<span title="El polígono guardado difiere del SIG">✏️</span>' : '<span title="Coincide con el SIG">=</span>';
+                const confBadge = r.confirmado ? '✅' : '📝';
+                return `
+                    <tr>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;">${escapeHtml(r.apellidos_nombres)}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;">${escapeHtml(r.unidad_catastral || '-')}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">${r.area_declarada_ha != null ? parseFloat(r.area_declarada_ha).toFixed(2) : '—'}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">${areaKml}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">${areaActual}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:12px;">${diferenciaTxt}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">${editadoBadge}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">${confBadge}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">
+                            <button onclick="_mostrarComparacionSinceramientoEsc(${idx})"
+                                style="padding:4px 10px;background:#003876;color:white;border:none;border-radius:4px;font-size:11px;cursor:pointer;">
+                                👁 Comparar
+                            </button>
+                        </td>
+                    </tr>`;
+            }).join('');
+
+            elTabla.innerHTML = `
+                <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:920px;">
+                    <thead>
+                        <tr style="background:#003876;color:white;">
+                            <th style="padding:8px;text-align:left;">Usuario</th>
+                            <th style="padding:8px;text-align:left;">U. Catastral</th>
+                            <th style="padding:8px;">Área declarada (ha)</th>
+                            <th style="padding:8px;">Área SIG (ha)</th>
+                            <th style="padding:8px;">Área actual (ha)</th>
+                            <th style="padding:8px;">Diferencia</th>
+                            <th style="padding:8px;">Editado</th>
+                            <th style="padding:8px;">Confirmado</th>
+                            <th style="padding:8px;">Comparar</th>
+                        </tr>
+                    </thead>
+                    <tbody>${filasHtml}</tbody>
+                </table>`;
+        }
+
+        var _mapaAntesSinceramientoEsc = null, _mapaDespuesSinceramientoEsc = null;
+
+        function _dibujarPoligonoMiniMapaEsc(mapaVar, contenedorId, latlngs, color) {
+            if (!mapaVar) {
+                mapaVar = L.map(contenedorId, { preferCanvas: true }).setView([-4.9, -80.6], 12);
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
+                    maxZoom: 19
+                }).addTo(mapaVar);
+            }
+            setTimeout(function () { mapaVar.invalidateSize(); }, 50);
+            mapaVar.eachLayer(function (capa) { if (capa instanceof L.Polygon) mapaVar.removeLayer(capa); });
+            if (latlngs.length >= 3) {
+                var capa = L.polygon(latlngs, { color: color, fillColor: color, fillOpacity: 0.3, weight: 2 }).addTo(mapaVar);
+                mapaVar.fitBounds(capa.getBounds(), { padding: [20, 20], maxZoom: 19 });
+            }
+            return mapaVar;
+        }
+
+        function _mostrarComparacionSinceramientoEsc(idx) {
+            const r = _sinceramientoEstado.registros[idx];
+            if (!r) return;
+            const elSeccion = document.getElementById('seccionComparacionSinceramientoEsc');
+            const elTitulo = document.getElementById('tituloComparacionSinceramientoEsc');
+            const elTexto = document.getElementById('textoDiferenciaSinceramientoEsc');
+            elSeccion.style.display = 'block';
+            elTitulo.textContent = 'Comparación — ' + r.apellidos_nombres + (r.unidad_catastral ? ' (UC ' + r.unidad_catastral + ')' : '');
+
+            const latlngsDespues = (r.vertices_utm || []).filter((v) => v.lat != null && v.lon != null).map((v) => [v.lat, v.lon]);
+            _mapaDespuesSinceramientoEsc = _dibujarPoligonoMiniMapaEsc(_mapaDespuesSinceramientoEsc, 'mapaDespuesSinceramientoEsc', latlngsDespues, '#c8a84b');
+
+            if (!r.predioKml) {
+                if (_mapaAntesSinceramientoEsc) { _mapaAntesSinceramientoEsc.remove(); _mapaAntesSinceramientoEsc = null; }
+                document.getElementById('contenedorMapaAntesSinceramientoEsc').innerHTML =
+                    '<div id="mapaAntesSinceramientoEsc" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;color:#888;font-size:12px;padding:12px;box-sizing:border-box;">Sin polígono original registrado en el SIG para comparar.</div>';
+                elTexto.textContent = r.areaActual != null
+                    ? ('📐 Área actual: ' + r.areaActual.toFixed(2) + ' ha (' + latlngsDespues.length + ' vértices). No había un polígono previamente registrado en el sistema.')
+                    : '';
+                return;
+            }
+            if (!document.getElementById('mapaAntesSinceramientoEsc')) {
+                document.getElementById('contenedorMapaAntesSinceramientoEsc').innerHTML = '<div id="mapaAntesSinceramientoEsc" style="width:100%;height:100%;"></div>';
+                _mapaAntesSinceramientoEsc = null;
+            }
+            const verticesAntes = poligonoKmlComoVerticesEsc(r.predioKml);
+            const latlngsAntes = verticesAntes.map((v) => [v.lat, v.lon]);
+            _mapaAntesSinceramientoEsc = _dibujarPoligonoMiniMapaEsc(_mapaAntesSinceramientoEsc, 'mapaAntesSinceramientoEsc', latlngsAntes, '#1d4ed8');
+
+            const areaAntes = r.areaKmlOriginal, areaDespues = r.areaActual;
+            const diferencia = (areaDespues || 0) - (areaAntes || 0);
+            const porcentaje = areaAntes > 0 ? (diferencia / areaAntes) * 100 : 0;
+            elTexto.textContent = '📐 Antes (SIG): ' + (areaAntes != null ? areaAntes.toFixed(2) : '—') + ' ha (' + verticesAntes.length + ' vértices) · Después: ' +
+                (areaDespues != null ? areaDespues.toFixed(2) : '—') + ' ha (' + latlngsDespues.length + ' vértices) · Diferencia: ' +
+                (diferencia >= 0 ? '+' : '') + diferencia.toFixed(2) + ' ha (' + (porcentaje >= 0 ? '+' : '') + porcentaje.toFixed(1) + '%).';
+        }
+
         function aplicarTemaComision(com) {
             // Encabezado
             const header = document.querySelector('.header');
@@ -2478,6 +2821,19 @@ const COMISIONES = {
                 if (headerText) headerText.appendChild(btnNotificaciones);
             }
             btnNotificaciones.style.display = esAdmin ? 'inline-block' : 'none';
+
+            // Botón panel de Sinceramiento de Áreas — admin o programador
+            // (comparación de polígonos antes/después + tabla comparativa).
+            let btnSinceramiento = document.getElementById('btnSinceramiento');
+            if (!btnSinceramiento) {
+                btnSinceramiento = document.createElement('button');
+                btnSinceramiento.id = 'btnSinceramiento';
+                btnSinceramiento.textContent = '📐 Sinceramiento de Áreas';
+                btnSinceramiento.onclick = mostrarPanelSinceramiento;
+                const headerText = document.querySelector('.header-text');
+                if (headerText) headerText.appendChild(btnSinceramiento);
+            }
+            btnSinceramiento.style.display = esAdminOProgramador ? 'inline-block' : 'none';
         }
 
         async function iniciarSistemaComisiones() {
