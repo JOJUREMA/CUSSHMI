@@ -18418,15 +18418,21 @@ async function exportarG3Excel() {
     });
 
     // ── Fila Total ──
-    const filaTotalDom = document.getElementById('filaTotalG3-' + tomaIdx);
-    const celdasTotal = filaTotalDom ? filaTotalDom.querySelectorAll('td') : [];
+    // Área y Volumen se calculan directo desde toma.usuarios (mismos valores que ya usa
+    // renderizarTomaG3 para pintar totalArea/totalVolC) en vez de leer las celdas de la fila
+    // "TOTAL" del DOM: esa fila usa colspan="2" en su primera celda (N°+Usuario fusionados),
+    // lo que desplaza en 1 el índice de todas las demás celdas de querySelectorAll('td') --
+    // celdasTotal[2] terminaba leyendo el Volumen (no el Área) y celdasTotal[3] el <td> que
+    // contiene el <input> de Tiempo (textContent vacío, siempre 0.00).
     const inpTotalTiempo = document.getElementById('totalTiempoG3-' + tomaIdx);
+    const totalAreaCalc = toma.usuarios.reduce((s, u) => s + (parseFloat(u.area) || 0), 0);
+    const totalVolCalc = toma.usuarios.reduce((s, u) => s + (parseFloat(u.volCorregido) || 0), 0);
 
     ws.mergeCells(r, 1, r, 2);
     const filaTotalRow = ws.getRow(r);
     filaTotalRow.getCell(1).value = 'Total';
-    filaTotalRow.getCell(3).value = parseFloat(celdasTotal[2]?.textContent) || 0;
-    filaTotalRow.getCell(4).value = parseFloat(celdasTotal[3]?.textContent) || 0;
+    filaTotalRow.getCell(3).value = totalAreaCalc;
+    filaTotalRow.getCell(4).value = totalVolCalc;
     filaTotalRow.getCell(5).value = parseFloat(inpTotalTiempo?.value) || 0;
     filaTotalRow.getCell(3).numFmt = '#,##0.00';
     filaTotalRow.getCell(4).numFmt = '#,##0.00';
