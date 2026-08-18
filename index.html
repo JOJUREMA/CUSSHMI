@@ -14819,6 +14819,11 @@ function reconciliarNoAptosEnSnapshot(toma, cultivo) {
     const claveUsuario = (u) => (
         (u.nombre || '-').toString() + '|' + (u.unidadCatastral || '-').toString() + '|' + (parseFloat(u.area) || 0).toFixed(4)
     ).toUpperCase();
+    // Identidad SIN área — el área puede cambiar entre una sincronización del Excel y otra;
+    // nombre + unidad catastral sigue identificando a la misma persona aunque su área cambie.
+    const identidadUsuario = (u) => (
+        (u.nombre || '-').toString() + '|' + (u.unidadCatastral || '-').toString()
+    ).toUpperCase();
 
     // Los no aptos vigentes se arman combinando DOS fuentes, cada una cubre un caso que la
     // otra no:
@@ -14846,16 +14851,27 @@ function reconciliarNoAptosEnSnapshot(toma, cultivo) {
         noAptosVigentes.push(u);
     });
 
-    let completo = (window._usuariosG3Completo && (window._usuariosG3Completo[keyExact] || window._usuariosG3Completo[keyNorm]));
-    if (!Array.isArray(completo) || completo.length === 0) {
-        // Nunca se confirmó Área Semana para este cultivo: la base es la clasificación en
-        // vivo completa (aptos + no aptos), con los aptos marcados seleccionados por
-        // defecto — mismo criterio que ya usaba abrirSelectorUsuariosCultivo la primera vez.
-        completo = clasificarUsuariosCultivoEnVivo(toma, cultivo).map(u => ({
-            ...u,
-            seleccionado: u.programadoNoApto ? true : !u.esNoApto,
-        }));
-    }
+    // ⚠️ El snapshot guardado (completo) puede haberse confirmado ANTES de una recarga
+    // posterior del Excel dentro de la misma semana — si el Excel cambió (áreas actualizadas,
+    // usuarios agregados/quitados de este cultivo), usar el snapshot tal cual dejaba fuera a
+    // usuarios reales (o los mostraba con área vieja), incluidos no aptos que antes ni
+    // siquiera aparecían en la lista para poder verse "bloqueados". Se reconcilia SIEMPRE
+    // contra la clasificación en vivo actual (aptos Y no aptos, clasificarUsuariosCultivoEnVivo
+    // ya trae ambos grupos): los usuarios que ya estaban en el snapshot conservan su
+    // .seleccionado (respeta lo que el programador ya eligió), los nuevos entran con el
+    // criterio por defecto de siempre, y los que ya no existen en el Excel actual se quitan.
+    const enVivo = clasificarUsuariosCultivoEnVivo(toma, cultivo);
+    let completoGuardado = (window._usuariosG3Completo && (window._usuariosG3Completo[keyExact] || window._usuariosG3Completo[keyNorm]));
+    if (!Array.isArray(completoGuardado)) completoGuardado = [];
+    const mapaGuardado = new Map(completoGuardado.map(u => [identidadUsuario(u), u]));
+
+    let completo = enVivo.map(uVivo => {
+        const previo = mapaGuardado.get(identidadUsuario(uVivo));
+        return {
+            ...uVivo, // área/deuda/esNoApto siempre del Excel actual, nunca del snapshot viejo
+            seleccionado: previo ? previo.seleccionado : (uVivo.programadoNoApto ? true : !uVivo.esNoApto),
+        };
+    });
 
     // Quitar del snapshot los no aptos que ya no están vigentes (se "deshicieron" desde la
     // tabla de programados).
