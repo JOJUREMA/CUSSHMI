@@ -18,27 +18,29 @@ function _svgEtiqueta(x, y, texto, anchor) {
 }
 
 // Canal Lateral y Drenes comparten la misma geometría de sección
-// trapezoidal — un canal abierto es más ancho arriba (espejo de agua) que
-// en la solera: Base Mayor B (más larga) va ABAJO, en la solera; Base
-// Menor b (más corta) va ARRIBA, en el borde libre. H es la altura total
-// de la sección; el tirante y es el nivel de agua, medido desde la
-// solera hacia arriba.
+// trapezoidal — un canal/dren abierto es más ancho ARRIBA (espejo de
+// agua, Base Mayor B) que en la solera excavada (Base Menor b, ABAJO).
+// H es la altura total de la sección, con su propia cota vertical a la
+// izquierda del dibujo; el tirante y es el nivel de agua, medido desde
+// la solera hacia arriba.
 function dibujarSeccionTrapezoidal(baseMayor, baseMenor, altura, tirante) {
     var B = _svgNum(baseMayor), b = _svgNum(baseMenor), H = _svgNum(altura);
     var y = _svgNum(tirante); // el tirante es opcional — se dibuja si viene
     if (!B || !b || !H) return null;
 
-    var escala = 240 / Math.max(B, b);
+    var MARGEN_IZQ = 46; // espacio reservado para la cota de H, sin recortarse
+    var ANCHO_DIBUJO = 240;
+    var escala = ANCHO_DIBUJO / Math.max(B, b);
     var Bpx = B * escala, bpx = b * escala, Hpx = H * escala;
-    var margenXBase = (280 - Bpx) / 2; // ancho mayor B, en la solera (abajo)
-    var margenXTope = (280 - bpx) / 2; // ancho menor b, en el borde libre (arriba)
+    var margenXTope = MARGEN_IZQ + (ANCHO_DIBUJO - Bpx) / 2; // B, arriba (espejo de agua)
+    var margenXBase = MARGEN_IZQ + (ANCHO_DIBUJO - bpx) / 2; // b, abajo (solera)
     var baseY = 170; // solera
     var topY = baseY - Hpx; // borde libre
 
     var puntos = [
         [margenXBase, baseY],
-        [margenXBase + Bpx, baseY],
-        [margenXTope + bpx, topY],
+        [margenXBase + bpx, baseY],
+        [margenXTope + Bpx, topY],
         [margenXTope, topY],
     ].map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ');
 
@@ -46,17 +48,23 @@ function dibujarSeccionTrapezoidal(baseMayor, baseMenor, altura, tirante) {
 
     if (y && y < H) {
         var ypx = y * escala;
-        var anchoEnY = Bpx - (Bpx - bpx) * (ypx / Hpx); // se angosta hacia arriba
-        var margenEnY = (280 - anchoEnY) / 2;
+        var anchoEnY = bpx + (Bpx - bpx) * (ypx / Hpx); // se ensancha hacia arriba
+        var margenEnY = MARGEN_IZQ + (ANCHO_DIBUJO - anchoEnY) / 2;
         var lineaY = baseY - ypx;
         contenido += '<line x1="' + margenEnY + '" y1="' + lineaY + '" x2="' + (margenEnY + anchoEnY) + '" y2="' + lineaY + '" ' +
             'stroke="#7ec8e3" stroke-width="1.5" stroke-dasharray="4,3"/>';
-        contenido += _svgEtiqueta(20, lineaY + 4, 'y=' + y + 'm', 'start');
+        contenido += _svgEtiqueta(margenEnY - 6, lineaY + 4, 'y=' + y + 'm', 'end');
     }
 
-    contenido += _svgEtiqueta(140, baseY + 16, 'B=' + B + 'm (solera)');
-    contenido += _svgEtiqueta(140, topY - 8, 'b=' + b + 'm');
-    contenido += _svgEtiqueta(margenXBase - 14, (baseY + topY) / 2, 'H=' + H + 'm', 'end');
+    contenido += _svgEtiqueta(MARGEN_IZQ + ANCHO_DIBUJO / 2, topY - 8, 'B=' + B + 'm');
+    contenido += _svgEtiqueta(MARGEN_IZQ + ANCHO_DIBUJO / 2, baseY + 16, 'b=' + b + 'm (solera)');
 
-    return _svgEnvoltura(contenido, 280, 190);
+    // Cota vertical de H, a la izquierda del dibujo (línea + marcas + etiqueta)
+    var xCotaH = MARGEN_IZQ - 18;
+    contenido += '<line x1="' + xCotaH + '" y1="' + topY + '" x2="' + xCotaH + '" y2="' + baseY + '" stroke="#ffffff" stroke-width="1"/>';
+    contenido += '<line x1="' + (xCotaH - 4) + '" y1="' + topY + '" x2="' + (xCotaH + 4) + '" y2="' + topY + '" stroke="#ffffff" stroke-width="1"/>';
+    contenido += '<line x1="' + (xCotaH - 4) + '" y1="' + baseY + '" x2="' + (xCotaH + 4) + '" y2="' + baseY + '" stroke="#ffffff" stroke-width="1"/>';
+    contenido += _svgEtiqueta(xCotaH, (baseY + topY) / 2 + 4, 'H=' + H + 'm', 'middle');
+
+    return _svgEnvoltura(contenido, MARGEN_IZQ + ANCHO_DIBUJO, 190);
 }
