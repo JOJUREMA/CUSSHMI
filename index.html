@@ -1096,6 +1096,7 @@
 <script src="assets/core/ordenRiego.js"></script>
 <script src="assets/core/mapa.js"></script>
 <script src="assets/core/coordenadasUtm.js"></script>
+<script src="assets/core/exportadorKml.js"></script>
 <script src="assets/core/modulosRiego.js"></script>
 <script src="assets/core/inventarioInfraestructura.js"></script>
 <script src="assets/core/anexoE41.js"></script>
@@ -1468,6 +1469,15 @@
             </p>
             <button class="btn btn-secondary" id="btnExportarInventario" onclick="exportarInventarioCompleto()" style="width: 100%;">
                 📤 Exportar Inventario (14 tipos)
+            </button>
+            <p class="info-text" style="text-align:left; font-size: 0.9em; margin-top: 12px;">
+                Mismo inventario en formato KML, con los colores/íconos
+                reales ya usados en el mapa (color por orden de canal,
+                íconos de las estructuras puntuales) — para importar en
+                tu propio software GIS (QGIS, Google Earth):
+            </p>
+            <button class="btn btn-secondary" id="btnExportarInventarioKml" onclick="_exportarInventarioKmlEsc()" style="width: 100%;">
+                🗺️ Exportar Inventario a KML
             </button>
 
             <button class="btn btn-secondary" onclick="cerrarModalInventario()" style="width: 100%; margin-top: 12px;">
@@ -2478,6 +2488,12 @@ const COMISIONES = {
                                     <option value="">Elige una toma</option>
                                 </select>
                             </div>
+                            <div style="display:flex;align-items:flex-end;">
+                                <button id="btnDescargarKmlSinceramientoEsc" onclick="_descargarKmlSinceramientoEsc()" disabled
+                                    style="padding:9px 14px;background:#c8a84b;color:#1a1a1a;border:none;border-radius:4px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap;">
+                                    ⬇ Descargar KML
+                                </button>
+                            </div>
                         </div>
 
                         <div id="indicadoresSinceramientoEsc" style="display:none;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;"></div>
@@ -2548,6 +2564,8 @@ const COMISIONES = {
             if (elComp) elComp.style.display = 'none';
             const elEstado = document.getElementById('estadoSinceramientoEsc');
             if (elEstado) elEstado.textContent = 'Elige una toma para ver sus registros.';
+            const elBtnKml = document.getElementById('btnDescargarKmlSinceramientoEsc');
+            if (elBtnKml) elBtnKml.disabled = true;
         }
 
         async function _cargarSinceramientoDeTomaEsc(comisionKey, tomaNombre) {
@@ -2581,7 +2599,44 @@ const COMISIONES = {
 
             _sinceramientoEstado = { registros, predios, toma: tomaNombre };
             elEstado.textContent = registros.length === 0 ? 'Sin registros de Sinceramiento para esta toma.' : '';
+            const elBtnKml = document.getElementById('btnDescargarKmlSinceramientoEsc');
+            if (elBtnKml) elBtnKml.disabled = registros.filter((r) => Array.isArray(r.vertices_utm) && r.vertices_utm.length >= 3).length === 0;
             _renderizarSinceramientoEsc();
+        }
+
+        // Exporta el polígono ACTUAL (vertices_utm, ya con lat/lon por
+        // vértice) de cada registro de la toma abierta — el "antes" (SIG)
+        // no se re-exporta, ya existe en mapas/*.kml; esto es solo para
+        // que el usuario importe lo actualizado en campo a su propio
+        // software GIS externo.
+        function _descargarKmlSinceramientoEsc() {
+            const registros = _sinceramientoEstado.registros.filter((r) => Array.isArray(r.vertices_utm) && r.vertices_utm.length >= 3);
+            if (registros.length === 0) { alert('No hay polígonos con vértices para exportar en esta toma.'); return; }
+
+            const colorSinceramiento = '#c8a84b';
+            const estiloId = 'estiloSinceramiento';
+            const estilo = construirEstiloPoligono(estiloId, colorSinceramiento, true);
+
+            const placemarks = registros.map((r) => {
+                const puntos = r.vertices_utm.filter((v) => v.lat != null && v.lon != null).map((v) => [v.lat, v.lon]);
+                if (puntos.length < 3) return '';
+                return construirPlacemarkPoligono(r.apellidos_nombres, puntos, estiloId, {
+                    UNIDAD_CATASTRAL: r.unidad_catastral,
+                    TOMA: r.toma_nombre,
+                    AREA_DECLARADA_HA: r.area_declarada_ha != null ? parseFloat(r.area_declarada_ha).toFixed(2) : '',
+                    AREA_MEDIDA_HA: r.areaActual != null ? r.areaActual.toFixed(2) : '',
+                    CONFIRMADO: r.confirmado ? 'SI' : 'NO',
+                    ACTUALIZADO_EN: r.actualizado_en,
+                });
+            }).filter(Boolean);
+
+            const kml = construirDocumentoKml(
+                'Sinceramiento de Áreas — ' + _sinceramientoEstado.toma,
+                [estilo],
+                [{ nombre: _sinceramientoEstado.toma, placemarksXml: placemarks.join('') }]
+            );
+            const fecha = new Date().toISOString().split('T')[0];
+            _descargarTextoComoArchivo(kml, 'Sinceramiento_' + _sinceramientoEstado.toma + '_' + fecha + '.kml', 'application/vnd.google-earth.kml+xml');
         }
 
         function _renderizarSinceramientoEsc() {
@@ -4267,6 +4322,178 @@ const COMISIONES = {
                 alert('Inventario exportado: 14 hojas, ' + totalFilas + ' filas en total. Las filas resaltadas en rojo tienen datos faltantes del formato oficial.');
             } catch (e) {
                 console.error('Error al exportar Inventario:', e);
+                alert('No se pudo generar el archivo: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+            }
+        }
+
+        // ── Exportador KML de Inventario (para importar en QGIS/Google
+        // Earth, "actualizar la base gráfica externa" — no escribe de
+        // vuelta a los .kml del repositorio, eso no es posible desde un
+        // sitio estático sin backend propio) ──
+        // Mismo color por Estado que ya usa el mapa en vivo
+        // (movil/inventario-infraestructura.html:901-906,
+        // _colorPorEstadoInventario) — Drenes no tienen color real
+        // propio en el KMZ, así que replican ese mismo criterio acá en
+        // vez de inventar uno nuevo.
+        function _colorPorEstadoInventarioEsc(estado) {
+            if (estado === 'B') return '#1e7e34';
+            if (estado === 'R') return '#c8a84b';
+            if (estado === 'M') return '#c0392b';
+            return '#888888';
+        }
+        // Mismas 3 normalizadoras ya escritas y probadas hoy en
+        // movil/inventario-infraestructura.html:923-936 — se duplican
+        // acá (no se importan por nombre global) siguiendo el mismo
+        // criterio ya usado para _normCanalGuardado en datos.js: cada
+        // script debe poder correr sin depender de que otro archivo
+        // haya cargado antes.
+        function _normMatchEsc(v) {
+            return (v || '').toString().trim().replace(/\s+/g, ' ').toUpperCase();
+        }
+        function _normProgresivaEsc(v) {
+            var s = (v || '').toString().trim().toUpperCase();
+            var m = s.match(/^(\d+)\s*\+\s*(\d+(?:\.\d+)?)$/);
+            if (!m) return s.replace(/\s+/g, '');
+            return parseInt(m[1], 10) + '+' + parseFloat(m[2]).toFixed(2);
+        }
+        function _normNombreLibreEsc(v) {
+            var s = _normMatchEsc(v);
+            s = s.replace(/\bCANAL\b/g, ' ').replace(/\bDREN\b/g, ' ');
+            s = s.replace(/-/g, '');
+            return s.replace(/\s+/g, ' ').trim();
+        }
+
+        var _canalLateralJsonCacheEsc = null;
+        async function _obtenerCanalLateralJsonEsc() {
+            if (_canalLateralJsonCacheEsc) return _canalLateralJsonCacheEsc;
+            try {
+                var resp = await fetch('mapas/inventario_gis/canal_lateral.json');
+                _canalLateralJsonCacheEsc = await resp.json();
+            } catch (e) { _canalLateralJsonCacheEsc = []; }
+            return _canalLateralJsonCacheEsc;
+        }
+        // Color real del canal (correlaciona con ORDEN L1-L5, ver
+        // mapas/inventario_gis/canal_lateral.json) — mismo criterio que
+        // _colorRealDeCanal ya construido hoy en
+        // movil/inventario-infraestructura.html, adaptado para resolver
+        // muchas filas de una sola pasada (el JSON ya está en memoria).
+        function _colorRealCanalLateralEsc(registro, figurasJson) {
+            var claves = CLAVES_KMZ_POR_TIPO.canal_lateral;
+            var match = figurasJson.find(function (f) {
+                return _normNombreLibreEsc(f.campos[claves.nombreCanalKey]) === _normNombreLibreEsc(registro.nombre_canal) &&
+                    _normProgresivaEsc(f.campos[claves.progresivaKey]) === _normProgresivaEsc(registro.progresiva_km);
+            });
+            return (match && match.color) || '#00bcd4';
+        }
+
+        async function _exportarInventarioKmlEsc() {
+            if (typeof TIPOS_ESTRUCTURA_GENERICOS === 'undefined' || typeof TIPOS_PUNTUALES_GIS === 'undefined' || typeof TIPOS_LINEALES_GIS === 'undefined' || typeof CLAVES_KMZ_POR_TIPO === 'undefined') {
+                alert('No se pudo cargar la lógica de inventario (assets/core/inventarioInfraestructura.js).');
+                return;
+            }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+
+            var btn = document.getElementById('btnExportarInventarioKml');
+            var textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '🗺️ Generando…'; }
+
+            try {
+                var comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                var tiposGenericos = Object.keys(TIPOS_ESTRUCTURA_GENERICOS);
+                var todosLosTipos = ['toma', 'compuerta'].concat(tiposGenericos);
+                var figurasCanalLateral = todosLosTipos.indexOf('canal_lateral') !== -1 ? await _obtenerCanalLateralJsonEsc() : [];
+
+                var estilosXml = [];
+                var estilosCreados = {};
+                function asegurarEstiloLinea(id, colorHex) {
+                    if (estilosCreados[id]) return;
+                    estilosXml.push(construirEstiloLinea(id, colorHex, 4));
+                    estilosCreados[id] = true;
+                }
+                function asegurarEstiloIcono(id, iconUrl) {
+                    if (estilosCreados[id]) return;
+                    estilosXml.push(construirEstiloIcono(id, iconUrl));
+                    estilosCreados[id] = true;
+                }
+                function asegurarEstiloCirculo(id, colorHex) {
+                    if (estilosCreados[id]) return;
+                    // Sin ícono real (alcantarilla/rápida hoy no tienen
+                    // uno asignado en pantalla): círculo de Google Maps
+                    // tintado por color, mismo criterio de respaldo que
+                    // ya usa el mapa en vivo para estos 2 tipos.
+                    estilosXml.push('<Style id="' + id + '"><IconStyle><color>' + _colorHexAKmlAABBGGRR(colorHex) + '</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle></Style>');
+                    estilosCreados[id] = true;
+                }
+
+                var folders = [];
+                var totalFiguras = 0;
+
+                for (var i = 0; i < todosLosTipos.length; i++) {
+                    var tipo = todosLosTipos[i];
+                    var etiquetaPlural, resultado;
+                    if (tipo === 'toma') { etiquetaPlural = 'Tomas'; resultado = await CusshmiDatos.listarTodosRegistrosInventarioTomas(comisionKey); }
+                    else if (tipo === 'compuerta') { etiquetaPlural = 'Compuertas'; resultado = await CusshmiDatos.listarTodosRegistrosInventarioCompuertas(comisionKey); }
+                    else { etiquetaPlural = TIPOS_ESTRUCTURA_GENERICOS[tipo].etiquetaPlural; resultado = await CusshmiDatos.listarTodosRegistrosInventarioEstructuras(comisionKey, tipo); }
+                    if (!resultado.ok) continue;
+
+                    var esLineal = TIPOS_LINEALES_GIS.indexOf(tipo) !== -1;
+                    var esPuntualConIcono = TIPOS_PUNTUALES_GIS.indexOf(tipo) !== -1;
+                    var placemarksTipo = [];
+
+                    resultado.registros.forEach(function (r) {
+                        var nombre = r.nombre_obra || r.nombre_canal || (etiquetaPlural + ' ' + (r.orden_compuerta || r.progresiva_km || ''));
+                        var camposComunes = {
+                            CANAL_FUENTE: r.canal_fuente, NOMBRE_CANAL: r.nombre_canal,
+                            PROGRESIVA: r.progresiva_km, TOMA: r.toma_nombre, ESTADO: r.estado,
+                        };
+                        if (tipo !== 'toma' && tipo !== 'compuerta' && TIPOS_ESTRUCTURA_GENERICOS[tipo].camposReferencia) {
+                            TIPOS_ESTRUCTURA_GENERICOS[tipo].camposReferencia.forEach(function (c) {
+                                var valor = r.campos && r.campos[c.clave];
+                                if (valor !== undefined && valor !== null && valor !== '') camposComunes[c.etiqueta] = valor;
+                            });
+                        }
+
+                        if (esLineal) {
+                            var c = r.campos || {};
+                            if (c.esteInicio == null || c.norteInicio == null || c.esteFinal == null || c.norteFinal == null) return;
+                            var pIni = utm17SALatLon(Number(c.esteInicio), Number(c.norteInicio));
+                            var pFin = utm17SALatLon(Number(c.esteFinal), Number(c.norteFinal));
+                            var colorLinea = tipo === 'canal_lateral' ? _colorRealCanalLateralEsc(r, figurasCanalLateral) : _colorPorEstadoInventarioEsc(r.estado);
+                            var estiloIdLinea = 'linea_' + tipo + '_' + colorLinea.replace('#', '');
+                            asegurarEstiloLinea(estiloIdLinea, colorLinea);
+                            placemarksTipo.push(construirPlacemarkLinea(nombre, [[pIni.lat, pIni.lon], [pFin.lat, pFin.lon]], estiloIdLinea, camposComunes));
+                        } else {
+                            if (r.este == null || r.norte == null) return;
+                            var p = utm17SALatLon(Number(r.este), Number(r.norte));
+                            if (esPuntualConIcono) {
+                                var estiloIdIcono = 'icono_' + tipo;
+                                asegurarEstiloIcono(estiloIdIcono, 'https://jojurema.github.io/mapas/inventario_gis/iconos/' + tipo + '.png');
+                                placemarksTipo.push(construirPlacemarkPunto(nombre, p.lat, p.lon, estiloIdIcono, camposComunes));
+                            } else {
+                                var colorPunto = _colorPorEstadoInventarioEsc(r.estado);
+                                var estiloIdCirculo = 'circulo_' + colorPunto.replace('#', '');
+                                asegurarEstiloCirculo(estiloIdCirculo, colorPunto);
+                                placemarksTipo.push(construirPlacemarkPunto(nombre, p.lat, p.lon, estiloIdCirculo, camposComunes));
+                            }
+                        }
+                    });
+
+                    if (placemarksTipo.length > 0) {
+                        folders.push({ nombre: etiquetaPlural, placemarksXml: placemarksTipo.join('') });
+                        totalFiguras += placemarksTipo.length;
+                    }
+                }
+
+                if (folders.length === 0) { alert('No hay estructuras con coordenadas para exportar.'); return; }
+
+                var kml = construirDocumentoKml('Inventario de Infraestructura — ' + comisionKey, estilosXml, folders);
+                var fecha = new Date().toISOString().split('T')[0];
+                _descargarTextoComoArchivo(kml, 'Inventario_' + comisionKey + '_' + fecha + '.kml', 'application/vnd.google-earth.kml+xml');
+                alert('Inventario exportado a KML: ' + folders.length + ' tipos, ' + totalFiguras + ' figuras en total.');
+            } catch (e) {
+                console.error('Error al exportar Inventario a KML:', e);
                 alert('No se pudo generar el archivo: ' + (e.message || e));
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
