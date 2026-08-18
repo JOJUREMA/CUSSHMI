@@ -505,7 +505,7 @@ const TIPOS_ESTRUCTURA_GENERICOS = {
             { indice: 8, clave: 'norteInicio', etiqueta: 'Norte inicio', editable: true },
             { indice: 9, clave: 'esteFinal', etiqueta: 'Este final', editable: true },
             { indice: 10, clave: 'norteFinal', etiqueta: 'Norte final', editable: true },
-            { indice: 11, clave: 'margen', etiqueta: 'Margen', diccionario: MARGEN_INVENTARIO },
+            { indice: 11, clave: 'margen', etiqueta: 'Margen', diccionario: MARGEN_INVENTARIO, editable: true },
             { indice: 12, clave: 'tipoUso', etiqueta: 'Tipo de Uso', diccionario: TIPO_USO_LATERAL },
             { indice: 13, clave: 'numeroUsuarios', etiqueta: 'Número Total de Usuarios' },
             { indice: 14, clave: 'areaBajoRiego', etiqueta: 'Área Total Bajo Riego (ha)' },
@@ -575,3 +575,46 @@ const CLAVES_KMZ_POR_TIPO = {
 // coordenadas de inicio/final, y si el mapa dibuja L.polyline o
 // L.circleMarker.
 const TIPOS_LINEALES_GIS = ['canal_lateral', 'dren_principal', 'dren_secundario'];
+
+// Los 9 tipos puntuales que reciben el mismo tratamiento que Toma: ícono
+// real del KMZ (mapas/inventario_gis/iconos/<tipo>.png), ubicación GPS en
+// tiempo real, sin polígono de predios, sin dibujo esquemático ni
+// hipervínculo de usuarios (a pedido explícito del usuario — ninguno de
+// estos formatos oficiales trae una lista de usuarios propia). Alcantarilla
+// y Rápida no fueron mencionados en el pedido — quedan con el
+// comportamiento genérico anterior hasta que se confirme lo contrario.
+const TIPOS_PUNTUALES_GIS = ['toma', 'compuerta', 'pase_vehicular', 'pase_peatonal', 'caida', 'medidor', 'acueducto', 'repartidor', 'sifon_invertido'];
+
+// Qué tan completa está una estructura respecto al Formato oficial de ANA
+// — "requerido" = Estado + todo campo de referencia NO editable (los
+// `editable:true` son correcciones de campo, no datos que el Excel deba
+// traer de entrada). No evalúa fotos acá (requeriría una consulta a
+// Storage por fila — se hace aparte, solo en la ficha, ver
+// movil/inventario-infraestructura.html).
+function calcularCompletitudEstructura(tipo, registro) {
+    var checks = [{ etiqueta: 'Estado', valor: registro.estado }];
+    if (tipo === 'toma') {
+        checks.push({ etiqueta: 'Material', valor: registro.material });
+        checks.push({ etiqueta: 'Tipo de captación', valor: registro.tipo });
+        checks.push({ etiqueta: 'Dimensión A', valor: registro.dimension_a });
+        checks.push({ etiqueta: 'Dimensión H', valor: registro.dimension_h });
+    } else if (tipo === 'compuerta') {
+        checks.push({ etiqueta: 'Tipo', valor: registro.tipo });
+        checks.push({ etiqueta: 'Material', valor: registro.material });
+        checks.push({ etiqueta: 'Operación', valor: registro.operacion });
+        checks.push({ etiqueta: 'Hoja A', valor: registro.hoja_a });
+        checks.push({ etiqueta: 'Hoja H', valor: registro.hoja_h });
+    } else {
+        var def = TIPOS_ESTRUCTURA_GENERICOS[tipo];
+        var campos = registro.campos || {};
+        (def && def.camposReferencia ? def.camposReferencia : []).forEach(function (c) {
+            if (c.editable) return;
+            checks.push({ etiqueta: c.etiqueta, valor: campos[c.clave] });
+        });
+    }
+    var faltantes = checks
+        .filter(function (c) { return c.valor === undefined || c.valor === null || c.valor === ''; })
+        .map(function (c) { return c.etiqueta; });
+    var porcentaje = checks.length ? Math.round(100 * (checks.length - faltantes.length) / checks.length) : 100;
+    return { porcentaje: porcentaje, faltantes: faltantes };
+}

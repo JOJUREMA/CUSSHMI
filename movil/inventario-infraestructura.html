@@ -241,6 +241,8 @@
                 🔒 Registro confirmado. Para editar solicite habilitación al administrador.
             </div>
 
+            <div class="aviso-bloqueado" id="bannerCompletitudFicha" style="display:none; margin-top:14px; background:rgba(192,57,43,0.15); border-color:rgba(192,57,43,0.5);"></div>
+
             <div class="seccion-titulo" style="margin-top:14px;" id="tituloSeccionIdentidad">Datos de la estructura</div>
             <div class="campo" style="width:100%; max-width:420px;">
                 <label for="inputCanalFuente">Canal Fuente</label>
@@ -282,6 +284,22 @@
                 <div class="campo">
                     <label for="inputNorte">Norte</label>
                     <input type="number" step="0.01" id="inputNorte">
+                </div>
+            </div>
+
+            <div id="seccionGpsFicha" style="width:100%; display:none; flex-direction:column; align-items:center;">
+                <div class="seccion-titulo">📍 Ubicación en tiempo real</div>
+                <div class="estado-busqueda" id="estadoGpsFicha" style="max-width:420px;">Toca "Iniciar" para ver qué tan cerca estás.</div>
+                <div class="fila-doble" style="max-width:420px;">
+                    <button type="button" class="boton-secundario" id="btnIniciarGps" style="flex:1;">▶ Iniciar ubicación en vivo</button>
+                    <button type="button" class="boton-secundario" id="btnDetenerGps" style="flex:1; display:none;">⏸ Detener</button>
+                </div>
+                <div class="fila-doble" id="filaFijarPuntual" style="max-width:420px; display:none;">
+                    <button type="button" class="boton" id="btnFijarPuntual" style="flex:1;" disabled>📍 Fijar aquí</button>
+                </div>
+                <div class="fila-doble" id="filaFijarLineal" style="max-width:420px; display:none;">
+                    <button type="button" class="boton" id="btnFijarInicio" style="flex:1;" disabled>📍 Fijar Inicio</button>
+                    <button type="button" class="boton" id="btnFijarFin" style="flex:1;" disabled>📍 Fijar Fin</button>
                 </div>
             </div>
 
@@ -817,10 +835,13 @@
                 fila.className = 'fila-resultado';
                 var estadoTexto = r.estado ? (ESTADO_INVENTARIO[r.estado] || r.estado) : 'sin revisar';
                 var tituloFila = r.nombre_obra || r.nombre_canal || '-';
+                var completitud = calcularCompletitudEstructura(tipoActual, r);
+                if (completitud.porcentaje < 100) fila.style.cssText = 'background:rgba(192,57,43,0.15); border-radius:8px;';
                 fila.innerHTML =
                     '<div class="nombre-resultado">' + escapeHtml(tituloFila) +
                     '<span class="badge-registrado">' + (r.confirmado ? '✅ confirmado' : '📝 pendiente') + '</span>' +
                     '<span class="badge-estado">' + escapeHtml(estadoTexto) + '</span>' +
+                    (completitud.porcentaje < 100 ? '<span class="badge-estado" style="background:rgba(192,57,43,0.5);">' + completitud.porcentaje + '% completo</span>' : '') +
                     '</div>' +
                     '<div class="detalle-resultado">Desde: ' + escapeHtml(r.canal_fuente || '-') + ' → ' + escapeHtml(r.nombre_canal || '-') + (r.progresiva_km ? ' · Prog. ' + escapeHtml(r.progresiva_km) : '') + '</div>';
                 fila.addEventListener('click', function () { abrirFormularioDesdeRegistro(r); });
@@ -933,14 +954,36 @@
                 if (resultadoTipo.ok) registrosParaEmparejar = resultadoTipo.registros;
             }
 
+            var esPuntualConIcono = TIPOS_PUNTUALES_GIS.indexOf(tipo) !== -1;
+            var incompletos = 0;
             figuras.forEach(function (f) {
                 var match = _buscarRegistroParaFigura(registrosParaEmparejar, f, claves);
-                var color = match ? _colorPorEstadoInventario(match.estado) : '#888888';
+                var completitud = match ? calcularCompletitudEstructura(tipo, match) : null;
+                var incompleto = completitud ? completitud.porcentaje < 100 : false;
+                if (incompleto) incompletos++;
+                var colorEstado = incompleto ? '#c0392b' : (match ? _colorPorEstadoInventario(match.estado) : '#888888');
                 var capa;
                 if (esLineal && f.geom && f.geom.type === 'LineString') {
-                    capa = L.polyline(f.geom.coords, { color: color, weight: 4, opacity: 0.9 }).addTo(mapaInventarioLeaflet);
+                    // Canal Lateral respeta el color real del KMZ (simboliza
+                    // el orden de riego, L1..L5) — Drenes conservan su color
+                    // fijo por subtipo, ya asignado en pintarDrenColor.
+                    var colorLinea = (tipo === 'canal_lateral' && f.color) ? f.color : colorEstado;
+                    capa = L.polyline(f.geom.coords, { color: colorLinea, weight: 4, opacity: 0.9, dashArray: incompleto ? '2,6' : null }).addTo(mapaInventarioLeaflet);
+                } else if (esPuntualConIcono && f.geom && f.geom.type === 'Point') {
+                    // Ícono real del KMZ (respeta la simbología original) +
+                    // una insignia de color en la esquina con el Estado (o
+                    // rojo si falta información del formato oficial).
+                    var icono = L.divIcon({
+                        className: '', html:
+                            '<div style="position:relative; width:24px; height:24px;">' +
+                            '<img src="../mapas/inventario_gis/iconos/' + tipo + '.png" style="width:24px; height:24px;">' +
+                            '<span style="position:absolute; right:-2px; bottom:-2px; width:9px; height:9px; border-radius:50%; background:' + colorEstado + '; border:1.5px solid #002555;"></span>' +
+                            '</div>',
+                        iconSize: [24, 24], iconAnchor: [12, 12],
+                    });
+                    capa = L.marker(f.geom.coords, { icon: icono }).addTo(mapaInventarioLeaflet);
                 } else if (!esLineal && f.geom && f.geom.type === 'Point') {
-                    capa = L.circleMarker(f.geom.coords, { radius: 8, color: '#002555', weight: 1.5, fillColor: color, fillOpacity: 0.9 }).addTo(mapaInventarioLeaflet);
+                    capa = L.circleMarker(f.geom.coords, { radius: 8, color: '#002555', weight: 1.5, fillColor: colorEstado, fillOpacity: 0.9 }).addTo(mapaInventarioLeaflet);
                 } else {
                     return;
                 }
@@ -950,6 +993,9 @@
                 });
                 marcadoresInventario.push(capa);
             });
+            if (incompletos) {
+                elEstado.textContent = (elEstado.textContent ? elEstado.textContent + ' · ' : '') + incompletos + ' con datos del formato incompletos (resaltadas en rojo).';
+            }
 
             if (marcadoresInventario.length) {
                 var grupo = L.featureGroup(marcadoresInventario);
@@ -1035,10 +1081,15 @@
 
         // ═══ Usuarios de la toma de la estructura abierta ═══
         async function mostrarUsuariosDeToma() {
-            var tomaNombre = registroActual ? registroActual.tomaNombre : null;
+            var r = registroActual;
+            var tomaNombre = r ? r.tomaNombre : null;
+            var esCanalLateral = r && r.tipo === 'canal_lateral';
+            var canalNombre = esCanalLateral ? r.nombreCanal : null;
+
             document.getElementById('vistaFormulario').style.display = 'none';
             document.getElementById('vistaUsuariosToma').style.display = 'flex';
-            document.getElementById('tituloUsuariosToma').textContent = tomaNombre ? ('Usuarios — Toma ' + tomaNombre) : 'Usuarios';
+            document.getElementById('tituloUsuariosToma').textContent = esCanalLateral
+                ? ('Usuarios — ' + canalNombre) : (tomaNombre ? ('Usuarios — Toma ' + tomaNombre) : 'Usuarios');
             var elEstado = document.getElementById('estadoUsuariosToma');
             var elLista = document.getElementById('listaUsuariosToma');
             elLista.innerHTML = '';
@@ -1047,10 +1098,33 @@
                 return;
             }
             elEstado.textContent = 'Cargando…';
+
+            // Los demás canales de la misma toma, para el desplegable de
+            // reasignación — solo hace falta pedirlo si es un Canal Lateral.
+            var otrosCanales = [];
+            if (esCanalLateral) {
+                var resultadoCanales = await CusshmiDatos.listarRegistrosInventarioEstructurasDeToma(comisionKeyActual, tomaNombre, 'canal_lateral');
+                if (resultadoCanales.ok) {
+                    var vistos = {};
+                    resultadoCanales.registros.forEach(function (c) {
+                        if (c.nombre_canal && !vistos[c.nombre_canal]) { vistos[c.nombre_canal] = true; otrosCanales.push(c.nombre_canal); }
+                    });
+                }
+            }
+
             var resultado = await CusshmiDatos.cargarPadronOficialA1(comisionKeyActual);
             if (!resultado.ok) { elEstado.textContent = resultado.error || 'No se pudo cargar el padrón.'; return; }
-            var usuarios = resultado.resultados.filter(function (u) { return u.toma_nombre === tomaNombre; });
-            if (!usuarios.length) { elEstado.textContent = 'No hay usuarios del padrón oficial A-1 registrados para esta toma.'; return; }
+            var usuarios = resultado.resultados.filter(function (u) {
+                if (u.toma_nombre !== tomaNombre) return false;
+                if (esCanalLateral) return u.canal_nombre === canalNombre;
+                return true;
+            });
+            if (!usuarios.length) {
+                elEstado.textContent = esCanalLateral
+                    ? 'Ningún usuario del padrón está asignado todavía a este canal.'
+                    : 'No hay usuarios del padrón oficial A-1 registrados para esta toma.';
+                return;
+            }
             var areaTotal = 0;
             usuarios.forEach(function (u) { areaTotal += Number(u.area_bajo_riego_ha) || 0; });
             elEstado.textContent = usuarios.length + ' usuario(s) · ' + areaTotal.toFixed(2) + ' ha en total';
@@ -1059,6 +1133,37 @@
                 fila.className = 'fila-resultado';
                 fila.innerHTML = '<div class="nombre-resultado">' + escapeHtml(u.apellidos_nombres) + '</div>' +
                     '<div class="detalle-resultado">UC ' + escapeHtml(u.unidad_catastral || '-') + ' · ' + (Number(u.area_bajo_riego_ha) || 0).toFixed(2) + ' ha</div>';
+
+                // Reasignación — solo tiene sentido en un Canal Lateral (el
+                // usuario mostrado puede no corresponder a este canal; se
+                // reasigna a otro de la misma toma sin salir de la pantalla).
+                if (esCanalLateral && otrosCanales.length) {
+                    var contReasignar = document.createElement('div');
+                    contReasignar.style.cssText = 'margin-top:6px; display:flex; gap:6px; align-items:center;';
+                    var selectCanal = document.createElement('select');
+                    selectCanal.style.cssText = 'flex:1; padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.95); color:#002555; font-size:12px;';
+                    otrosCanales.filter(function (c) { return c !== canalNombre; }).forEach(function (c) {
+                        var opt = document.createElement('option'); opt.value = c; opt.textContent = c; selectCanal.appendChild(opt);
+                    });
+                    var btnReasignar = document.createElement('button');
+                    btnReasignar.type = 'button';
+                    btnReasignar.textContent = '↔ Reasignar';
+                    btnReasignar.style.cssText = 'padding:6px 10px; border:none; border-radius:6px; background:#003876; color:#fff; font-weight:600; font-size:12px; cursor:pointer;';
+                    btnReasignar.addEventListener('click', async function () {
+                        if (!selectCanal.value) return;
+                        btnReasignar.disabled = true; btnReasignar.textContent = 'Guardando…';
+                        var resultadoReasignar = await CusshmiDatos.reasignarUsuarioCanal(u.id, selectCanal.value);
+                        if (!resultadoReasignar.ok) {
+                            alert('No se pudo reasignar: ' + resultadoReasignar.error);
+                            btnReasignar.disabled = false; btnReasignar.textContent = '↔ Reasignar';
+                            return;
+                        }
+                        mostrarUsuariosDeToma(); // refresca — el usuario ya no aparece en este canal
+                    });
+                    contReasignar.appendChild(selectCanal);
+                    contReasignar.appendChild(btnReasignar);
+                    fila.appendChild(contReasignar);
+                }
                 elLista.appendChild(fila);
             });
         }
@@ -1109,7 +1214,14 @@
                 capasFicha.push(linea);
             } else {
                 var p = utm17SALatLon(Number(este), Number(norte));
-                var punto = L.circleMarker([p.lat, p.lon], { radius: 9, color: '#002555', weight: 1.5, fillColor: '#00bcd4', fillOpacity: 0.95 }).addTo(mapaFichaLeaflet);
+                var punto;
+                if (TIPOS_PUNTUALES_GIS.indexOf(r.tipo) !== -1) {
+                    punto = L.marker([p.lat, p.lon], {
+                        icon: L.icon({ iconUrl: '../mapas/inventario_gis/iconos/' + r.tipo + '.png', iconSize: [28, 28], iconAnchor: [14, 14] })
+                    }).addTo(mapaFichaLeaflet);
+                } else {
+                    punto = L.circleMarker([p.lat, p.lon], { radius: 9, color: '#002555', weight: 1.5, fillColor: '#00bcd4', fillOpacity: 0.95 }).addTo(mapaFichaLeaflet);
+                }
                 punto.esCapaFicha = true;
                 capasFicha.push(punto);
             }
@@ -1117,8 +1229,10 @@
             // Predios de los usuarios de la toma — reusa tal cual el parser
             // y el cruce ya escritos en assets/core/mapa.js (KML_POR_TOMA/
             // parsearKmlATomas/filtrarPorToma/cruzarPredioConPadron/
-            // _colorPorCultivo), sin inventar un criterio visual nuevo.
-            if (r.tomaNombre) {
+            // _colorPorCultivo), sin inventar un criterio visual nuevo. Se
+            // omite para los tipos puntuales (Toma y afines) — el usuario
+            // pidió quitarlos ahí, quedan solo en Canales/Drenes.
+            if (r.tomaNombre && TIPOS_PUNTUALES_GIS.indexOf(r.tipo) === -1) {
                 var archivosKml = KML_POR_TOMA[normalizarNombreToma(r.tomaNombre)];
                 if (archivosKml) {
                     var listaArchivos = Array.isArray(archivosKml) ? archivosKml : [archivosKml];
@@ -1148,28 +1262,119 @@
                 }
             }
 
-            elEstado.textContent = capasFicha.length > 1 ? (capasFicha.length - 1) + ' predio(s) abastecido(s) por esta toma.' : 'Sin predios mapeados para esta toma todavía.';
+            if (TIPOS_PUNTUALES_GIS.indexOf(r.tipo) !== -1) {
+                elEstado.textContent = '';
+            } else {
+                elEstado.textContent = capasFicha.length > 1 ? (capasFicha.length - 1) + ' predio(s) abastecido(s) por esta toma.' : 'Sin predios mapeados para esta toma todavía.';
+            }
             if (capasFicha.length) mapaFichaLeaflet.fitBounds(L.featureGroup(capasFicha).getBounds(), { padding: [24, 24], maxZoom: 17 });
         }
 
-        // ═══ Dibujo esquemático (SVG) según el tipo de estructura ═══
+        // ═══ Ubicación en tiempo real (GPS continuo) — puntuales: cuánto
+        // falta para llegar a la coordenada registrada, + "Fijar aquí".
+        // Canal Lateral/Drenes: "Fijar Inicio"/"Fijar Fin" caminando a cada
+        // extremo. Seguimiento continuo (watchPosition), no un solo tiro —
+        // a diferencia del GPS de Sinceramiento de Áreas (un punto a la
+        // vez), acá se pidió ver la distancia en vivo mientras se camina. ═══
+        var watchIdFicha = null;
+        var posicionActualFicha = null;
+
+        function iniciarSeguimientoGps(onActualizar, onError) {
+            if (!navigator.geolocation) { onError(new Error('Este dispositivo no soporta geolocalización.')); return null; }
+            return navigator.geolocation.watchPosition(onActualizar, onError, { enableHighAccuracy: true, maximumAge: 2000 });
+        }
+        function detenerSeguimientoGps(watchId) {
+            if (watchId != null && navigator.geolocation) navigator.geolocation.clearWatch(watchId);
+        }
+        function _distanciaUtmMetros(este1, norte1, este2, norte2) {
+            var de = Number(este1) - Number(este2), dn = Number(norte1) - Number(norte2);
+            return Math.sqrt(de * de + dn * dn);
+        }
+
+        function actualizarSeccionGpsFicha() {
+            var r = registroActual;
+            var esPuntual = TIPOS_PUNTUALES_GIS.indexOf(r.tipo) !== -1;
+            var esLineal = TIPOS_LINEALES_GIS.indexOf(r.tipo) !== -1;
+            document.getElementById('seccionGpsFicha').style.display = (esPuntual || esLineal) ? 'flex' : 'none';
+            document.getElementById('filaFijarPuntual').style.display = esPuntual ? 'flex' : 'none';
+            document.getElementById('filaFijarLineal').style.display = esLineal ? 'flex' : 'none';
+            detenerSeguimientoGps(watchIdFicha);
+            watchIdFicha = null;
+            posicionActualFicha = null;
+            document.getElementById('btnIniciarGps').style.display = 'inline-block';
+            document.getElementById('btnDetenerGps').style.display = 'none';
+            document.getElementById('btnFijarPuntual').disabled = true;
+            document.getElementById('btnFijarInicio').disabled = true;
+            document.getElementById('btnFijarFin').disabled = true;
+            document.getElementById('estadoGpsFicha').textContent = 'Toca "Iniciar" para ver qué tan cerca estás.';
+        }
+
+        document.getElementById('btnIniciarGps').addEventListener('click', function () {
+            var elEstado = document.getElementById('estadoGpsFicha');
+            elEstado.textContent = 'Obteniendo ubicación…';
+            watchIdFicha = iniciarSeguimientoGps(function (pos) {
+                posicionActualFicha = latLonAUtm17S(pos.coords.latitude, pos.coords.longitude);
+                var esPuntual = TIPOS_PUNTUALES_GIS.indexOf(registroActual.tipo) !== -1;
+                if (esPuntual) {
+                    var esteRef = document.getElementById('inputEste').value, norteRef = document.getElementById('inputNorte').value;
+                    if (esteRef && norteRef) {
+                        var dist = _distanciaUtmMetros(posicionActualFicha.easting, posicionActualFicha.northing, esteRef, norteRef);
+                        elEstado.textContent = 'A ' + dist.toFixed(0) + ' m de la coordenada registrada (±' + Math.round(pos.coords.accuracy) + ' m de precisión GPS).';
+                    } else {
+                        elEstado.textContent = 'Sin coordenada previa para comparar — toca "Fijar aquí" para registrar esta.';
+                    }
+                    document.getElementById('btnFijarPuntual').disabled = false;
+                } else {
+                    elEstado.textContent = 'Ubicación lista (±' + Math.round(pos.coords.accuracy) + ' m). Camina a cada extremo del canal y toca "Fijar Inicio"/"Fijar Fin".';
+                    document.getElementById('btnFijarInicio').disabled = false;
+                    document.getElementById('btnFijarFin').disabled = false;
+                }
+            }, function (err) {
+                elEstado.textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '.';
+            });
+            document.getElementById('btnIniciarGps').style.display = 'none';
+            document.getElementById('btnDetenerGps').style.display = 'inline-block';
+        });
+        document.getElementById('btnDetenerGps').addEventListener('click', function () {
+            detenerSeguimientoGps(watchIdFicha);
+            watchIdFicha = null;
+            document.getElementById('btnIniciarGps').style.display = 'inline-block';
+            document.getElementById('btnDetenerGps').style.display = 'none';
+        });
+        document.getElementById('btnFijarPuntual').addEventListener('click', function () {
+            if (!posicionActualFicha) return;
+            document.getElementById('inputEste').value = posicionActualFicha.easting.toFixed(2);
+            document.getElementById('inputNorte').value = posicionActualFicha.northing.toFixed(2);
+            document.getElementById('estadoGpsFicha').textContent = '✅ Coordenadas fijadas — toca "Continuar" para guardar.';
+        });
+        document.getElementById('btnFijarInicio').addEventListener('click', function () {
+            if (!posicionActualFicha) return;
+            var i1 = document.getElementById('campoGenerico_esteInicio'), i2 = document.getElementById('campoGenerico_norteInicio');
+            if (i1) i1.value = posicionActualFicha.easting.toFixed(2);
+            if (i2) i2.value = posicionActualFicha.northing.toFixed(2);
+            document.getElementById('estadoGpsFicha').textContent = '✅ Inicio fijado — toca "Continuar" para guardar.';
+        });
+        document.getElementById('btnFijarFin').addEventListener('click', function () {
+            if (!posicionActualFicha) return;
+            var i1 = document.getElementById('campoGenerico_esteFinal'), i2 = document.getElementById('campoGenerico_norteFinal');
+            if (i1) i1.value = posicionActualFicha.easting.toFixed(2);
+            if (i2) i2.value = posicionActualFicha.northing.toFixed(2);
+            document.getElementById('estadoGpsFicha').textContent = '✅ Fin fijado — toca "Continuar" para guardar.';
+        });
+
+        // ═══ Dibujo esquemático (SVG) — solo Canal Lateral y Drenes. Los 9
+        // tipos puntuales (Toma, Compuerta y afines) lo perdieron a pedido
+        // del usuario: ese formato no les corresponde. ═══
         function pintarDibujoEstructura() {
             var r = registroActual;
             var campos = r.campos || {};
             var svg = null;
-            if (r.tipo === 'canal_lateral' || r.tipo === 'dren_principal' || r.tipo === 'dren_secundario') {
+            if (TIPOS_LINEALES_GIS.indexOf(r.tipo) !== -1) {
                 svg = dibujarSeccionTrapezoidal(campos.baseMayor, campos.baseMenor, campos.altura, campos.tirante);
-            } else if (r.tipo === 'compuerta') {
-                svg = dibujarCompuerta(r.hojaA, r.hojaH, r.marcoA, r.marcoH);
-            } else if (r.tipo === 'toma') {
-                svg = dibujarToma(r.dimensionA, r.dimensionH, r.dimensionD);
-            } else if (r.tipo === 'pase_vehicular' || r.tipo === 'pase_peatonal') {
-                svg = dibujarPlantaPuente(campos.longitud, campos.ancho);
             }
             var seccion = document.getElementById('seccionDibujoEstructura');
             var cont = document.getElementById('contenidoDibujoEstructura');
-            var tiposConDibujo = ['canal_lateral', 'dren_principal', 'dren_secundario', 'compuerta', 'toma', 'pase_vehicular', 'pase_peatonal'];
-            if (tiposConDibujo.indexOf(r.tipo) === -1) {
+            if (TIPOS_LINEALES_GIS.indexOf(r.tipo) === -1) {
                 seccion.style.display = 'none';
                 return;
             }
@@ -1255,6 +1460,11 @@
             // más abajo (mismo mecanismo de campos `editable`).
             var esLineal = TIPOS_LINEALES_GIS.indexOf(r.tipo) !== -1;
             document.getElementById('filaEsteNorteUnico').style.display = esLineal ? 'none' : 'flex';
+            // "Usuarios de esta toma" solo tiene sentido para Canal Lateral
+            // (y Drenes) — los 9 tipos puntuales y Toma/Compuerta no traen
+            // una lista de usuarios propia en el formato oficial.
+            document.getElementById('btnVerUsuariosToma').style.display =
+                (TIPOS_PUNTUALES_GIS.indexOf(r.tipo) !== -1 || r.tipo === 'toma' || r.tipo === 'compuerta') ? 'none' : 'block';
 
             document.getElementById('camposToma').style.display = (r.tipo === 'toma') ? 'flex' : 'none';
             document.getElementById('camposCompuerta').style.display = (r.tipo === 'compuerta') ? 'flex' : 'none';
@@ -1282,12 +1492,30 @@
                 if (r.bloqueRiego) cont.innerHTML += filaResumen('Bloque de Riego', r.bloqueRiego);
                 (def.definicion.camposReferencia || []).forEach(function (c) {
                     if (c.editable) return; // se pinta aparte, como campo editable
+                    // "Número Total de Usuarios" de un Canal Lateral se pinta
+                    // aparte, como botón clickeable (abre la lista real y
+                    // permite reasignar) — no como texto plano.
+                    if (r.tipo === 'canal_lateral' && c.clave === 'numeroUsuarios') return;
                     var valorCrudo = (r.campos || {})[c.clave];
                     if (valorCrudo === undefined || valorCrudo === null || valorCrudo === '') return;
                     var valorMostrado = valorCrudo;
                     if (c.diccionario && c.diccionario[valorCrudo]) valorMostrado = valorCrudo + ' — ' + c.diccionario[valorCrudo];
                     cont.innerHTML += filaResumen(c.etiqueta, valorMostrado);
                 });
+                if (r.tipo === 'canal_lateral') {
+                    var nUsuariosCanal = (r.campos || {}).numeroUsuarios;
+                    var filaUsuarios = document.createElement('div');
+                    filaUsuarios.className = 'resumen-fila';
+                    filaUsuarios.innerHTML = '<span class="etiqueta-resumen">Número Total de Usuarios</span>';
+                    var btnValorUsuarios = document.createElement('button');
+                    btnValorUsuarios.type = 'button';
+                    btnValorUsuarios.className = 'valor-resumen';
+                    btnValorUsuarios.style.cssText = 'background:none; border:none; color:#00bcd4; text-decoration:underline; cursor:pointer; font:inherit;';
+                    btnValorUsuarios.textContent = (nUsuariosCanal != null && nUsuariosCanal !== '') ? nUsuariosCanal : '— ver usuarios';
+                    btnValorUsuarios.addEventListener('click', function () { mostrarUsuariosDeToma(); });
+                    filaUsuarios.appendChild(btnValorUsuarios);
+                    cont.appendChild(filaUsuarios);
+                }
                 if (!cont.innerHTML) cont.innerHTML = '<div class="estado-busqueda">Sin datos de referencia — vuelve a sincronizar desde escritorio.</div>';
 
                 // Campos editables (ej. Tipo/Longitud de un Canal Lateral que
@@ -1359,6 +1587,7 @@
 
             pintarMapaFicha();
             pintarDibujoEstructura();
+            actualizarSeccionGpsFicha();
             cargarFotosDeRegistro();
         }
 
@@ -1443,6 +1672,38 @@
             }
             renderizarFotosInventario();
             sincronizarFotosPendientesInventario();
+            actualizarBannerCompletitud();
+        }
+
+        // Convierte registroActual (ya transformado por
+        // registroDesdeFilaServidor) de vuelta al esquema de columnas
+        // crudo que espera calcularCompletitudEstructura — la misma
+        // función que ya usa el mapa (assets/core/inventarioInfraestructura.js),
+        // sin duplicar la lógica de qué campos son obligatorios.
+        function _registroActualComoCrudo() {
+            var r = registroActual;
+            if (r.tipo === 'toma') {
+                return { estado: r.estado, material: r.material, tipo: r.tipo_, dimension_a: r.dimensionA, dimension_h: r.dimensionH, dimension_d: r.dimensionD };
+            }
+            if (r.tipo === 'compuerta') {
+                return { estado: r.estado, tipo: r.tipo_, material: r.material, operacion: r.operacion, hoja_a: r.hojaA, hoja_h: r.hojaH };
+            }
+            return { estado: r.estado, campos: r.campos || {} };
+        }
+
+        function actualizarBannerCompletitud() {
+            var r = registroActual;
+            var banner = document.getElementById('bannerCompletitudFicha');
+            if (!r.id) { banner.style.display = 'none'; return; }
+            var completitud = calcularCompletitudEstructura(r.tipo, _registroActualComoCrudo());
+            var faltantes = completitud.faltantes.slice();
+            if (!r.fotos || !r.fotos.length) faltantes.push('Foto');
+            if (faltantes.length) {
+                banner.style.display = 'block';
+                banner.textContent = '⚠️ Faltan ' + faltantes.length + ' dato(s) del formato oficial: ' + faltantes.join(', ') + '.';
+            } else {
+                banner.style.display = 'none';
+            }
         }
 
         var sincronizandoFotosInventario = false;
@@ -1601,6 +1862,8 @@
         }
 
         async function volverALista() {
+            detenerSeguimientoGps(watchIdFicha);
+            watchIdFicha = null;
             document.getElementById('vistaFormulario').style.display = 'none';
             abrirToma(tomaSeleccionada); // refresca la lista para que los badges queden al día
         }

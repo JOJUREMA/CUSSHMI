@@ -1453,6 +1453,17 @@
             </button>
             <input type="file" id="inputTipoInventario" accept=".xlsx" style="display:none;" onchange="importarInventarioSegunTipoSeleccionado(event)">
 
+            <hr style="margin: 18px 0; border-color: #ddd;">
+            <p class="info-text" style="text-align:left; font-size: 0.9em;">
+                Descarga el inventario ya corregido/completado desde el móvil
+                (una hoja por tipo, 14 en total) — las filas con datos
+                faltantes del formato oficial quedan resaltadas en rojo
+                tenue:
+            </p>
+            <button class="btn btn-secondary" id="btnExportarInventario" onclick="exportarInventarioCompleto()" style="width: 100%;">
+                📤 Exportar Inventario (14 tipos)
+            </button>
+
             <button class="btn btn-secondary" onclick="cerrarModalInventario()" style="width: 100%; margin-top: 12px;">
                 ❌ Cerrar
             </button>
@@ -3794,6 +3805,112 @@ const COMISIONES = {
                     'Si el navegador bloqueó alguna descarga, permite "descargas múltiples" para este sitio y vuelve a intentar.');
             } catch (e) {
                 console.error('Error al exportar Formatos A-1/A-2:', e);
+                alert('No se pudo generar el archivo: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+            }
+        }
+
+        // ── Exportador de Inventario (14 tipos, una hoja por tipo) ──
+        // A diferencia de A-1/A-2/E-4.1 (que replican el layout multi-nivel
+        // exacto del Excel oficial), acá se usa un encabezado de una sola
+        // fila por columna — las 12 hojas genéricas tienen entre 15 y 40
+        // columnas técnicas cada una (ver TIPOS_ESTRUCTURA_GENERICOS,
+        // assets/core/inventarioInfraestructura.js) y replicar el
+        // agrupamiento multi-nivel exacto de cada una es trabajo aparte; acá
+        // se prioriza que las 14 hojas salgan completas, correctas y
+        // legibles, con las mismas etiquetas que ya usa el móvil. Las filas
+        // con datos faltantes del formato oficial (misma función que ya usa
+        // el móvil, calcularCompletitudEstructura) se resaltan en rojo
+        // tenue, igual criterio visual en las dos plataformas.
+        function _construirHojaInventarioTipo(wb, tipo, etiquetaPlural, registros, comisionNombre) {
+            var esGenerico = !(tipo === 'toma' || tipo === 'compuerta');
+            var def = esGenerico ? TIPOS_ESTRUCTURA_GENERICOS[tipo] : null;
+            var camposExtra = esGenerico ? (def.camposReferencia || []).filter(function (c) { return !c.editable; }) : [];
+
+            var encabezados = ['N°', 'Toma', 'Nombre de la obra / Canal', 'Canal Fuente', 'Nombre del Canal', 'Progresiva'];
+            if (tipo === 'toma') encabezados = encabezados.concat(['Este', 'Norte', 'Material', 'Tipo', 'Dimensión A', 'Dimensión H', 'Dimensión D']);
+            else if (tipo === 'compuerta') encabezados = encabezados.concat(['Este', 'Norte', 'Orden', 'Tipo', 'Material', 'Operación', 'Hoja A', 'Hoja H', 'Marco A', 'Marco H', 'Bloque de Riego']);
+            else encabezados = encabezados.concat(['Este', 'Norte'], camposExtra.map(function (c) { return c.etiqueta; }));
+            encabezados = encabezados.concat(['Estado', 'Observación', '% Completo (formato oficial)']);
+
+            var NUM_COLS = encabezados.length;
+            var ws = wb.addWorksheet(etiquetaPlural.slice(0, 31), {
+                views: [{ showGridLines: false }],
+                pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+            });
+            ws.columns = encabezados.map(function (_, i) { return { width: i < 6 ? 16 : 13 }; });
+
+            var filaGrupo = _escribirEncabezadoFormatoOficial(ws, NUM_COLS, 'Inventario de Obras de Arte — ' + etiquetaPlural, 'INVENTARIO DE ' + etiquetaPlural.toUpperCase(), comisionNombre);
+            for (var c = 1; c <= NUM_COLS; c++) {
+                ws.getCell(filaGrupo, c).value = encabezados[c - 1];
+                _estiloEncabezadoTablaOficial(ws.getCell(filaGrupo, c));
+            }
+            ws.getRow(filaGrupo).height = 28;
+            var r = filaGrupo + 1;
+
+            var relleneRojo = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5C6CB' } };
+            registros.forEach(function (reg, idx) {
+                var completitud = calcularCompletitudEstructura(tipo, reg);
+                var valores = [idx + 1, reg.toma_nombre || '—', reg.nombre_obra || reg.nombre_canal || '—', reg.canal_fuente || '', reg.nombre_canal || '', reg.progresiva_km || ''];
+                if (tipo === 'toma') {
+                    valores = valores.concat([reg.este, reg.norte, reg.material, reg.tipo, reg.dimension_a, reg.dimension_h, reg.dimension_d]);
+                } else if (tipo === 'compuerta') {
+                    valores = valores.concat([reg.este, reg.norte, reg.orden_compuerta, reg.tipo, reg.material, reg.operacion, reg.hoja_a, reg.hoja_h, reg.marco_a, reg.marco_h, reg.bloque_riego]);
+                } else {
+                    var campos = reg.campos || {};
+                    valores = valores.concat([reg.este, reg.norte], camposExtra.map(function (c) { return campos[c.clave]; }));
+                }
+                valores = valores.concat([reg.estado ? (ESTADO_INVENTARIO[reg.estado] || reg.estado) : '', reg.observacion || '', completitud.porcentaje + '%']);
+                _escribirFilaDatos(ws, r, NUM_COLS, valores);
+                if (completitud.porcentaje < 100) {
+                    for (var cc = 1; cc <= NUM_COLS; cc++) ws.getCell(r, cc).fill = relleneRojo;
+                }
+                r++;
+            });
+            if (!registros.length) {
+                ws.getCell(r, 1).value = 'Sin registros sincronizados para este tipo.';
+                ws.mergeCells(r, 1, r, NUM_COLS);
+            }
+            return ws;
+        }
+
+        async function exportarInventarioCompleto() {
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+            if (typeof TIPOS_ESTRUCTURA_GENERICOS === 'undefined' || typeof calcularCompletitudEstructura !== 'function') {
+                alert('No se pudo cargar la lógica de inventario (assets/core/inventarioInfraestructura.js).');
+                return;
+            }
+
+            var btn = document.getElementById('btnExportarInventario');
+            var textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📊 Generando…'; }
+
+            try {
+                var comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                var comisionNombre = (COMISIONES[comisionKey] && COMISIONES[comisionKey].nombre) || comisionKey;
+                var fecha = new Date().toISOString().split('T')[0];
+                var tiposGenericos = Object.keys(TIPOS_ESTRUCTURA_GENERICOS);
+                var todosLosTipos = ['toma', 'compuerta'].concat(tiposGenericos);
+
+                var wb = new ExcelJS.Workbook();
+                var totalFilas = 0;
+                for (var i = 0; i < todosLosTipos.length; i++) {
+                    var tipo = todosLosTipos[i];
+                    var etiquetaPlural, resultado;
+                    if (tipo === 'toma') { etiquetaPlural = 'Tomas'; resultado = await CusshmiDatos.listarTodosRegistrosInventarioTomas(comisionKey); }
+                    else if (tipo === 'compuerta') { etiquetaPlural = 'Compuertas'; resultado = await CusshmiDatos.listarTodosRegistrosInventarioCompuertas(comisionKey); }
+                    else { etiquetaPlural = TIPOS_ESTRUCTURA_GENERICOS[tipo].etiquetaPlural; resultado = await CusshmiDatos.listarTodosRegistrosInventarioEstructuras(comisionKey, tipo); }
+                    if (!resultado.ok) { alert('No se pudo cargar ' + etiquetaPlural + ': ' + resultado.error); continue; }
+                    _construirHojaInventarioTipo(wb, tipo, etiquetaPlural, resultado.registros, comisionNombre);
+                    totalFilas += resultado.registros.length;
+                }
+
+                await _descargarWorkbook(wb, `Inventario_${comisionKey}_${fecha}.xlsx`);
+                alert('Inventario exportado: 14 hojas, ' + totalFilas + ' filas en total. Las filas resaltadas en rojo tienen datos faltantes del formato oficial.');
+            } catch (e) {
+                console.error('Error al exportar Inventario:', e);
                 alert('No se pudo generar el archivo: ' + (e.message || e));
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }

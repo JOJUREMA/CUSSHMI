@@ -1512,11 +1512,58 @@
         return { ok: true, registros: data || [] };
     }
 
+    // Todas las filas de la comisión, sin filtro de toma — usado por el
+    // exportador de escritorio (assets/supabase/datos.js no conoce Excel,
+    // solo trae los datos; Sistema_Riego_CUSSHMI_14.html arma el .xlsx).
+    // `filtroExtra` opcional: { columna, valor } (ej. tipo_estructura).
+    async function _listarTodosRegistrosInventario(tabla, columnas, comisionKey, filtroExtra) {
+        if (!comisionKey) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+        const TAMANO_PAGINA = 1000;
+        const registros = [];
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => {
+                    let q = client.from(tabla).select(columnas).eq('comision_id', comisionId);
+                    if (filtroExtra) q = q.eq(filtroExtra.columna, filtroExtra.valor);
+                    return q.range(desde, desde + TAMANO_PAGINA - 1);
+                },
+                'listar todos los registros de ' + tabla
+            );
+            if (error || !data) return { ok: false, registros: [], error: error ? error.mensaje : 'No se pudo listar los registros.' };
+            registros.push(...data);
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return { ok: true, registros };
+    }
+    function listarTodosRegistrosInventarioTomas(comisionKey) {
+        return _listarTodosRegistrosInventario('inventario_tomas',
+            'id, toma_nombre, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte, observacion, material, tipo, dimension_a, dimension_h, dimension_d',
+            comisionKey);
+    }
+    function listarTodosRegistrosInventarioCompuertas(comisionKey) {
+        return _listarTodosRegistrosInventario('inventario_compuertas',
+            'id, toma_nombre, canal_fuente, nombre_canal, orden_compuerta, progresiva_km, estado, confirmado, este, norte, observacion, tipo, material, operacion, hoja_a, hoja_h, marco_a, marco_h, bloque_riego',
+            comisionKey);
+    }
+    function listarTodosRegistrosInventarioEstructuras(comisionKey, tipoEstructura) {
+        return _listarTodosRegistrosInventario('inventario_estructuras',
+            'id, toma_nombre, nombre_obra, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte, observacion, campos',
+            comisionKey, { columna: 'tipo_estructura', valor: tipoEstructura });
+    }
+
     function listarRegistrosInventarioTomasDeToma(comisionKey, tomaNombre) {
-        return _listarRegistrosInventarioDeToma('inventario_tomas', 'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte', comisionKey, tomaNombre);
+        return _listarRegistrosInventarioDeToma('inventario_tomas',
+            'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte, observacion, material, tipo, dimension_a, dimension_h, dimension_d',
+            comisionKey, tomaNombre);
     }
     function listarRegistrosInventarioCompuertasDeToma(comisionKey, tomaNombre) {
-        return _listarRegistrosInventarioDeToma('inventario_compuertas', 'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte', comisionKey, tomaNombre);
+        return _listarRegistrosInventarioDeToma('inventario_compuertas',
+            'id, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte, observacion, tipo, material, operacion, hoja_a, hoja_h, marco_a, marco_h, bloque_riego',
+            comisionKey, tomaNombre);
     }
 
     async function _cargarRegistroInventario(tabla, id) {
@@ -1848,7 +1895,7 @@
         if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
         const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
             (client) => client.from('inventario_estructuras')
-                .select('id, nombre_obra, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte')
+                .select('id, nombre_obra, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte, observacion, campos')
                 .eq('comision_id', comisionId).eq('toma_nombre', tomaNombre).eq('tipo_estructura', tipoEstructura),
             'listar registros de inventario_estructuras de la toma'
         );
@@ -1866,7 +1913,7 @@
         if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
         const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
             (client) => client.from('inventario_estructuras')
-                .select('id, nombre_obra, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte, toma_nombre')
+                .select('id, nombre_obra, canal_fuente, nombre_canal, progresiva_km, estado, confirmado, este, norte, toma_nombre, observacion, campos')
                 .eq('comision_id', comisionId).eq('tipo_estructura', tipoEstructura),
             'listar registros de inventario_estructuras por tipo'
         );
@@ -2167,7 +2214,7 @@
         while (true) {
             const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
                 (client) => client.from('padron_oficial_a1')
-                    .select('id, apellidos_nombres, tipo_documento, numero_documento, unidad_catastral, area_total_ha, area_bajo_riego_ha, numero_resolucion, clase_derecho, tipo_uso, volumen_m3, origen, toma_nombre')
+                    .select('id, apellidos_nombres, tipo_documento, numero_documento, unidad_catastral, area_total_ha, area_bajo_riego_ha, numero_resolucion, clase_derecho, tipo_uso, volumen_m3, origen, toma_nombre, canal_nombre')
                     .eq('comision_id', comisionId)
                     .range(desde, desde + TAMANO_PAGINA - 1),
                 'cargar padrón oficial A-1'
@@ -2211,6 +2258,21 @@
             desde += TAMANO_PAGINA;
         }
         return { ok: true, resultados };
+    }
+
+    // Mueve un usuario de un Canal Lateral a otro dentro de la misma toma
+    // (ficha del Mapa de Inventario) — un simple `update` de la columna
+    // nueva `canal_nombre`, sin RPC especial: la fila ya pertenece a esa
+    // comisión y las políticas RLS de padron_oficial_a1 ya cubren esto.
+    async function reasignarUsuarioCanal(usuarioId, nuevoCanalNombre) {
+        if (!usuarioId) return { ok: false, error: 'Falta el usuario a reasignar.' };
+        let client;
+        try { client = window.CusshmiSupabase.getClient(); } catch (e) { return { ok: false, error: e.message }; }
+        const { error } = await client.from('padron_oficial_a1')
+            .update({ canal_nombre: nuevoCanalNombre || null })
+            .eq('id', usuarioId);
+        if (error) return { ok: false, error: error.message };
+        return { ok: true };
     }
 
     // Un usuario que el sectorista registró en campo y que NO estaba en el
@@ -2363,6 +2425,9 @@
         obtenerAvanceInventarioCompuertasPorToma,
         listarRegistrosInventarioTomasDeToma,
         listarRegistrosInventarioCompuertasDeToma,
+        listarTodosRegistrosInventarioTomas,
+        listarTodosRegistrosInventarioCompuertas,
+        listarTodosRegistrosInventarioEstructuras,
         cargarRegistroInventarioToma,
         cargarRegistroInventarioCompuerta,
         guardarRegistroInventarioToma,
@@ -2397,6 +2462,7 @@
         guardarPadronOficialA1,
         cargarPadronOficialA1,
         cargarPadronOficialA1CompletoParaExportar,
+        reasignarUsuarioCanal,
         incorporarUsuarioNuevoAPadronOficialA1,
         actualizarPadronOficialA1DesdeRegistro,
     };
