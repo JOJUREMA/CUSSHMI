@@ -141,6 +141,8 @@
 
         <div class="av-cargando" id="avCargando" style="display:none;">Consultando…</div>
 
+        <div class="av-nota" id="avContexto" style="display:none;"></div>
+
         <div class="tarjeta">
             <div class="av-respuesta" id="avRespuesta">Hazme una pregunta sobre deuda, agua programada hoy o ubicación de una toma.</div>
         </div>
@@ -149,7 +151,9 @@
             <strong>Ejemplos:</strong><br>
             "¿Cuál es la deuda de [nombre]?"<br>
             "¿Cuánta agua está programada hoy en la toma [nombre] / en el canal Sur?"<br>
-            "¿Dónde está la toma [nombre]?"
+            "¿Dónde está la toma [nombre]?"<br>
+            "Información de la toma [nombre]"<br>
+            <em>Después puedes seguir preguntando sin repetir el nombre: "¿y cuánta agua tiene?"</em>
         </div>
     </div>
 
@@ -158,6 +162,12 @@
         var comisionKeyActual = null;
         var reconocimiento = null; // instancia SpeechRecognition activa, o null si no hay soporte
         var escuchandoAhora = false;
+
+        // Memoria de conversación: lo último resuelto con éxito, para que una
+        // pregunta de seguimiento ("¿y cuánta agua tiene?") no necesite repetir
+        // la toma/persona ya mencionada. interpretarPreguntaVoz es pura — este
+        // objeto vive acá (el llamador) y se pasa/actualiza en cada pregunta.
+        var contextoConversacion = { ultimaToma: null, ultimaPersona: null };
 
         var elBtnMic = document.getElementById('btnMic');
         var elEtiquetaMic = document.getElementById('etiquetaMic');
@@ -168,6 +178,7 @@
         var elCargando = document.getElementById('avCargando');
         var elRespuesta = document.getElementById('avRespuesta');
         var elMensajeError = document.getElementById('mensajeError');
+        var elContexto = document.getElementById('avContexto');
 
         function mostrarError(texto) {
             elMensajeError.textContent = texto;
@@ -187,6 +198,14 @@
             escuchandoAhora = activo;
             elBtnMic.classList.toggle('av-escuchando', activo);
             elEtiquetaMic.textContent = activo ? 'Escuchando… habla ahora' : 'Toca el micrófono y pregunta';
+        }
+        function actualizarIndicadorContexto() {
+            var partes = [];
+            if (contextoConversacion.ultimaToma) partes.push('toma ' + contextoConversacion.ultimaToma);
+            if (contextoConversacion.ultimaPersona) partes.push(contextoConversacion.ultimaPersona);
+            if (partes.length === 0) { elContexto.style.display = 'none'; return; }
+            elContexto.textContent = '🧠 Recordando: ' + partes.join(' · ');
+            elContexto.style.display = 'block';
         }
 
         function hablar(texto) {
@@ -228,6 +247,7 @@
 
         elBtnMic.addEventListener('click', function () {
             if (!reconocimiento || escuchandoAhora) return;
+            window.speechSynthesis && window.speechSynthesis.cancel(); // corta cualquier respuesta que siga hablando
             ocultarError();
             elTranscripcion.textContent = '';
             marcarEscuchando(true);
@@ -243,28 +263,40 @@
             ev.preventDefault();
             var texto = elInputTexto.value.trim();
             if (!texto) return;
+            elInputTexto.value = '';
             responderPregunta(texto);
         });
 
         // ── Manejador central ──
         async function responderPregunta(textoOriginal) {
+            window.speechSynthesis && window.speechSynthesis.cancel(); // corta de inmediato cualquier respuesta anterior que siga hablando
             ocultarError();
             mostrarCargando(true);
-            var interpretado = interpretarPreguntaVoz(textoOriginal);
+            var interpretado = interpretarPreguntaVoz(textoOriginal, contextoConversacion);
             var respuesta;
             try {
+                var resultado;
                 if (interpretado.intent === 'deuda') {
-                    respuesta = await _responderDeuda(interpretado.parametro);
+                    resultado = await _responderDeuda(interpretado.parametro);
                 } else if (interpretado.intent === 'agua_hoy') {
-                    respuesta = await _responderAguaHoy(interpretado.parametro);
+                    resultado = await _responderAguaHoy(interpretado.parametro);
                 } else if (interpretado.intent === 'ubicacion') {
-                    respuesta = await _responderUbicacion(interpretado.parametro);
+                    resultado = await _responderUbicacion(interpretado.parametro);
+                } else if (interpretado.intent === 'info_toma') {
+                    resultado = await _responderInfoToma(interpretado.parametro);
                 } else {
-                    respuesta = 'No entendí la pregunta: "' + textoOriginal + '". ' +
+                    resultado = { texto: 'No entendí la pregunta: "' + textoOriginal + '". ' +
                         'Puedes preguntar, por ejemplo: "¿cuál es la deuda de [nombre]?", ' +
-                        '"¿cuánta agua está programada hoy en la toma [nombre]?" o ' +
-                        '"¿dónde está la toma [nombre]?".';
+                        '"¿cuánta agua está programada hoy en la toma [nombre]?", ' +
+                        '"¿dónde está la toma [nombre]?" o "información de la toma [nombre]".' };
                 }
+                respuesta = resultado.texto;
+                // Solo se actualiza la memoria de conversación cuando la pregunta se
+                // resolvió a algo concreto (nunca en errores/"no encontrado") — así una
+                // pregunta fallida no borra el contexto útil de la anterior.
+                if (resultado.ultimaToma) contextoConversacion.ultimaToma = resultado.ultimaToma;
+                if (resultado.ultimaPersona) contextoConversacion.ultimaPersona = resultado.ultimaPersona;
+                actualizarIndicadorContexto();
             } catch (e) {
                 respuesta = 'Ocurrió un error inesperado: ' + (e && e.message ? e.message : e);
             }
@@ -276,18 +308,19 @@
         // ── Deuda ──
         async function _responderDeuda(nombreBuscado) {
             var resultado = await CusshmiDatos.buscarEnPadron(comisionKeyActual, nombreBuscado);
-            if (!resultado.ok) return 'No se pudo consultar el padrón: ' + (resultado.error || 'error desconocido') + '.';
+            if (!resultado.ok) return { texto: 'No se pudo consultar el padrón: ' + (resultado.error || 'error desconocido') + '.' };
             var filas = resultado.resultados || [];
-            if (filas.length === 0) return 'No encontré a nadie llamado "' + nombreBuscado + '" en el padrón.';
+            if (filas.length === 0) return { texto: 'No encontré a nadie llamado "' + nombreBuscado + '" en el padrón.' };
             if (filas.length > 1) {
                 var nombres = filas.slice(0, 3).map(function (f) { return f.nombre; }).join(', ');
-                return 'Encontré ' + filas.length + ' usuarios que coinciden con "' + nombreBuscado + '": ' + nombres +
-                    (filas.length > 3 ? ', entre otros' : '') + '. Precisa mejor el nombre.';
+                return { texto: 'Encontré ' + filas.length + ' usuarios que coinciden con "' + nombreBuscado + '": ' + nombres +
+                    (filas.length > 3 ? ', entre otros' : '') + '. Precisa mejor el nombre.' };
             }
             var f = filas[0];
             var total = (parseFloat(f.deuda_total) || 0).toFixed(2);
-            return f.nombre + ' (toma ' + (f.toma_nombre || 'sin toma') + ') tiene una deuda total de S/ ' + total + '.' +
+            var texto = f.nombre + ' (toma ' + (f.toma_nombre || 'sin toma') + ') tiene una deuda total de S/ ' + total + '.' +
                 (f.al_dia ? ' Está al día.' : ' No está al día.');
+            return { texto: texto, ultimaPersona: f.nombre };
         }
 
         // ── Agua programada hoy ──
@@ -307,14 +340,15 @@
 
         async function _responderAguaHoy(param) {
             if (param.tipo === 'desconocido') {
-                return 'No reconocí la toma o canal "' + param.textoOriginal + '". Intenta con el nombre exacto de la toma, o di "canal Sur" para el total.';
+                return { texto: 'No reconocí la toma o canal "' + param.textoOriginal + '". Intenta con el nombre exacto de la toma, o di "canal Sur" para el total.' };
             }
             var claveHoy = _AV_DIAS[new Date().getDay()];
             var semanaInicio = _avObtenerLunesActual();
             var resultado = await CusshmiDatos.cargarTodasLasProgramaciones(comisionKeyActual, semanaInicio);
-            if (!resultado.ok) return 'No se pudo cargar la programación de la semana.';
+            if (!resultado.ok) return { texto: 'No se pudo cargar la programación de la semana.' };
             var programaciones = resultado.programaciones || [];
-            if (programaciones.length === 0) return 'No hay ninguna toma programada esta semana.';
+            var ultimaToma = param.tipo === 'toma' ? param.valor : undefined; // "canal" no fija una toma puntual en el contexto
+            if (programaciones.length === 0) return { texto: 'No hay ninguna toma programada esta semana.', ultimaToma: ultimaToma };
 
             if (param.tipo === 'canal') {
                 var tomasRio = (typeof TOMAS_ORDEN_AL_FINAL !== 'undefined' ? TOMAS_ORDEN_AL_FINAL : []).map(function (t) { return t.toUpperCase(); });
@@ -324,34 +358,59 @@
                     var detalle = p.turno && p.turno.caudalesPorDiaDetallado ? p.turno.caudalesPorDiaDetallado[claveHoy] : null;
                     if (detalle) { volumenTotal += (detalle.volumen || 0); tomasConAgua++; }
                 });
-                if (tomasConAgua === 0) return 'Hoy no hay agua programada en el canal Sur.';
-                return 'Hoy el canal Sur tiene ' + volumenTotal.toFixed(0) + ' metros cúbicos programados, repartidos en ' + tomasConAgua + ' toma(s).';
+                if (tomasConAgua === 0) return { texto: 'Hoy no hay agua programada en el canal Sur.' };
+                return { texto: 'Hoy el canal Sur tiene ' + volumenTotal.toFixed(0) + ' metros cúbicos programados, repartidos en ' + tomasConAgua + ' toma(s).' };
             }
 
             // param.tipo === 'toma'
             var prog = programaciones.find(function (p) { return (p.toma || '').toUpperCase() === param.valor.toUpperCase(); });
-            if (!prog) return 'La toma ' + param.valor + ' no tiene programación esta semana.';
+            if (!prog) return { texto: 'La toma ' + param.valor + ' no tiene programación esta semana.', ultimaToma: param.valor };
             var detalleToma = prog.turno && prog.turno.caudalesPorDiaDetallado ? prog.turno.caudalesPorDiaDetallado[claveHoy] : null;
-            if (!detalleToma) return 'Hoy la toma ' + param.valor + ' no tiene agua programada.';
-            return 'Hoy la toma ' + param.valor + ' tiene ' + (detalleToma.volumen || 0).toFixed(0) + ' metros cúbicos programados, en ' +
-                (detalleToma.horas || 0) + ' horas de riego.';
+            if (!detalleToma) return { texto: 'Hoy la toma ' + param.valor + ' no tiene agua programada.', ultimaToma: param.valor };
+            return {
+                texto: 'Hoy la toma ' + param.valor + ' tiene ' + (detalleToma.volumen || 0).toFixed(0) + ' metros cúbicos programados, en ' +
+                    (detalleToma.horas || 0) + ' horas de riego.',
+                ultimaToma: param.valor,
+            };
         }
 
         // ── Ubicación / ruta ──
         async function _responderUbicacion(param) {
             if (param.tipo === 'desconocido') {
-                return 'No reconocí de qué toma hablas ("' + param.textoOriginal + '"). Intenta con el nombre exacto de la toma.';
+                return { texto: 'No reconocí de qué toma hablas ("' + param.textoOriginal + '"). Intenta con el nombre exacto de la toma.' };
             }
             var resultado = await CusshmiDatos.listarRegistrosInventarioTomasDeToma(comisionKeyActual, param.valor);
-            if (!resultado.ok) return 'No se pudo consultar el inventario de la toma ' + param.valor + ': ' + (resultado.error || 'error desconocido') + '.';
+            if (!resultado.ok) return { texto: 'No se pudo consultar el inventario de la toma ' + param.valor + ': ' + (resultado.error || 'error desconocido') + '.', ultimaToma: param.valor };
             var registros = resultado.registros || [];
             var conCoordenadas = registros.find(function (r) { return r.este != null && r.norte != null; });
-            if (!conCoordenadas) return 'La toma ' + param.valor + ' no tiene coordenadas registradas todavía en el inventario.';
+            if (!conCoordenadas) return { texto: 'La toma ' + param.valor + ' no tiene coordenadas registradas todavía en el inventario.', ultimaToma: param.valor };
 
             var geo = utm17SALatLon(conCoordenadas.este, conCoordenadas.norte);
             var url = 'https://www.google.com/maps/dir/?api=1&destination=' + geo.lat + ',' + geo.lon;
             window.open(url, '_blank');
-            return 'Abriendo la ruta a la toma ' + param.valor + '.';
+            return { texto: 'Abriendo la ruta a la toma ' + param.valor + '.', ultimaToma: param.valor };
+        }
+
+        // ── Información general de una toma (combina agua de hoy + si tiene
+        // ubicación registrada, sin abrir el mapa automáticamente — eso solo
+        // pasa si el usuario pregunta explícitamente "dónde está"/"ruta") ──
+        async function _responderInfoToma(param) {
+            if (param.tipo === 'desconocido') {
+                return { texto: 'No reconocí de qué toma o canal hablas ("' + param.textoOriginal + '"). Intenta con el nombre exacto de la toma, o "canal Sur".' };
+            }
+            if (param.tipo === 'canal') {
+                return await _responderAguaHoy(param);
+            }
+            var agua = await _responderAguaHoy(param);
+            var textoUbic = '';
+            var resultadoUbic = await CusshmiDatos.listarRegistrosInventarioTomasDeToma(comisionKeyActual, param.valor);
+            if (resultadoUbic.ok) {
+                var tieneCoordenadas = (resultadoUbic.registros || []).some(function (r) { return r.este != null && r.norte != null; });
+                textoUbic = tieneCoordenadas
+                    ? ' Tengo su ubicación registrada — pregunta "¿dónde está?" para la ruta.'
+                    : ' No tiene ubicación registrada en el inventario.';
+            }
+            return { texto: agua.texto + textoUbic, ultimaToma: param.valor };
         }
 
         (async function iniciar() {
