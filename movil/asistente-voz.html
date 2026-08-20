@@ -343,16 +343,38 @@
 
             if (huboError) return { texto: 'No se pudo consultar el padrón: ' + (mensajeError || 'error desconocido') + '.' };
             if (candidatos.length === 0) return { texto: 'No encontré a nadie llamado "' + nombreBuscado + '" en el padrón.' };
-            if (candidatos.length > 1) {
+
+            // Un mismo usuario puede tener derechos (y por lo tanto una fila propia) en varias
+            // tomas del padrón — eso NO es ambigüedad de identidad, es la misma persona con
+            // deuda por toma. Se agrupa por nombre EXACTO: si sale más de un nombre DISTINTO
+            // entre los candidatos, ahí sí son personas distintas y se pide precisar.
+            var porNombre = {};
+            candidatos.forEach(function (f) {
+                var clave = (f.nombre || '').trim().toUpperCase();
+                (porNombre[clave] = porNombre[clave] || []).push(f);
+            });
+            var nombresDistintos = Object.keys(porNombre);
+
+            if (nombresDistintos.length > 1) {
                 var nombres = candidatos.slice(0, 3).map(function (f) { return f.nombre; }).join(', ');
-                return { texto: 'Encontré ' + candidatos.length + ' usuarios que coinciden con "' + nombreBuscado + '": ' + nombres +
-                    (candidatos.length > 3 ? ', entre otros' : '') + '. Precisa mejor el nombre.' };
+                return { texto: 'Encontré ' + nombresDistintos.length + ' usuarios que coinciden con "' + nombreBuscado + '": ' + nombres +
+                    (nombresDistintos.length > 3 ? ', entre otros' : '') + '. Precisa mejor el nombre.' };
             }
-            var f = candidatos[0];
-            var total = (parseFloat(f.deuda_total) || 0).toFixed(2);
-            var texto = f.nombre + ' (toma ' + (f.toma_nombre || 'sin toma') + ') tiene una deuda total de S/ ' + total + '.' +
-                (f.al_dia ? ' Está al día.' : ' No está al día.');
-            return { texto: texto, ultimaPersona: f.nombre };
+
+            var filasPersona = porNombre[nombresDistintos[0]];
+            var nombrePersona = filasPersona[0].nombre;
+            if (filasPersona.length === 1) {
+                var f = filasPersona[0];
+                var total = (parseFloat(f.deuda_total) || 0).toFixed(2);
+                var texto = nombrePersona + ' debe S/ ' + total + ' en la toma ' + (f.toma_nombre || 'sin toma') + '.' +
+                    (f.al_dia ? ' Está al día.' : ' No está al día.');
+                return { texto: texto, ultimaPersona: nombrePersona };
+            }
+            // Varias tomas: una deuda por cada una.
+            var partes = filasPersona.map(function (f) {
+                return 'S/ ' + (parseFloat(f.deuda_total) || 0).toFixed(2) + ' en la toma ' + (f.toma_nombre || 'sin toma');
+            });
+            return { texto: nombrePersona + ' debe ' + partes.join(', ') + '.', ultimaPersona: nombrePersona };
         }
 
         // ── Agua/caudal programado (hoy, mañana, o cualquier día que haya pedido) ──
@@ -367,10 +389,9 @@
             return y + '-' + m + '-' + dd;
         }
 
-        // Texto del caudal en L/s y m³/s a partir del m³/s guardado (caudalesPorDiaDetallado[].caudal).
-        function _avTextoCaudal(caudalM3s) {
-            var c = parseFloat(caudalM3s) || 0;
-            return (c * 1000).toFixed(0) + ' litros por segundo (' + c.toFixed(3) + ' m³/s)';
+        // Litros/segundo a partir del m³/s guardado (caudalesPorDiaDetallado[].caudal).
+        function _avLitrosPorSegundo(caudalM3s) {
+            return (parseFloat(caudalM3s) || 0) * 1000;
         }
 
         async function _responderAguaHoy(param) {
@@ -388,24 +409,23 @@
 
             if (param.tipo === 'canal') {
                 var tomasRio = (typeof TOMAS_ORDEN_AL_FINAL !== 'undefined' ? TOMAS_ORDEN_AL_FINAL : []).map(function (t) { return t.toUpperCase(); });
-                var volumenTotal = 0, tomasConAgua = 0;
+                var caudalTotalLs = 0, tomasConAgua = 0;
                 programaciones.forEach(function (p) {
                     if (tomasRio.indexOf((p.toma || '').toUpperCase()) !== -1) return; // excluye Río Chira
                     var detalle = p.turno && p.turno.caudalesPorDiaDetallado ? p.turno.caudalesPorDiaDetallado[dia.claveDia] : null;
-                    if (detalle) { volumenTotal += (detalle.volumen || 0); tomasConAgua++; }
+                    if (detalle) { caudalTotalLs += _avLitrosPorSegundo(detalle.caudal); tomasConAgua++; }
                 });
-                if (tomasConAgua === 0) return { texto: dia.etiqueta + ' no hay agua programada en el canal Sur.' };
-                return { texto: dia.etiqueta + ' el canal Sur tiene ' + volumenTotal.toFixed(0) + ' metros cúbicos programados, repartidos en ' + tomasConAgua + ' toma(s).' };
+                if (tomasConAgua === 0) return { texto: 'El canal Sur no tiene caudal programado para ' + dia.etiquetaPara + '.' };
+                return { texto: 'El canal Sur tiene ' + caudalTotalLs.toFixed(0) + ' litros por segundo programados para ' + dia.etiquetaPara + ', repartidos en ' + tomasConAgua + ' toma(s).' };
             }
 
             // param.tipo === 'toma'
             var prog = programaciones.find(function (p) { return (p.toma || '').toUpperCase() === param.valor.toUpperCase(); });
             if (!prog) return { texto: 'La toma ' + param.valor + ' no tiene programación esa semana.', ultimaToma: param.valor };
             var detalleToma = prog.turno && prog.turno.caudalesPorDiaDetallado ? prog.turno.caudalesPorDiaDetallado[dia.claveDia] : null;
-            if (!detalleToma) return { texto: dia.etiqueta + ' la toma ' + param.valor + ' no tiene agua programada.', ultimaToma: param.valor };
+            if (!detalleToma) return { texto: 'La toma ' + param.valor + ' no tiene caudal programado para ' + dia.etiquetaPara + '.', ultimaToma: param.valor };
             return {
-                texto: dia.etiqueta + ' la toma ' + param.valor + ' tiene ' + (detalleToma.volumen || 0).toFixed(0) + ' metros cúbicos programados, ' +
-                    'con un caudal de ' + _avTextoCaudal(detalleToma.caudal) + ', en ' + (detalleToma.horas || 0) + ' horas de riego.',
+                texto: 'La toma ' + param.valor + ' tiene ' + _avLitrosPorSegundo(detalleToma.caudal).toFixed(0) + ' litros por segundo programados para ' + dia.etiquetaPara + '.',
                 ultimaToma: param.valor,
             };
         }

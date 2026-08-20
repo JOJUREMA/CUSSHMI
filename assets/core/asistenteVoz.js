@@ -116,8 +116,10 @@ function _avResolverDiaObjetivo(norm) {
     fecha.setDate(fecha.getDate() + offsetDias);
     const claveDia = _AV_DIAS_ABS[fecha.getDay()];
     const etiqueta = offsetDias === 0 ? 'Hoy' : offsetDias === 1 ? 'Mañana' : offsetDias === 2 ? 'Pasado mañana' : 'El ' + claveDia;
+    // Variante en minúsculas para insertar a mitad de frase ("...programados para HOY/MAÑANA/EL DOMINGO").
+    const etiquetaPara = offsetDias === 0 ? 'hoy' : offsetDias === 1 ? 'mañana' : offsetDias === 2 ? 'pasado mañana' : 'el ' + claveDia;
     const y = fecha.getFullYear(), m = String(fecha.getMonth() + 1).padStart(2, '0'), d = String(fecha.getDate()).padStart(2, '0');
-    return { claveDia, etiqueta, offsetDias, fechaISO: y + '-' + m + '-' + d };
+    return { claveDia, etiqueta, etiquetaPara, offsetDias, fechaISO: y + '-' + m + '-' + d };
 }
 
 // Palabras que pueden aparecer justo después de "deuda"/"debe" pero que
