@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Asistente de Voz — CUSSHMI Móvil</title>
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#003876">
+    <link rel="icon" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="stylesheet" href="estilos.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <script src="../assets/supabase/supabase-config.js"></script>
+    <script src="../assets/supabase/supabase-client.js"></script>
+    <script src="../assets/supabase/auth.js"></script>
+    <script src="../assets/supabase/datos.js"></script>
+    <script src="../assets/core/anexoG2.js"></script>
+    <script src="../assets/core/coordenadasUtm.js"></script>
+    <script src="../assets/core/asistenteVoz.js"></script>
+
+    <style>
+        .av-boton-mic {
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            border: none;
+            background: #c8a84b;
+            color: #002555;
+            font-size: 40px;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .av-boton-mic:active { transform: scale(0.96); }
+        .av-boton-mic.av-escuchando {
+            background: #dc3545;
+            color: #ffffff;
+            animation: av-pulso 1.1s ease-in-out infinite;
+        }
+        @keyframes av-pulso {
+            0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.55); }
+            70% { box-shadow: 0 0 0 18px rgba(220, 53, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
+        }
+        .av-zona-mic {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+        .av-etiqueta-mic { font-size: 12px; opacity: 0.8; min-height: 16px; }
+        .av-transcripcion {
+            width: 100%;
+            max-width: 420px;
+            min-height: 20px;
+            font-size: 14px;
+            font-style: italic;
+            opacity: 0.85;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .av-form-texto {
+            width: 100%;
+            max-width: 420px;
+            display: flex;
+            gap: 8px;
+            margin-bottom: 18px;
+        }
+        .av-form-texto input {
+            flex: 1;
+            padding: 11px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.95);
+            color: #002555;
+            font-size: 14px;
+        }
+        .av-form-texto button {
+            padding: 0 16px;
+            border: none;
+            border-radius: 8px;
+            background: #c8a84b;
+            color: #002555;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .av-nota {
+            width: 100%;
+            max-width: 420px;
+            font-size: 12px;
+            opacity: 0.75;
+            text-align: center;
+            margin-bottom: 14px;
+        }
+        .av-respuesta {
+            width: 100%;
+            max-width: 420px;
+            font-size: 15px;
+            line-height: 1.5;
+            min-height: 24px;
+        }
+        .av-cargando { font-size: 13px; opacity: 0.8; text-align: center; margin-bottom: 10px; }
+        .av-ejemplos {
+            width: 100%;
+            max-width: 420px;
+            font-size: 12px;
+            opacity: 0.75;
+            margin-top: 18px;
+            line-height: 1.6;
+        }
+        .av-ejemplos strong { opacity: 0.95; }
+    </style>
+</head>
+<body>
+    <div class="pantalla">
+        <div class="encabezado-modulo">
+            <a class="volver" href="index.html" title="Volver al menú">←</a>
+            <h2>🎙️ Asistente de Voz</h2>
+        </div>
+
+        <div class="mensaje-error" id="mensajeError"></div>
+
+        <div class="av-zona-mic">
+            <button class="av-boton-mic" id="btnMic" type="button" title="Toca para preguntar por voz">🎙️</button>
+            <div class="av-etiqueta-mic" id="etiquetaMic">Toca el micrófono y pregunta</div>
+        </div>
+        <div class="av-nota" id="notaSinSoporte" style="display:none;">
+            Tu navegador no soporta reconocimiento de voz (común en iOS Safari) — usa el campo de texto de abajo.
+        </div>
+
+        <div class="av-transcripcion" id="transcripcionEnVivo"></div>
+
+        <form class="av-form-texto" id="formTexto">
+            <input type="text" id="inputTexto" placeholder="O escribe tu pregunta aquí..." autocomplete="off">
+            <button type="submit">Preguntar</button>
+        </form>
+
+        <div class="av-cargando" id="avCargando" style="display:none;">Consultando…</div>
+
+        <div class="tarjeta">
+            <div class="av-respuesta" id="avRespuesta">Hazme una pregunta sobre deuda, agua programada hoy o ubicación de una toma.</div>
+        </div>
+
+        <div class="av-ejemplos">
+            <strong>Ejemplos:</strong><br>
+            "¿Cuál es la deuda de [nombre]?"<br>
+            "¿Cuánta agua está programada hoy en la toma [nombre] / en el canal Sur?"<br>
+            "¿Dónde está la toma [nombre]?"
+        </div>
+    </div>
+
+    <script>
+        var perfilActual = null;
+        var comisionKeyActual = null;
+        var reconocimiento = null; // instancia SpeechRecognition activa, o null si no hay soporte
+        var escuchandoAhora = false;
+
+        var elBtnMic = document.getElementById('btnMic');
+        var elEtiquetaMic = document.getElementById('etiquetaMic');
+        var elNotaSinSoporte = document.getElementById('notaSinSoporte');
+        var elTranscripcion = document.getElementById('transcripcionEnVivo');
+        var elFormTexto = document.getElementById('formTexto');
+        var elInputTexto = document.getElementById('inputTexto');
+        var elCargando = document.getElementById('avCargando');
+        var elRespuesta = document.getElementById('avRespuesta');
+        var elMensajeError = document.getElementById('mensajeError');
+
+        function mostrarError(texto) {
+            elMensajeError.textContent = texto;
+            elMensajeError.classList.add('visible');
+        }
+        function ocultarError() {
+            elMensajeError.textContent = '';
+            elMensajeError.classList.remove('visible');
+        }
+        function mostrarCargando(activo) {
+            elCargando.style.display = activo ? 'block' : 'none';
+        }
+        function mostrarRespuesta(texto) {
+            elRespuesta.textContent = texto;
+        }
+        function marcarEscuchando(activo) {
+            escuchandoAhora = activo;
+            elBtnMic.classList.toggle('av-escuchando', activo);
+            elEtiquetaMic.textContent = activo ? 'Escuchando… habla ahora' : 'Toca el micrófono y pregunta';
+        }
+
+        function hablar(texto) {
+            if (!('speechSynthesis' in window)) return;
+            window.speechSynthesis.cancel(); // evita solapar con una respuesta anterior
+            var u = new SpeechSynthesisUtterance(texto);
+            u.lang = 'es-PE';
+            window.speechSynthesis.speak(u);
+        }
+
+        function detectarSoporteVoz() {
+            var Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!Ctor) {
+                elBtnMic.style.display = 'none';
+                elEtiquetaMic.style.display = 'none';
+                elNotaSinSoporte.style.display = 'block';
+                return;
+            }
+            reconocimiento = new Ctor();
+            reconocimiento.lang = 'es-PE';
+            reconocimiento.continuous = false;
+            reconocimiento.interimResults = true;
+
+            reconocimiento.onresult = function (evento) {
+                var transcripcion = '';
+                for (var i = evento.resultIndex; i < evento.results.length; i++) {
+                    transcripcion += evento.results[i][0].transcript;
+                }
+                elTranscripcion.textContent = transcripcion;
+                var esFinal = evento.results[evento.results.length - 1].isFinal;
+                if (esFinal) responderPregunta(transcripcion);
+            };
+            reconocimiento.onerror = function (evento) {
+                marcarEscuchando(false);
+                mostrarError('No se pudo reconocer la voz (' + evento.error + '). Intenta de nuevo o usa el campo de texto.');
+            };
+            reconocimiento.onend = function () { marcarEscuchando(false); };
+        }
+
+        elBtnMic.addEventListener('click', function () {
+            if (!reconocimiento || escuchandoAhora) return;
+            ocultarError();
+            elTranscripcion.textContent = '';
+            marcarEscuchando(true);
+            try {
+                reconocimiento.start();
+            } catch (e) {
+                marcarEscuchando(false);
+                mostrarError('No se pudo iniciar el micrófono: ' + (e && e.message ? e.message : e));
+            }
+        });
+
+        elFormTexto.addEventListener('submit', function (ev) {
+            ev.preventDefault();
+            var texto = elInputTexto.value.trim();
+            if (!texto) return;
+            responderPregunta(texto);
+        });
+
+        // ── Manejador central ──
+        async function responderPregunta(textoOriginal) {
+            ocultarError();
+            mostrarCargando(true);
+            var interpretado = interpretarPreguntaVoz(textoOriginal);
+            var respuesta;
+            try {
+                if (interpretado.intent === 'deuda') {
+                    respuesta = await _responderDeuda(interpretado.parametro);
+                } else if (interpretado.intent === 'agua_hoy') {
+                    respuesta = await _responderAguaHoy(interpretado.parametro);
+                } else if (interpretado.intent === 'ubicacion') {
+                    respuesta = await _responderUbicacion(interpretado.parametro);
+                } else {
+                    respuesta = 'No entendí la pregunta: "' + textoOriginal + '". ' +
+                        'Puedes preguntar, por ejemplo: "¿cuál es la deuda de [nombre]?", ' +
+                        '"¿cuánta agua está programada hoy en la toma [nombre]?" o ' +
+                        '"¿dónde está la toma [nombre]?".';
+                }
+            } catch (e) {
+                respuesta = 'Ocurrió un error inesperado: ' + (e && e.message ? e.message : e);
+            }
+            mostrarCargando(false);
+            mostrarRespuesta(respuesta);
+            hablar(respuesta);
+        }
+
+        // ── Deuda ──
+        async function _responderDeuda(nombreBuscado) {
+            var resultado = await CusshmiDatos.buscarEnPadron(comisionKeyActual, nombreBuscado);
+            if (!resultado.ok) return 'No se pudo consultar el padrón: ' + (resultado.error || 'error desconocido') + '.';
+            var filas = resultado.resultados || [];
+            if (filas.length === 0) return 'No encontré a nadie llamado "' + nombreBuscado + '" en el padrón.';
+            if (filas.length > 1) {
+                var nombres = filas.slice(0, 3).map(function (f) { return f.nombre; }).join(', ');
+                return 'Encontré ' + filas.length + ' usuarios que coinciden con "' + nombreBuscado + '": ' + nombres +
+                    (filas.length > 3 ? ', entre otros' : '') + '. Precisa mejor el nombre.';
+            }
+            var f = filas[0];
+            var total = (parseFloat(f.deuda_total) || 0).toFixed(2);
+            return f.nombre + ' (toma ' + (f.toma_nombre || 'sin toma') + ') tiene una deuda total de S/ ' + total + '.' +
+                (f.al_dia ? ' Está al día.' : ' No está al día.');
+        }
+
+        // ── Agua programada hoy ──
+        var _AV_DIAS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+
+        function _avObtenerLunesActual() {
+            var hoy = new Date();
+            var diaSemana = hoy.getDay();
+            var offsetHastaLunes = diaSemana === 0 ? -6 : 1 - diaSemana;
+            var lunes = new Date(hoy);
+            lunes.setDate(hoy.getDate() + offsetHastaLunes);
+            var y = lunes.getFullYear();
+            var m = String(lunes.getMonth() + 1).padStart(2, '0');
+            var d = String(lunes.getDate()).padStart(2, '0');
+            return y + '-' + m + '-' + d;
+        }
+
+        async function _responderAguaHoy(param) {
+            if (param.tipo === 'desconocido') {
+                return 'No reconocí la toma o canal "' + param.textoOriginal + '". Intenta con el nombre exacto de la toma, o di "canal Sur" para el total.';
+            }
+            var claveHoy = _AV_DIAS[new Date().getDay()];
+            var semanaInicio = _avObtenerLunesActual();
+            var resultado = await CusshmiDatos.cargarTodasLasProgramaciones(comisionKeyActual, semanaInicio);
+            if (!resultado.ok) return 'No se pudo cargar la programación de la semana.';
+            var programaciones = resultado.programaciones || [];
+            if (programaciones.length === 0) return 'No hay ninguna toma programada esta semana.';
+
+            if (param.tipo === 'canal') {
+                var tomasRio = (typeof TOMAS_ORDEN_AL_FINAL !== 'undefined' ? TOMAS_ORDEN_AL_FINAL : []).map(function (t) { return t.toUpperCase(); });
+                var volumenTotal = 0, tomasConAgua = 0;
+                programaciones.forEach(function (p) {
+                    if (tomasRio.indexOf((p.toma || '').toUpperCase()) !== -1) return; // excluye Río Chira
+                    var detalle = p.turno && p.turno.caudalesPorDiaDetallado ? p.turno.caudalesPorDiaDetallado[claveHoy] : null;
+                    if (detalle) { volumenTotal += (detalle.volumen || 0); tomasConAgua++; }
+                });
+                if (tomasConAgua === 0) return 'Hoy no hay agua programada en el canal Sur.';
+                return 'Hoy el canal Sur tiene ' + volumenTotal.toFixed(0) + ' metros cúbicos programados, repartidos en ' + tomasConAgua + ' toma(s).';
+            }
+
+            // param.tipo === 'toma'
+            var prog = programaciones.find(function (p) { return (p.toma || '').toUpperCase() === param.valor.toUpperCase(); });
+            if (!prog) return 'La toma ' + param.valor + ' no tiene programación esta semana.';
+            var detalleToma = prog.turno && prog.turno.caudalesPorDiaDetallado ? prog.turno.caudalesPorDiaDetallado[claveHoy] : null;
+            if (!detalleToma) return 'Hoy la toma ' + param.valor + ' no tiene agua programada.';
+            return 'Hoy la toma ' + param.valor + ' tiene ' + (detalleToma.volumen || 0).toFixed(0) + ' metros cúbicos programados, en ' +
+                (detalleToma.horas || 0) + ' horas de riego.';
+        }
+
+        // ── Ubicación / ruta ──
+        async function _responderUbicacion(param) {
+            if (param.tipo === 'desconocido') {
+                return 'No reconocí de qué toma hablas ("' + param.textoOriginal + '"). Intenta con el nombre exacto de la toma.';
+            }
+            var resultado = await CusshmiDatos.listarRegistrosInventarioTomasDeToma(comisionKeyActual, param.valor);
+            if (!resultado.ok) return 'No se pudo consultar el inventario de la toma ' + param.valor + ': ' + (resultado.error || 'error desconocido') + '.';
+            var registros = resultado.registros || [];
+            var conCoordenadas = registros.find(function (r) { return r.este != null && r.norte != null; });
+            if (!conCoordenadas) return 'La toma ' + param.valor + ' no tiene coordenadas registradas todavía en el inventario.';
+
+            var geo = utm17SALatLon(conCoordenadas.este, conCoordenadas.norte);
+            var url = 'https://www.google.com/maps/dir/?api=1&destination=' + geo.lat + ',' + geo.lon;
+            window.open(url, '_blank');
+            return 'Abriendo la ruta a la toma ' + param.valor + '.';
+        }
+
+        (async function iniciar() {
+            if (typeof CusshmiAuth === 'undefined') { location.href = 'index.html'; return; }
+            var resultado = await CusshmiAuth.recuperarSesion();
+            if (!resultado.ok) { location.href = 'index.html'; return; }
+            perfilActual = resultado.perfil;
+            comisionKeyActual = perfilActual.comisionClave;
+            detectarSoporteVoz();
+        })();
+    </script>
+</body>
+</html>
