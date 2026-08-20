@@ -86,6 +86,40 @@ function _avResolverTomaConContexto(norm, contexto) {
     return resuelto;
 }
 
+// ── Día objetivo para preguntas de agua/riego: "hoy" (por defecto),
+// "mañana", "pasado mañana", o el nombre de cualquier día de la semana
+// ("domingo", "el lunes"...). Las claves de caudalesPorDiaDetallado ya
+// son estos mismos nombres en español sin tilde, así que no hace falta
+// traducir nada más allá de calcular a qué fecha corresponde.
+const _AV_DIAS_ABS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']; // indexado como Date.getDay()
+
+function _avResolverDiaObjetivo(norm) {
+    let offsetDias = null;
+    if (/\bpasado\s+manana\b/.test(norm)) offsetDias = 2;
+    else if (/\bmanana\b/.test(norm)) offsetDias = 1;
+    else if (/\bhoy\b/.test(norm)) offsetDias = 0;
+
+    if (offsetDias === null) {
+        // Nombre de día explícito ("domingo", "el lunes"...) -> la próxima
+        // ocurrencia de ese día (hoy mismo si hoy ES ese día).
+        const hoy = new Date();
+        for (let i = 0; i < _AV_DIAS_ABS.length; i++) {
+            if (new RegExp('\\b' + _AV_DIAS_ABS[i] + '\\b').test(norm)) {
+                offsetDias = ((i - hoy.getDay()) + 7) % 7;
+                break;
+            }
+        }
+    }
+    if (offsetDias === null) offsetDias = 0; // sin mención explícita: "hoy" por defecto
+
+    const fecha = new Date();
+    fecha.setDate(fecha.getDate() + offsetDias);
+    const claveDia = _AV_DIAS_ABS[fecha.getDay()];
+    const etiqueta = offsetDias === 0 ? 'Hoy' : offsetDias === 1 ? 'Mañana' : offsetDias === 2 ? 'Pasado mañana' : 'El ' + claveDia;
+    const y = fecha.getFullYear(), m = String(fecha.getMonth() + 1).padStart(2, '0'), d = String(fecha.getDate()).padStart(2, '0');
+    return { claveDia, etiqueta, offsetDias, fechaISO: y + '-' + m + '-' + d };
+}
+
 // Palabras que pueden aparecer justo después de "deuda"/"debe" pero que
 // describen QUÉ deuda (no A QUIÉN) — ej. "¿y su deuda atrasada?". Si el
 // extractor "captura" una de estas solas, no es un nombre real: se
@@ -122,10 +156,14 @@ function _avExtraerNombreDeuda(norm) {
  * Interpreta una pregunta en español (texto crudo, con o sin tildes/signos)
  * y devuelve la intención estructurada:
  *   - { intent: 'deuda', parametro: '<nombre buscado>' }
- *   - { intent: 'agua_hoy', parametro: { tipo:'canal'|'toma'|'desconocido', valor, textoOriginal, deContexto? } }
+ *   - { intent: 'agua_hoy', parametro: { tipo:'canal'|'toma'|'desconocido', valor, textoOriginal, deContexto?, dia } }
  *   - { intent: 'ubicacion', parametro: { tipo:'toma'|'desconocido', valor, textoOriginal, deContexto? } }
- *   - { intent: 'info_toma', parametro: { tipo:'canal'|'toma'|'desconocido', valor, textoOriginal, deContexto? } }
+ *   - { intent: 'info_toma', parametro: { tipo:'canal'|'toma'|'desconocido', valor, textoOriginal, deContexto?, dia } }
  *   - { intent: 'desconocido', parametro: '<texto original>' }
+ *
+ * `dia` (en agua_hoy/info_toma): { claveDia:'lunes'..'domingo', etiqueta:'Hoy'|'Mañana'|..., offsetDias, fechaISO } —
+ * "hoy" por defecto si la pregunta no menciona ningún día; reconoce "mañana",
+ * "pasado mañana" y cualquier nombre de día de la semana.
  *
  * `contexto` (opcional): { ultimaToma: 'SD3'|null, ultimaPersona: 'Juan Pérez'|null } —
  * lo último resuelto con éxito en la conversación, para preguntas de seguimiento
@@ -137,7 +175,7 @@ function interpretarPreguntaVoz(textoCrudo, contexto) {
     if (!norm) return { intent: 'desconocido', parametro: original };
 
     const tieneUbicacion = /\b(donde|ubicacion|ubicad[oa]|llegar|llego|ruta|queda|situad[oa]|encuentra|localizacion|posicion)\b/.test(norm);
-    const tieneAgua = /\b(agua|riego|regando|regadio)\b/.test(norm);
+    const tieneAgua = /\b(agua|riego|regando|regadio|caudal)\b/.test(norm);
     const tieneDeudaKw = /\b(deuda|debe|debo)\b/.test(norm);
     const tieneInfo = /\b(informacion|info|cuentame|hablame|datos de)\b/.test(norm);
 
@@ -151,7 +189,9 @@ function interpretarPreguntaVoz(textoCrudo, contexto) {
         return { intent: 'ubicacion', parametro };
     }
     if (tieneAgua) {
-        return { intent: 'agua_hoy', parametro: _avResolverTomaConContexto(norm, contexto) };
+        const resuelto = _avResolverTomaConContexto(norm, contexto);
+        resuelto.dia = _avResolverDiaObjetivo(norm);
+        return { intent: 'agua_hoy', parametro: resuelto };
     }
     if (tieneDeudaKw) {
         let nombre = _avExtraerNombreDeuda(norm);
@@ -163,7 +203,10 @@ function interpretarPreguntaVoz(textoCrudo, contexto) {
     }
     if (tieneInfo) {
         const resuelto = _avResolverTomaConContexto(norm, contexto);
-        if (resuelto.tipo !== 'desconocido') return { intent: 'info_toma', parametro: resuelto };
+        if (resuelto.tipo !== 'desconocido') {
+            resuelto.dia = _avResolverDiaObjetivo(norm);
+            return { intent: 'info_toma', parametro: resuelto };
+        }
     }
     return { intent: 'desconocido', parametro: original };
 }

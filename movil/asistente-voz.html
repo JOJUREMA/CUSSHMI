@@ -306,70 +306,106 @@
         }
 
         // ── Deuda ──
+        // Búsqueda tolerante al orden nombre/apellido: en el padrón, los usuarios suelen
+        // guardarse "Apellido1 Apellido2 Nombre1 Nombre2" (formato peruano), pero al hablar
+        // es natural decir "Nombre Apellido" — un ilike de la frase completa ("juan perez")
+        // nunca encuentra "PEREZ RUIZ JUAN CARLOS" porque las palabras no están contiguas en
+        // ese orden. Se busca con la palabra más distintiva (la más larga, casi siempre un
+        // apellido) para traer un grupo amplio de la misma consulta ya existente
+        // (buscarEnPadron, sin tocarla), y se filtra localmente por los candidatos que
+        // contienen TODAS las palabras dichas, sin importar el orden.
         async function _responderDeuda(nombreBuscado) {
-            var resultado = await CusshmiDatos.buscarEnPadron(comisionKeyActual, nombreBuscado);
-            if (!resultado.ok) return { texto: 'No se pudo consultar el padrón: ' + (resultado.error || 'error desconocido') + '.' };
-            var filas = resultado.resultados || [];
-            if (filas.length === 0) return { texto: 'No encontré a nadie llamado "' + nombreBuscado + '" en el padrón.' };
-            if (filas.length > 1) {
-                var nombres = filas.slice(0, 3).map(function (f) { return f.nombre; }).join(', ');
-                return { texto: 'Encontré ' + filas.length + ' usuarios que coinciden con "' + nombreBuscado + '": ' + nombres +
-                    (filas.length > 3 ? ', entre otros' : '') + '. Precisa mejor el nombre.' };
+            var palabras = nombreBuscado.split(/\s+/).filter(Boolean);
+            var candidatos = [];
+            var huboError = false, mensajeError = '';
+
+            if (palabras.length <= 1) {
+                var r = await CusshmiDatos.buscarEnPadron(comisionKeyActual, nombreBuscado);
+                if (!r.ok) { huboError = true; mensajeError = r.error; } else { candidatos = r.resultados || []; }
+            } else {
+                var palabraGuia = palabras.slice().sort(function (a, b) { return b.length - a.length; })[0];
+                var r2 = await CusshmiDatos.buscarEnPadron(comisionKeyActual, palabraGuia);
+                if (!r2.ok) {
+                    huboError = true; mensajeError = r2.error;
+                } else {
+                    candidatos = (r2.resultados || []).filter(function (f) {
+                        var nombreNorm = _avQuitarTildes((f.nombre || '').toLowerCase());
+                        return palabras.every(function (p) { return nombreNorm.indexOf(_avQuitarTildes(p)) !== -1; });
+                    });
+                    // Si ninguna de las palabras coincidió con la búsqueda amplia, se intenta la
+                    // frase literal tal cual (por si el nombre sí está guardado en ese orden).
+                    if (candidatos.length === 0) {
+                        var r3 = await CusshmiDatos.buscarEnPadron(comisionKeyActual, nombreBuscado);
+                        if (r3.ok) candidatos = r3.resultados || [];
+                    }
+                }
             }
-            var f = filas[0];
+
+            if (huboError) return { texto: 'No se pudo consultar el padrón: ' + (mensajeError || 'error desconocido') + '.' };
+            if (candidatos.length === 0) return { texto: 'No encontré a nadie llamado "' + nombreBuscado + '" en el padrón.' };
+            if (candidatos.length > 1) {
+                var nombres = candidatos.slice(0, 3).map(function (f) { return f.nombre; }).join(', ');
+                return { texto: 'Encontré ' + candidatos.length + ' usuarios que coinciden con "' + nombreBuscado + '": ' + nombres +
+                    (candidatos.length > 3 ? ', entre otros' : '') + '. Precisa mejor el nombre.' };
+            }
+            var f = candidatos[0];
             var total = (parseFloat(f.deuda_total) || 0).toFixed(2);
             var texto = f.nombre + ' (toma ' + (f.toma_nombre || 'sin toma') + ') tiene una deuda total de S/ ' + total + '.' +
                 (f.al_dia ? ' Está al día.' : ' No está al día.');
             return { texto: texto, ultimaPersona: f.nombre };
         }
 
-        // ── Agua programada hoy ──
-        var _AV_DIAS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-
-        function _avObtenerLunesActual() {
-            var hoy = new Date();
-            var diaSemana = hoy.getDay();
+        // ── Agua/caudal programado (hoy, mañana, o cualquier día que haya pedido) ──
+        function _avObtenerLunesDe(fecha) {
+            var d = new Date(fecha);
+            var diaSemana = d.getDay();
             var offsetHastaLunes = diaSemana === 0 ? -6 : 1 - diaSemana;
-            var lunes = new Date(hoy);
-            lunes.setDate(hoy.getDate() + offsetHastaLunes);
-            var y = lunes.getFullYear();
-            var m = String(lunes.getMonth() + 1).padStart(2, '0');
-            var d = String(lunes.getDate()).padStart(2, '0');
-            return y + '-' + m + '-' + d;
+            d.setDate(d.getDate() + offsetHastaLunes);
+            var y = d.getFullYear();
+            var m = String(d.getMonth() + 1).padStart(2, '0');
+            var dd = String(d.getDate()).padStart(2, '0');
+            return y + '-' + m + '-' + dd;
+        }
+
+        // Texto del caudal en L/s y m³/s a partir del m³/s guardado (caudalesPorDiaDetallado[].caudal).
+        function _avTextoCaudal(caudalM3s) {
+            var c = parseFloat(caudalM3s) || 0;
+            return (c * 1000).toFixed(0) + ' litros por segundo (' + c.toFixed(3) + ' m³/s)';
         }
 
         async function _responderAguaHoy(param) {
             if (param.tipo === 'desconocido') {
                 return { texto: 'No reconocí la toma o canal "' + param.textoOriginal + '". Intenta con el nombre exacto de la toma, o di "canal Sur" para el total.' };
             }
-            var claveHoy = _AV_DIAS[new Date().getDay()];
-            var semanaInicio = _avObtenerLunesActual();
+            // dia: siempre viene resuelto por interpretarPreguntaVoz (por defecto "hoy" si no se mencionó ninguno).
+            var dia = param.dia || { claveDia: _AV_DIAS_ABS[new Date().getDay()], etiqueta: 'Hoy', offsetDias: 0, fechaISO: null };
+            var semanaInicio = dia.fechaISO ? _avObtenerLunesDe(dia.fechaISO + 'T12:00:00') : _avObtenerLunesDe(new Date());
             var resultado = await CusshmiDatos.cargarTodasLasProgramaciones(comisionKeyActual, semanaInicio);
-            if (!resultado.ok) return { texto: 'No se pudo cargar la programación de la semana.' };
+            if (!resultado.ok) return { texto: 'No se pudo cargar la programación de esa semana.' };
             var programaciones = resultado.programaciones || [];
             var ultimaToma = param.tipo === 'toma' ? param.valor : undefined; // "canal" no fija una toma puntual en el contexto
-            if (programaciones.length === 0) return { texto: 'No hay ninguna toma programada esta semana.', ultimaToma: ultimaToma };
+            if (programaciones.length === 0) return { texto: dia.etiqueta + ' no hay ninguna toma programada.', ultimaToma: ultimaToma };
 
             if (param.tipo === 'canal') {
                 var tomasRio = (typeof TOMAS_ORDEN_AL_FINAL !== 'undefined' ? TOMAS_ORDEN_AL_FINAL : []).map(function (t) { return t.toUpperCase(); });
                 var volumenTotal = 0, tomasConAgua = 0;
                 programaciones.forEach(function (p) {
                     if (tomasRio.indexOf((p.toma || '').toUpperCase()) !== -1) return; // excluye Río Chira
-                    var detalle = p.turno && p.turno.caudalesPorDiaDetallado ? p.turno.caudalesPorDiaDetallado[claveHoy] : null;
+                    var detalle = p.turno && p.turno.caudalesPorDiaDetallado ? p.turno.caudalesPorDiaDetallado[dia.claveDia] : null;
                     if (detalle) { volumenTotal += (detalle.volumen || 0); tomasConAgua++; }
                 });
-                if (tomasConAgua === 0) return { texto: 'Hoy no hay agua programada en el canal Sur.' };
-                return { texto: 'Hoy el canal Sur tiene ' + volumenTotal.toFixed(0) + ' metros cúbicos programados, repartidos en ' + tomasConAgua + ' toma(s).' };
+                if (tomasConAgua === 0) return { texto: dia.etiqueta + ' no hay agua programada en el canal Sur.' };
+                return { texto: dia.etiqueta + ' el canal Sur tiene ' + volumenTotal.toFixed(0) + ' metros cúbicos programados, repartidos en ' + tomasConAgua + ' toma(s).' };
             }
 
             // param.tipo === 'toma'
             var prog = programaciones.find(function (p) { return (p.toma || '').toUpperCase() === param.valor.toUpperCase(); });
-            if (!prog) return { texto: 'La toma ' + param.valor + ' no tiene programación esta semana.', ultimaToma: param.valor };
-            var detalleToma = prog.turno && prog.turno.caudalesPorDiaDetallado ? prog.turno.caudalesPorDiaDetallado[claveHoy] : null;
-            if (!detalleToma) return { texto: 'Hoy la toma ' + param.valor + ' no tiene agua programada.', ultimaToma: param.valor };
+            if (!prog) return { texto: 'La toma ' + param.valor + ' no tiene programación esa semana.', ultimaToma: param.valor };
+            var detalleToma = prog.turno && prog.turno.caudalesPorDiaDetallado ? prog.turno.caudalesPorDiaDetallado[dia.claveDia] : null;
+            if (!detalleToma) return { texto: dia.etiqueta + ' la toma ' + param.valor + ' no tiene agua programada.', ultimaToma: param.valor };
             return {
-                texto: 'Hoy la toma ' + param.valor + ' tiene ' + (detalleToma.volumen || 0).toFixed(0) + ' metros cúbicos programados, en ' +
-                    (detalleToma.horas || 0) + ' horas de riego.',
+                texto: dia.etiqueta + ' la toma ' + param.valor + ' tiene ' + (detalleToma.volumen || 0).toFixed(0) + ' metros cúbicos programados, ' +
+                    'con un caudal de ' + _avTextoCaudal(detalleToma.caudal) + ', en ' + (detalleToma.horas || 0) + ' horas de riego.',
                 ultimaToma: param.valor,
             };
         }
