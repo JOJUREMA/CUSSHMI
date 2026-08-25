@@ -592,7 +592,8 @@
         const aplicarClave = (query) => {
             const q = query.eq('programacion_id', datos.programacionId)
                 .eq('cultivo', datos.cultivo)
-                .eq('usuario_nombre', datos.usuarioNombre);
+                .eq('usuario_nombre', datos.usuarioNombre)
+                .eq('clave_dia', datos.claveDia || '');
             return unidadCatastral ? q.eq('unidad_catastral', unidadCatastral) : q.is('unidad_catastral', null);
         };
 
@@ -617,6 +618,7 @@
             cultivo: datos.cultivo,
             usuario_nombre: datos.usuarioNombre,
             unidad_catastral: unidadCatastral,
+            clave_dia: datos.claveDia || '',
             comision_nombre: datos.comisionNombre || '',
             toma_nombre: datos.tomaNombre || '',
             semana_inicio: datos.semanaInicio,

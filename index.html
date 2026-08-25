@@ -15445,7 +15445,87 @@ function mostrarAnexoG3(modoManual) {
             // (toma con varios cultivos y sin desglose diario propio, dato guardado
             // antes de esta función), se deja el volumen mínimo calculado por área,
             // igual que el comportamiento anterior — sin escalar a ciegas.
+
+            // ── Islas de días NO consecutivos (ej. Miércoles + Sábado, con Jueves/Viernes
+            // inactivos): el motor de turnos trata cada área como UN tramo continuo que debe
+            // caber en un solo día — con días no consecutivos eso hacía que el turno saltara
+            // semanas enteras buscando dónde caber. El modelo correcto (confirmado con el
+            // usuario contra sus números reales) es que CADA isla de días consecutivos es un
+            // turno independiente: el volumen semanal de cada área se reparte proporcional a
+            // la capacidad (caudal×horas×3600) de cada isla, y dentro de cada isla las áreas
+            // riegan una tras otra por orden, igual que hoy. Con 1 sola isla (caso común) este
+            // bloque no cambia nada — incluso el `if (islas.length > 1)` es un no-op garantizado.
+            const islas = agruparDiasEnIslas(diasDelCultivo);
+            if (islas.length > 1) {
+                const capacidadPorIsla = islas.map(isla => {
+                    let cap = 0;
+                    isla.forEach(offset => {
+                        const mapaCaudal = caudalPorCultivoPorDiaOffset[offset];
+                        const mapaHoras = horasPorCultivoPorDiaOffset[offset];
+                        const caudalDia = (mapaCaudal && Number.isFinite(mapaCaudal[claveCultivo]))
+                            ? mapaCaudal[claveCultivo]
+                            : (soloUnCultivo && Number.isFinite(caudalPorDiaOffset[offset]) ? caudalPorDiaOffset[offset] : null);
+                        const horasDia = (mapaHoras && Number.isFinite(mapaHoras[claveCultivo]))
+                            ? mapaHoras[claveCultivo]
+                            : (soloUnCultivo && Number.isFinite(horasPorDiaOffset[offset]) ? horasPorDiaOffset[offset] : null);
+                        if (caudalDia !== null && horasDia !== null) cap += caudalDia * horasDia * 3600;
+                    });
+                    return cap;
+                });
+                const capacidadTotal = capacidadPorIsla.reduce((s, c) => s + c, 0);
+                if (capacidadTotal > 0) {
+                    const indicesOriginales = [];
+                    usuariosFinales.forEach((u, idx) => { if (_normCultivo(u.cultivo) === claveCultivo) indicesOriginales.push(idx); });
+
+                    const nuevasEntradas = [];
+                    usuariosCultivo.forEach(uOriginal => {
+                        islas.forEach((isla, idxIsla) => {
+                            const fraccion = capacidadPorIsla[idxIsla] / capacidadTotal;
+                            nuevasEntradas.push(Object.assign({}, uOriginal, {
+                                volCorregido: uOriginal.volCorregido * fraccion,
+                                qTeorico: uOriginal.qTeorico * fraccion,
+                                tiempo: uOriginal.tiempo * fraccion,
+                                claveDia: claveCultivo + '#isla' + idxIsla,
+                            }));
+                        });
+                    });
+
+                    // Reemplaza las entradas originales de este cultivo por las N copias
+                    // expandidas, en el mismo punto (primer índice original) — preserva el
+                    // orden relativo del resto de usuariosFinales.
+                    const primerIdx = indicesOriginales[0];
+                    for (let i = indicesOriginales.length - 1; i >= 0; i--) usuariosFinales.splice(indicesOriginales[i], 1);
+                    usuariosFinales.splice(primerIdx, 0, ...nuevasEntradas);
+
+                    // Mapas espejo para las claves virtuales — SIN BORRAR NUNCA la clave real
+                    // (mostrarAvisoCaudalCultivoG3 valida horas programadas por el nombre real;
+                    // borrarla rompería ese aviso). El CAUDAL nunca recibe clave virtual — el
+                    // caudal siempre se resuelve por el nombre real del cultivo.
+                    islas.forEach((isla, idxIsla) => {
+                        const claveVirtual = claveCultivo + '#isla' + idxIsla;
+                        diasActivosPorCultivo[claveVirtual] = isla.slice();
+                        isla.forEach(offset => {
+                            const mapaHoras = horasPorCultivoPorDiaOffset[offset];
+                            const horasReal = (mapaHoras && Number.isFinite(mapaHoras[claveCultivo]))
+                                ? mapaHoras[claveCultivo]
+                                : (soloUnCultivo && Number.isFinite(horasPorDiaOffset[offset]) ? horasPorDiaOffset[offset] : null);
+                            if (horasReal !== null) {
+                                horasPorCultivoPorDiaOffset[offset] = horasPorCultivoPorDiaOffset[offset] || {};
+                                horasPorCultivoPorDiaOffset[offset][claveVirtual] = horasReal;
+                            }
+                            const mapaOrden = ordenPorCultivoPorDiaOffset[offset];
+                            if (mapaOrden && Number.isFinite(mapaOrden[claveCultivo])) {
+                                mapaOrden[claveVirtual] = mapaOrden[claveCultivo];
+                            }
+                        });
+                    });
+                }
+            }
         });
+
+        // Renumerar nOrden de todo usuariosFinales tras la posible expansión por islas de
+        // arriba — no-op si ninguna toma tuvo 2+ islas (el orden ya coincide con el original).
+        usuariosFinales.forEach((u, idx) => { u.nOrden = idx + 1; });
 
         // ── LOG DE DEPURACIÓN: programación por cultivo antes de generar el G-3 ──
         console.log(`%c[G3 · ${toma.toma}] Cultivos programados: ${toma.cultivos.length}`, 'font-weight:bold;color:#003876;');
@@ -15560,42 +15640,48 @@ function planificarOrdenG3(toma) {
         }
 
         const u = usuarios[i];
-        const clave = _normCultivo(u.cultivo);
-        inicializarCursor(clave);
+        // Nombre real (caudal SIEMPRE se resuelve por este) vs. clave de cursor/agrupamiento —
+        // con islas de días no consecutivos (mostrarAnexoG3), u.claveDia distingue "MELÓN#isla0"
+        // de "MELÓN#isla1" para no mezclar candidatos de islas distintas al rellenar huecos. Sin
+        // islas, u.claveDia es undefined y claveCursor === claveCultivoReal, idéntico a antes.
+        const claveCultivoReal = _normCultivo(u.cultivo);
+        const claveCursor = u.claveDia || claveCultivoReal;
+        inicializarCursor(claveCursor);
 
-        const inicioMinAbs = vt.ajustarADiaActivo(cursorPorCultivo[clave], clave);
-        let tiempoHrs = tiempoHrsSiInicia(inicioMinAbs, clave, u.volCorregido);
-        const cabe = vt.saltarSiNoCabeEnElDia(inicioMinAbs, tiempoHrs * 60, clave) === inicioMinAbs;
+        const inicioMinAbs = vt.ajustarADiaActivo(cursorPorCultivo[claveCursor], claveCursor);
+        let tiempoHrs = tiempoHrsSiInicia(inicioMinAbs, claveCultivoReal, u.volCorregido);
+        const cabe = vt.saltarSiNoCabeEnElDia(inicioMinAbs, tiempoHrs * 60, claveCursor) === inicioMinAbs;
 
         if (!cabe) {
-            // Buscar desde i+1 el primer usuario del MISMO cultivo cuya duración sí quepa en lo
-            // que resta del tramo actual (mismo inicioMinAbs/cursor para cualquier candidato de
-            // este cultivo, así que la comparación es directa).
+            // Buscar desde i+1 el primer usuario de la MISMA isla/cultivo cuya duración sí quepa
+            // en lo que resta del tramo actual (mismo inicioMinAbs/cursor para cualquier
+            // candidato de esta clave, así que la comparación es directa).
             let jEncontrado = -1;
             for (let j = i + 1; j < usuarios.length; j++) {
-                if (_normCultivo(usuarios[j].cultivo) !== clave) continue;
-                const tHrsJ = tiempoHrsSiInicia(inicioMinAbs, clave, usuarios[j].volCorregido);
-                if (vt.saltarSiNoCabeEnElDia(inicioMinAbs, tHrsJ * 60, clave) === inicioMinAbs) {
+                const uj = usuarios[j];
+                if ((uj.claveDia || _normCultivo(uj.cultivo)) !== claveCursor) continue;
+                const tHrsJ = tiempoHrsSiInicia(inicioMinAbs, _normCultivo(uj.cultivo), uj.volCorregido);
+                if (vt.saltarSiNoCabeEnElDia(inicioMinAbs, tHrsJ * 60, claveCursor) === inicioMinAbs) {
                     jEncontrado = j;
                     break;
                 }
             }
             if (jEncontrado !== -1) {
-                const [uj] = usuarios.splice(jEncontrado, 1);
-                usuarios.splice(i, 0, uj);
+                const [ujEncontrado] = usuarios.splice(jEncontrado, 1);
+                usuarios.splice(i, 0, ujEncontrado);
                 i--; // el i++ del for cancela este i--: se reintenta la MISMA posición con uj ya ahí
                 continue;
             }
-            // Nadie más del mismo cultivo cabe: se deja el comportamiento actual (el hueco queda
-            // sin llenar y recalcularProgramacionG3Desde saltará este usuario entero al siguiente
-            // día/tramo activo, tal como ya hace saltarSiNoCabeEnElDia hoy).
+            // Nadie más de la misma isla/cultivo cabe: se deja el comportamiento actual (el hueco
+            // queda sin llenar y recalcularProgramacionG3Desde saltará este usuario entero al
+            // siguiente día/tramo activo, tal como ya hace saltarSiNoCabeEnElDia hoy).
         }
 
-        // Avanzar el cursor simulado de este cultivo (mismo criterio que el cierre de grupo en
-        // recalcularProgramacionG3Desde, con currentGroupLen=1).
-        const inicioFinal = cabe ? inicioMinAbs : vt.saltarSiNoCabeEnElDia(inicioMinAbs, tiempoHrs * 60, clave);
-        if (!cabe) tiempoHrs = tiempoHrsSiInicia(inicioFinal, clave, u.volCorregido);
-        cursorPorCultivo[clave] = inicioFinal + tiempoHrs * 60;
+        // Avanzar el cursor simulado de esta isla/cultivo (mismo criterio que el cierre de grupo
+        // en recalcularProgramacionG3Desde, con currentGroupLen=1).
+        const inicioFinal = cabe ? inicioMinAbs : vt.saltarSiNoCabeEnElDia(inicioMinAbs, tiempoHrs * 60, claveCursor);
+        if (!cabe) tiempoHrs = tiempoHrsSiInicia(inicioFinal, claveCultivoReal, u.volCorregido);
+        cursorPorCultivo[claveCursor] = inicioFinal + tiempoHrs * 60;
     }
 
     usuarios.forEach((u, idx) => { u.nOrden = idx + 1; }); // mismo patrón que moverFilaG3
@@ -15705,7 +15791,10 @@ function renderizarTomaG3(tomaIdx) {
         });
     }
 
-    const totalArea = toma.usuarios.reduce((s,u) => s + u.area, 0);
+    // Área ÚNICA (un área con 2+ islas por días no consecutivos aparece varias veces en
+    // toma.usuarios — ver calcularAreaUnicaG3 — pero es la MISMA parcela física, se cuenta una
+    // sola vez). El volumen sí debe sumar todas las entradas (cada isla es un reparto real).
+    const totalArea = calcularAreaUnicaG3(toma.usuarios);
     const totalVolC = toma.usuarios.reduce((s,u) => s + u.volCorregido, 0);
     // El canal solo opera 168h/semana como máximo, sin importar cuántos cultivos la
     // comparten (cada uno usa su propia porción de caudal al mismo tiempo, no en
@@ -17069,6 +17158,7 @@ async function guardarHorarioG3EnSupabase(tomaIdx) {
             area: u.area,
             unidadCatastral: u.unidadCatastral,
             esNoApto: !!u.esNoApto,
+            claveDia: u.claveDia || '',
             caudalLs: parseFloat(caudalLs.toFixed(3)),
             tiempoHoras: parseFloat(tiempoHoras.toFixed(3)),
             volumenM3: parseFloat(volumenM3.toFixed(2)),
@@ -17286,6 +17376,15 @@ function construirVentanasG3(toma, horaInicioBaseMin) {
     function offsetSemana(diaOffsetAbs) {
         return ((diaOffsetAbs % 7) + 7) % 7;
     }
+    // Quita el sufijo "#islaN" de una clave de cultivo (ver mostrarAnexoG3, reparto por islas de
+    // días no consecutivos) — un cultivo con 2+ islas registra tanto su clave real como su(s)
+    // clave(s) virtual(es) en el mismo día; para no contar sus horas dos veces al calcular el
+    // desplazamiento de otro cultivo (ventanaDiaCultivo, más abajo) hay que deduplicar por esta
+    // identidad base antes de sumar. Para cultivos sin islas, claveBaseCultivo(x) === x siempre.
+    function claveBaseCultivo(clave) {
+        const idx = (clave || '').indexOf('#isla');
+        return idx === -1 ? clave : clave.slice(0, idx);
+    }
     // Siguiente día activo de un cultivo en offset ABSOLUTO: primero busca dentro de la misma
     // semana: si no queda ninguno, salta a la semana siguiente y toma el primer día activo de su
     // patrón semanal (el patrón se repite semana a semana mientras haga falta).
@@ -17330,9 +17429,15 @@ function construirVentanasG3(toma, horaInicioBaseMin) {
         const ordenMap = ordenPorCultivoPorDiaOffset[diaSemana];
         if (!esSimultaneoDia && claveCultivo && ordenMap && horasCultivoMap && Number.isFinite(ordenMap[claveCultivo])) {
             const miOrden = ordenMap[claveCultivo];
+            const miClaveBase = claveBaseCultivo(claveCultivo);
+            const yaContadas = new Set();
             Object.keys(ordenMap).forEach(otraClave => {
                 if (otraClave === claveCultivo) return;
+                const otraClaveBase = claveBaseCultivo(otraClave);
+                if (otraClaveBase === miClaveBase) return; // misma identidad real (islas del mismo cultivo que yo): no es "otro" cultivo
+                if (yaContadas.has(otraClaveBase)) return; // ya sumado vía su clave real o una isla anterior — no contar dos veces
                 if ((parseFloat(ordenMap[otraClave]) || 0) < miOrden) {
+                    yaContadas.add(otraClaveBase);
                     desplazamientoMin += (parseFloat(horasCultivoMap[otraClave]) || 0) * 60;
                 }
             });
@@ -17457,7 +17562,11 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         // cultivo a partir de lo que ya está renderizado antes de startIdx.
         for (let i = 0; i < startIdx; i++) {
             const uPrev = toma.usuarios[i];
-            const clave = _normCultivo(uPrev.cultivo);
+            // Islas de días no consecutivos (mostrarAnexoG3): cada isla del cultivo avanza su
+            // propio cursor — u.claveDia distingue "MELÓN#isla0" de "MELÓN#isla1" aunque ambas
+            // sean el mismo cultivo real. Sin islas, u.claveDia es undefined y esto es idéntico
+            // a antes (clave = nombre real del cultivo).
+            const clave = uPrev.claveDia || _normCultivo(uPrev.cultivo);
             const elTD = document.getElementById('terminoDia_' + tomaIdx + '_' + i);
             const terminoPrev = parseFloat(elTD?.getAttribute('data-minutos-termino'));
             if (Number.isFinite(terminoPrev)) {
@@ -17467,7 +17576,8 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
             }
         }
         if (typeof minutosInicioForzado === 'number' && Number.isFinite(minutosInicioForzado)) {
-            cursorPorCultivo[_normCultivo(toma.usuarios[startIdx].cultivo)] = minutosInicioForzado;
+            const uForzado = toma.usuarios[startIdx];
+            cursorPorCultivo[uForzado.claveDia || _normCultivo(uForzado.cultivo)] = minutosInicioForzado;
         }
     }
 
@@ -17488,7 +17598,12 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
     for (let uIdx = startIdx; uIdx < toma.usuarios.length; uIdx++) {
         const u = toma.usuarios[uIdx];
         const claveCultivoActual = _normCultivo(u.cultivo);
-        inicializarCursor(claveCultivoActual);
+        // Cursor por ISLA (mostrarAnexoG3, reparto proporcional de días no consecutivos): si el
+        // usuario tiene claveDia (2+ islas para su cultivo), su cursor de avance es propio de esa
+        // isla, no compartido con las demás islas del mismo cultivo. El caudal/tiempo siguen
+        // resolviéndose SIEMPRE por claveCultivoActual (nombre real), sin cambios más abajo.
+        const claveCursor = u.claveDia || claveCultivoActual;
+        inicializarCursor(claveCursor);
 
         const chkParalelo = document.getElementById('paralelo_' + tomaIdx + '_' + uIdx);
         const esParalelo  = uIdx > 0 && chkParalelo && chkParalelo.checked;
@@ -17496,7 +17611,7 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
         // Inicio del usuario: si es simultáneo, comparte el inicio del anterior; si no, usa el cursor
         // de SU PROPIO cultivo (ajustado para saltar al siguiente día activo si ya se agotaron las
         // horas del día actual).
-        let inicioMinAbs = esParalelo ? minutosInicio[uIdx - 1] : ajustarADiaActivo(cursorPorCultivo[claveCultivoActual], claveCultivoActual);
+        let inicioMinAbs = esParalelo ? minutosInicio[uIdx - 1] : ajustarADiaActivo(cursorPorCultivo[claveCursor], claveCursor);
 
         // Si inicia un grupo, calcular cuántos riegan simultáneamente (grupo = usuario actual + consecutivos con checkbox)
         if (!esParalelo) {
@@ -17550,7 +17665,7 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
             tiempoHrsAuto     = caudalUsuarioAuto > 0 ? u.volCorregido / caudalUsuarioAuto / 3600 : 0;
 
             if (esParalelo) break; // los turnos simultáneos siempre comparten el inicio del líder, nunca cambian de día
-            const inicioAjustado = saltarSiNoCabeEnElDia(inicioMinAbs, tiempoHrsAuto * 60, claveCultivoActual);
+            const inicioAjustado = saltarSiNoCabeEnElDia(inicioMinAbs, tiempoHrsAuto * 60, claveCursor);
             if (inicioAjustado === inicioMinAbs) break; // cabe entero en este día (o no hay más días activos): listo
             inicioMinAbs = inicioAjustado; // se movió entero al siguiente día activo: recalcular caudal/tiempo para ese día
         }
@@ -17674,7 +17789,7 @@ function recalcularProgramacionG3Desde(tomaIdx, startIdx, minutosInicioForzado) 
                     break;
                 }
             }
-            cursorPorCultivo[claveCultivoActual] = maxTermino;
+            cursorPorCultivo[claveCursor] = maxTermino;
         }
     }
 
@@ -17912,13 +18027,23 @@ function toggleExcluirUsuarioG3(tomaIdx, uIdx, excluir) {
     // Recalcular totales
     const tbody = document.getElementById('tbodyG3-' + tomaIdx);
     if (!tbody) return;
-    let totalArea = 0, totalVol = 0;
+    const toma = window._tomasG3Data && window._tomasG3Data[tomaIdx];
+    let totalVol = 0;
+    const usuariosVisibles = [];
     tbody.querySelectorAll('tr[id^="filaG3-"]').forEach(f => {
         if (f.style.display === 'none') return;
         const celdas = f.querySelectorAll('td');
-        totalArea += parseFloat(celdas[2]?.textContent) || 0;
         totalVol += parseFloat(celdas[3]?.textContent) || 0;
+        // Área ÚNICA (no doble-contada cuando un área tiene 2+ islas, ver
+        // calcularAreaUnicaG3/mostrarAnexoG3): se recalcula desde toma.usuarios, no desde el
+        // texto de la celda, para poder deduplicar por unidad catastral.
+        if (toma) {
+            const idx = parseInt(f.id.split('-').pop(), 10);
+            if (Number.isFinite(idx) && toma.usuarios[idx]) usuariosVisibles.push(toma.usuarios[idx]);
+        }
     });
+    const totalArea = toma ? calcularAreaUnicaG3(usuariosVisibles)
+        : usuariosVisibles.reduce((s, u) => s + (parseFloat(u.area) || 0), 0);
     const ta = document.getElementById('totalAreaG3-' + tomaIdx);
     const tv = document.getElementById('totalVolG3-' + tomaIdx);
     if (ta) ta.textContent = totalArea.toFixed(2);
@@ -18523,7 +18648,9 @@ async function exportarG3Excel() {
     // celdasTotal[2] terminaba leyendo el Volumen (no el Área) y celdasTotal[3] el <td> que
     // contiene el <input> de Tiempo (textContent vacío, siempre 0.00).
     const inpTotalTiempo = document.getElementById('totalTiempoG3-' + tomaIdx);
-    const totalAreaCalc = toma.usuarios.reduce((s, u) => s + (parseFloat(u.area) || 0), 0);
+    // Área ÚNICA (no doble-contada por un área con 2+ islas, ver calcularAreaUnicaG3); el
+    // Volumen sí suma TODAS las filas (cada isla es un reparto real del volumen semanal).
+    const totalAreaCalc = calcularAreaUnicaG3(toma.usuarios);
     const totalVolCalc = toma.usuarios.reduce((s, u) => s + (parseFloat(u.volCorregido) || 0), 0);
 
     ws.mergeCells(r, 1, r, 2);

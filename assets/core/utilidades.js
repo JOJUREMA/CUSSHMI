@@ -141,3 +141,36 @@ function parsearFechaHoraTexto(texto) {
         parseInt(hm[0], 10) || 0, parseInt(hm[1], 10) || 0
     );
 }
+
+// Agrupa offsets de día (0=lunes..6=domingo) en "islas" de días CONSECUTIVOS. Días activos de
+// un cultivo no consecutivos en la semana (ej. Miércoles + Sábado) generan 2+ islas; días
+// seguidos (ej. Lunes-Martes-Miércoles) generan 1 sola isla. Pura y determinista.
+function agruparDiasEnIslas(diasOffsets) {
+    if (!Array.isArray(diasOffsets) || diasOffsets.length === 0) return [];
+    const ordenados = Array.from(new Set(diasOffsets.map(Number))).sort((a, b) => a - b);
+    const islas = [[ordenados[0]]];
+    for (let i = 1; i < ordenados.length; i++) {
+        const actual = ordenados[i];
+        const islaActual = islas[islas.length - 1];
+        if (actual === islaActual[islaActual.length - 1] + 1) islaActual.push(actual);
+        else islas.push([actual]);
+    }
+    return islas;
+}
+
+// Área total ÚNICA (ha) de usuarios del G-3, sin contar dos veces la misma área física cuando
+// aparece repetida por "isla" (ver u.claveDia en mostrarAnexoG3): el VOLUMEN debe sumar todas
+// las entradas (reparto real), el ÁREA debe contarse una sola vez por área física.
+function calcularAreaUnicaG3(usuarios) {
+    const vistos = new Set();
+    let total = 0;
+    (usuarios || []).forEach(u => {
+        const unidadValida = u.unidadCatastral && u.unidadCatastral !== '-';
+        const clave = unidadValida ? ('UC|' + u.unidadCatastral)
+            : ('NAC|' + (u.nombre || '') + '|' + (parseFloat(u.area) || 0) + '|' + _normCultivo(u.cultivo));
+        if (vistos.has(clave)) return;
+        vistos.add(clave);
+        total += parseFloat(u.area) || 0;
+    });
+    return total;
+}

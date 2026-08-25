@@ -454,7 +454,8 @@
                 horasTotal: datos.horasTotal,
                 volumenM3: datos.volumenEntregar,
                 inicioTexto: u.inicioTexto || null,
-                terminoTexto: u.terminoTexto || null
+                terminoTexto: u.terminoTexto || null,
+                claveDia: u.claveDia || ''
             };
 
             elVistaDetalle.style.display = 'none';
@@ -575,7 +576,8 @@
                 horasTotal: g4Actual.horasTotal,
                 volumenM3: g4Actual.volumenM3,
                 inicioTexto: g4Actual.inicioTexto,
-                terminoTexto: g4Actual.terminoTexto
+                terminoTexto: g4Actual.terminoTexto,
+                claveDia: g4Actual.claveDia
             });
 
             if (!resultado.ok) {
