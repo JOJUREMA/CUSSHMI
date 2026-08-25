@@ -15416,13 +15416,13 @@ function mostrarAnexoG3(modoManual) {
             // si quedó seleccionada/registrada más de una vez para este cultivo (ej. toma.cultivos
             // trae 2 filas con el mismo nombre de cultivo, cada una disparando su propia llamada a
             // obtenerUsuariosG3Seleccionados con la misma selección). Mismo criterio de identidad
-            // que calcularAreaUnicaG3 (assets/core/utilidades.js).
+            // que calcularAreaUnicaG3 (assets/core/utilidades.js, vía claveAreaFisicaG3) — usa la
+            // unidad catastral SOLO si es real, para no fusionar áreas distintas de un mismo
+            // usuario que comparten un mismo placeholder de UC (ej. "000000", sin asignar aún).
             const vistosArea = new Set();
             const usuariosCultivo = [];
             usuariosCultivoRaw.forEach(u => {
-                const unidadValida = u.unidadCatastral && u.unidadCatastral !== '-';
-                const claveArea = unidadValida ? ('UC|' + u.unidadCatastral)
-                    : ('NAC|' + (u.nombre || '') + '|' + (parseFloat(u.area) || 0) + '|' + claveCultivo);
+                const claveArea = claveAreaFisicaG3(u);
                 if (vistosArea.has(claveArea)) return;
                 vistosArea.add(claveArea);
                 usuariosCultivo.push(u);

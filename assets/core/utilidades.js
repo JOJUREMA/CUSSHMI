@@ -158,6 +158,30 @@ function agruparDiasEnIslas(diasOffsets) {
     return islas;
 }
 
+// Unidad catastral "real" — descarta valores placeholder ("-", vacío, o todo ceros como
+// "000000") que varios usuarios distintos comparten cuando aún no se les asignó una UC real.
+// Tratar un placeholder como identificador único fusionaría áreas físicas DISTINTAS que
+// coinciden solo en el placeholder — hay que caer al criterio por nombre+área en ese caso.
+function _esUnidadCatastralValida(uc) {
+    if (!uc) return false;
+    const s = uc.toString().trim();
+    if (!s || s === '-') return false;
+    return !/^0+$/.test(s);
+}
+
+// Clave de identidad de un área física del G-3 — compartida entre calcularAreaUnicaG3 (dedupe
+// de ÁREA en pantalla/Excel) y la deduplicación de usuarios de mostrarAnexoG3 (evita procesar/
+// programar la misma área dos veces si quedó seleccionada más de una vez para un cultivo). Usa
+// la unidad catastral SOLO si es un identificador real (ver _esUnidadCatastralValida) — si no,
+// nombre+área+condición apto/no-apto+cultivo, que sigue distinguiendo áreas distintas del mismo
+// usuario aunque compartan un mismo placeholder de UC.
+function claveAreaFisicaG3(u) {
+    const unidadValida = _esUnidadCatastralValida(u.unidadCatastral);
+    return unidadValida
+        ? ('UC|' + u.unidadCatastral.toString().trim())
+        : ('NAC|' + (u.nombre || '') + '|' + (parseFloat(u.area) || 0) + '|' + (u.esNoApto ? 1 : 0) + '|' + _normCultivo(u.cultivo));
+}
+
 // Área total ÚNICA (ha) de usuarios del G-3, sin contar dos veces la misma área física cuando
 // aparece repetida por "isla" (ver u.claveDia en mostrarAnexoG3): el VOLUMEN debe sumar todas
 // las entradas (reparto real), el ÁREA debe contarse una sola vez por área física.
@@ -165,9 +189,7 @@ function calcularAreaUnicaG3(usuarios) {
     const vistos = new Set();
     let total = 0;
     (usuarios || []).forEach(u => {
-        const unidadValida = u.unidadCatastral && u.unidadCatastral !== '-';
-        const clave = unidadValida ? ('UC|' + u.unidadCatastral)
-            : ('NAC|' + (u.nombre || '') + '|' + (parseFloat(u.area) || 0) + '|' + _normCultivo(u.cultivo));
+        const clave = claveAreaFisicaG3(u);
         if (vistos.has(clave)) return;
         vistos.add(clave);
         total += parseFloat(u.area) || 0;
