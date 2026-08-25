@@ -15409,8 +15409,24 @@ function mostrarAnexoG3(modoManual) {
         const nombresCultivosToma = Array.from(new Set((toma.cultivos || []).map(c => _normCultivo(c.cultivo))));
         const soloUnCultivo = nombresCultivosToma.length <= 1;
         nombresCultivosToma.forEach(claveCultivo => {
-            const usuariosCultivo = usuariosFinales.filter(u => _normCultivo(u.cultivo) === claveCultivo);
-            if (usuariosCultivo.length === 0) return;
+            const usuariosCultivoRaw = usuariosFinales.filter(u => _normCultivo(u.cultivo) === claveCultivo);
+            if (usuariosCultivoRaw.length === 0) return;
+
+            // Deduplicar por área física — evita contar (y programar) la misma área dos veces
+            // si quedó seleccionada/registrada más de una vez para este cultivo (ej. toma.cultivos
+            // trae 2 filas con el mismo nombre de cultivo, cada una disparando su propia llamada a
+            // obtenerUsuariosG3Seleccionados con la misma selección). Mismo criterio de identidad
+            // que calcularAreaUnicaG3 (assets/core/utilidades.js).
+            const vistosArea = new Set();
+            const usuariosCultivo = [];
+            usuariosCultivoRaw.forEach(u => {
+                const unidadValida = u.unidadCatastral && u.unidadCatastral !== '-';
+                const claveArea = unidadValida ? ('UC|' + u.unidadCatastral)
+                    : ('NAC|' + (u.nombre || '') + '|' + (parseFloat(u.area) || 0) + '|' + claveCultivo);
+                if (vistosArea.has(claveArea)) return;
+                vistosArea.add(claveArea);
+                usuariosCultivo.push(u);
+            });
 
             const diasDelCultivo = diasActivosPorCultivo[claveCultivo] || diasActivosOffsets || [];
             let volumenObjetivo = 0;
@@ -15446,6 +15462,14 @@ function mostrarAnexoG3(modoManual) {
             // antes de esta función), se deja el volumen mínimo calculado por área,
             // igual que el comportamiento anterior — sin escalar a ciegas.
 
+            // Reemplaza TODAS las entradas originales de este cultivo (incluidas las
+            // duplicadas descartadas arriba) por SOLO las deduplicadas — así ninguna fila
+            // duplicada llega a la tabla final, haya o no expansión por islas más abajo.
+            const indicesOriginales = [];
+            usuariosFinales.forEach((u, idx) => { if (_normCultivo(u.cultivo) === claveCultivo) indicesOriginales.push(idx); });
+            const primerIdx = indicesOriginales[0];
+            for (let i = indicesOriginales.length - 1; i >= 0; i--) usuariosFinales.splice(indicesOriginales[i], 1);
+
             // ── Islas de días NO consecutivos (ej. Miércoles + Sábado, con Jueves/Viernes
             // inactivos): el motor de turnos trata cada área como UN tramo continuo que debe
             // caber en un solo día — con días no consecutivos eso hacía que el turno saltara
@@ -15454,8 +15478,9 @@ function mostrarAnexoG3(modoManual) {
             // turno independiente: el volumen semanal de cada área se reparte proporcional a
             // la capacidad (caudal×horas×3600) de cada isla, y dentro de cada isla las áreas
             // riegan una tras otra por orden, igual que hoy. Con 1 sola isla (caso común) este
-            // bloque no cambia nada — incluso el `if (islas.length > 1)` es un no-op garantizado.
+            // bloque no expande nada — entradasFinalesCultivo queda igual a usuariosCultivo.
             const islas = agruparDiasEnIslas(diasDelCultivo);
+            let entradasFinalesCultivo = usuariosCultivo;
             if (islas.length > 1) {
                 const capacidadPorIsla = islas.map(isla => {
                     let cap = 0;
@@ -15474,9 +15499,6 @@ function mostrarAnexoG3(modoManual) {
                 });
                 const capacidadTotal = capacidadPorIsla.reduce((s, c) => s + c, 0);
                 if (capacidadTotal > 0) {
-                    const indicesOriginales = [];
-                    usuariosFinales.forEach((u, idx) => { if (_normCultivo(u.cultivo) === claveCultivo) indicesOriginales.push(idx); });
-
                     const nuevasEntradas = [];
                     usuariosCultivo.forEach(uOriginal => {
                         islas.forEach((isla, idxIsla) => {
@@ -15489,13 +15511,7 @@ function mostrarAnexoG3(modoManual) {
                             }));
                         });
                     });
-
-                    // Reemplaza las entradas originales de este cultivo por las N copias
-                    // expandidas, en el mismo punto (primer índice original) — preserva el
-                    // orden relativo del resto de usuariosFinales.
-                    const primerIdx = indicesOriginales[0];
-                    for (let i = indicesOriginales.length - 1; i >= 0; i--) usuariosFinales.splice(indicesOriginales[i], 1);
-                    usuariosFinales.splice(primerIdx, 0, ...nuevasEntradas);
+                    entradasFinalesCultivo = nuevasEntradas;
 
                     // Mapas espejo para las claves virtuales — SIN BORRAR NUNCA la clave real
                     // (mostrarAvisoCaudalCultivoG3 valida horas programadas por el nombre real;
@@ -15521,6 +15537,7 @@ function mostrarAnexoG3(modoManual) {
                     });
                 }
             }
+            usuariosFinales.splice(primerIdx, 0, ...entradasFinalesCultivo);
         });
 
         // Renumerar nOrden de todo usuariosFinales tras la posible expansión por islas de
