@@ -2420,6 +2420,75 @@
     // identificacion_registros (arriba), tabla propia
     // `formato_a2_levantamiento` (ver assets/supabase/sql/026_formato_a2_levantamiento.sql).
 
+    // Guarda el archivo Excel original tal cual se sube (Storage, bucket
+    // 'formato-a2-plantillas', ver assets/supabase/sql/027_formato_a2_plantilla.sql)
+    // — un solo archivo por comisión, sobreescrito en cada sincronización. El
+    // exportador vuelve a abrir ESTE mismo archivo y solo reescribe las filas
+    // de datos, para garantizar el mismo formato exacto del oficial.
+    async function subirPlantillaFormatoA2Levantamiento(comisionKey, blob) {
+        if (!comisionKey || !blob) return { ok: false, error: 'Faltan datos para subir la plantilla.' };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const path = comisionId + '/plantilla.xlsx';
+        const { error } = await client.storage.from('formato-a2-plantillas').upload(path, blob, { upsert: true });
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, path };
+    }
+
+    // Descarga la plantilla guardada — el exportador la carga con ExcelJS y
+    // solo reescribe las filas de datos, dejando el resto del archivo intacto.
+    async function obtenerPlantillaFormatoA2Levantamiento(comisionKey) {
+        if (!comisionKey) return { ok: false, error: 'Falta comisión.' };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const path = comisionId + '/plantilla.xlsx';
+        const { data, error } = await client.storage.from('formato-a2-plantillas').download(path);
+        if (error) return { ok: false, error: 'No se encontró una plantilla guardada — sincroniza primero el Formato A-2 desde el Excel oficial (' + error.message + ').' };
+        return { ok: true, blob: data };
+    }
+
+    // Todas las columnas de formato_a2_levantamiento (todas las tomas) — para
+    // que el exportador reparta en memoria por hoja (Margen Izquierda +
+    // cada toma). Paginado de 1000, mismo patrón que
+    // cargarPadronOficialA1CompletoParaExportar.
+    async function cargarFormatoA2LevantamientoParaExportar(comisionKey) {
+        if (!comisionKey) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const TAMANO_PAGINA = 1000;
+        const registros = [];
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from('formato_a2_levantamiento')
+                    .select('*')
+                    .eq('comision_id', comisionId)
+                    .range(desde, desde + TAMANO_PAGINA - 1),
+                'cargar Formato A-2 (Levantamiento) para exportar'
+            );
+            if (error || !data) return { ok: false, registros: [], error: error ? error.mensaje : 'No se pudo cargar los registros.' };
+            registros.push(...data);
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+        return { ok: true, registros };
+    }
+
     // Upsert masivo desde el importador de escritorio — mismo patrón que
     // guardarPadronOficialA1: deduplica en cliente por la clave de
     // conflicto (acá apellidos_nombres, normalizado por el llamador) porque
@@ -2478,9 +2547,15 @@
             actualizado_por: usuarioId,
         }));
 
+        // Clave de conflicto: (toma_nombre, numero_orden), NO apellidos_nombres — un
+        // mismo nombre/asociación puede repetirse varias veces dentro de la MISMA
+        // hoja de toma (varios predios, ej. una asociación con 7 filas en SD11);
+        // numero_orden (la posición real de la fila en su hoja) sí las distingue
+        // siempre. Mismo motivo que guardarPadronOficialA1 para deduplicar en
+        // cliente antes del upsert (Postgres rechaza claves repetidas en un lote).
         const filasPorClave = new Map();
         filas.forEach((fila) => {
-            filasPorClave.set(fila.apellidos_nombres.toString().trim().toUpperCase(), fila);
+            filasPorClave.set((fila.toma_nombre || '') + '|' + fila.numero_orden, fila);
         });
         const filasSinDuplicados = Array.from(filasPorClave.values());
 
@@ -2488,7 +2563,7 @@
         let guardados = 0;
         for (let i = 0; i < filasSinDuplicados.length; i += TAMANO_LOTE) {
             const lote = filasSinDuplicados.slice(i, i + TAMANO_LOTE);
-            const { error } = await client.from('formato_a2_levantamiento').upsert(lote, { onConflict: 'comision_id,apellidos_nombres' });
+            const { error } = await client.from('formato_a2_levantamiento').upsert(lote, { onConflict: 'comision_id,toma_nombre,numero_orden' });
             if (error) return { ok: false, error: error.message, guardados };
             guardados += lote.length;
         }
@@ -2831,5 +2906,8 @@
         listarSolicitudesEdicionFormatoA2Levantamiento,
         rechazarSolicitudEdicionFormatoA2Levantamiento,
         marcarVerificadoEnCampoFormatoA2Levantamiento,
+        subirPlantillaFormatoA2Levantamiento,
+        obtenerPlantillaFormatoA2Levantamiento,
+        cargarFormatoA2LevantamientoParaExportar,
     };
 })();

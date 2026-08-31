@@ -1398,6 +1398,9 @@
                 🗂️ Sincronizar Formato A-2 (Levantamiento)
             </button>
             <input type="file" id="inputFormatoA2Levantamiento" accept=".xlsx" style="display:none;" onchange="importarFormatoA2Levantamiento(event)">
+            <button class="btn btn-success" id="btnExportarFormatoA2Levantamiento" onclick="exportarFormatoA2LevantamientoActualizado()" style="width: 100%; margin-top: 12px;" title="Descarga el Excel del Formato A-2 (16 hojas) con lo verificado/completado en campo hasta ahora, en el mismo formato exacto del oficial — para imprimir/entregar">
+                📥 Exportar Formato A-2 actualizado (para imprimir)
+            </button>
 
             <button class="btn btn-secondary" onclick="cerrarModalPadronA1()" style="width: 100%; margin-top: 12px;">
                 ❌ Cerrar
@@ -3521,15 +3524,72 @@ const COMISIONES = {
         // Distinto de importarPadronOficialA1 (arriba) — esto es el Excel de
         // cumplimiento puntual "... LEVANTADO" (Oficio Múltiple
         // N°101-2026-JUSHMCH): 18 hojas — 'RESUMEN LEVANTAMIENTO',
-        // 'Margen Izquierda' (consolidado, fuente autoritativa: tiene los
-        // datos más completos Y el color de verificación, pero NO trae
-        // columna de toma), 15 hojas por toma (solo sirven acá para saber la
-        // toma de cada usuario por nombre), 'RESUMEN'. Verificado que la
-        // misma versión de ExcelJS vendorizada arriba (4.4.0) abre este
-        // archivo sin problema (a diferencia del Formato A-1 crudo de ANA,
-        // que sí necesita SheetJS — ver comentario en importarPadronOficialA1).
+        // 'Margen Izquierda' (consolidado), 15 hojas por toma, 'RESUMEN'.
+        // ⚠️ La FUENTE DE DATOS es cada hoja por toma, no 'Margen Izquierda'
+        // (a pedido explícito del usuario) — cada hoja de toma es la fuente
+        // de verdad completa de sus 47 columnas, y toma_nombre sale directo
+        // del nombre de la hoja (nunca queda "sin toma"). 'Margen Izquierda'
+        // se usa SOLO para el color de verificación (verde/naranja/amarillo),
+        // porque no existe en ninguna otra parte — las hojas de toma no
+        // tienen relleno de color (verificado). Verificado que la misma
+        // versión de ExcelJS vendorizada arriba (4.4.0) abre este archivo sin
+        // problema (a diferencia del Formato A-1 crudo de ANA, que sí
+        // necesita SheetJS — ver comentario en importarPadronOficialA1).
         const TOMAS_FORMATO_A2_LEVANTAMIENTO = ['SD3', 'SD4', 'SD5', 'SD6', 'SD7', 'SD8', 'SD8.1', 'SD9', 'SD10', 'SD12', 'SI4', 'SD11', 'SD14', 'SI5', 'SI7'];
         const COLORES_FORMATO_A2_LEVANTAMIENTO = { FFD9EAD3: 'verde', FFFCE5CD: 'naranja', FFFFF2CC: 'amarillo' };
+
+        // Mapeo columna Excel (1-47) <-> campo — usado por el importador (lectura)
+        // y por el exportador (escritura, en sentido inverso) para no repetir/
+        // desincronizar la relación entre las dos direcciones.
+        const COLUMNAS_FORMATO_A2_LEVANTAMIENTO = [
+            { col: 1, campo: 'numeroOrden', tipo: 'numero' },
+            { col: 2, campo: 'apellidosNombres', tipo: 'texto' },
+            { col: 3, campo: 'tipoDocumento', tipo: 'texto' },
+            { col: 4, campo: 'numeroDocumento', tipo: 'texto' },
+            { col: 5, campo: 'departamento', tipo: 'texto' },
+            { col: 6, campo: 'provincia', tipo: 'texto' },
+            { col: 7, campo: 'distrito', tipo: 'texto' },
+            { col: 8, campo: 'localidad', tipo: 'texto' },
+            { col: 9, campo: 'unidadCatastral', tipo: 'texto' },
+            { col: 10, campo: 'areaTotalHa', tipo: 'numero' },
+            { col: 11, campo: 'areaBajoRiegoHa', tipo: 'numero' },
+            { col: 12, campo: 'subSectorHidraulico', tipo: 'texto' },
+            { col: 13, campo: 'canalDerivacion', tipo: 'texto' },
+            { col: 14, campo: 'fuenteAgua', tipo: 'texto' },
+            { col: 15, campo: 'cutExpediente', tipo: 'texto' },
+            { col: 16, campo: 'tipoUso', tipo: 'texto' },
+            { col: 17, campo: 'volumenM3', tipo: 'numero' },
+            { col: 18, campo: 'conductorActual', tipo: 'texto' },
+            { col: 19, campo: 'conductorTipoDocumento', tipo: 'texto' },
+            { col: 20, campo: 'conductorNumeroDocumento', tipo: 'texto' },
+            { col: 21, campo: 'estado', tipo: 'texto' },
+            { col: 22, campo: 'ultimaFechaRiego', tipo: 'texto' },
+            { col: 23, campo: 'este', tipo: 'numero' },
+            { col: 24, campo: 'norte', tipo: 'numero' },
+            { col: 25, campo: 'zona', tipo: 'texto' },
+            { col: 26, campo: 'ucRef', tipo: 'texto' },
+            { col: 27, campo: 'seUbicaBloque', tipo: 'texto' },
+            { col: 28, campo: 'nombreBloqueRiego', tipo: 'texto' },
+            { col: 29, campo: 'sector', tipo: 'texto' },
+            { col: 30, campo: 'cdCp', tipo: 'texto', enJson: true },
+            { col: 31, campo: 'l01', tipo: 'texto', enJson: true },
+            { col: 32, campo: 'l02', tipo: 'texto', enJson: true },
+            { col: 33, campo: 'l03', tipo: 'texto', enJson: true },
+            { col: 34, campo: 'l04', tipo: 'texto', enJson: true },
+            { col: 35, campo: 'l05', tipo: 'texto', enJson: true },
+            { col: 36, campo: 'l06', tipo: 'texto', enJson: true },
+            { col: 37, campo: 'areaTotalVerificadaHa', tipo: 'numero', enJson: true },
+            { col: 38, campo: 'areaBajoRiegoVerificadaHa', tipo: 'numero', enJson: true },
+            { col: 39, campo: 'cultivo1', tipo: 'texto', enJson: true },
+            { col: 40, campo: 'areaInstalada1', tipo: 'numero', enJson: true },
+            { col: 41, campo: 'cultivo2', tipo: 'texto', enJson: true },
+            { col: 42, campo: 'areaInstalada2', tipo: 'numero', enJson: true },
+            { col: 43, campo: 'cultivo3', tipo: 'texto', enJson: true },
+            { col: 44, campo: 'areaInstalada3', tipo: 'numero', enJson: true },
+            { col: 45, campo: 'cultivo4', tipo: 'texto', enJson: true },
+            { col: 46, campo: 'areaInstalada4', tipo: 'numero', enJson: true },
+            { col: 47, campo: 'observaciones', tipo: 'texto' },
+        ];
 
         async function importarFormatoA2Levantamiento(event) {
             const file = event.target.files && event.target.files[0];
@@ -3546,79 +3606,83 @@ const COMISIONES = {
                 const wb = new ExcelJS.Workbook();
                 await wb.xlsx.load(buffer);
 
-                const wsConsolidado = wb.getWorksheet('Margen Izquierda');
-                if (!wsConsolidado) {
-                    alert('El archivo no tiene la hoja "Margen Izquierda" — verifica que sea el Excel de Levantamiento del Formato A-2.');
-                    return;
-                }
-
-                // Pasada 1: nombre -> toma, recorriendo las 15 hojas conocidas por toma.
-                const nombreATomaMapa = new Map();
+                // Pasada 1: cada hoja por toma es la fuente de verdad completa de sus
+                // 47 columnas — toma_nombre sale directo del nombre de la hoja.
+                const filas = [];
+                let hojasEncontradas = 0;
                 TOMAS_FORMATO_A2_LEVANTAMIENTO.forEach((toma) => {
                     const ws = wb.getWorksheet(toma);
                     if (!ws) return;
+                    hojasEncontradas++;
                     for (let r = 1; r <= ws.rowCount; r++) {
                         const val = _leerFilaInventarioComun(ws.getRow(r));
                         const numeroOrden = val(1);
                         if (typeof numeroOrden !== 'number' || numeroOrden <= 0) continue;
-                        const nombre = val(2).toString().trim().toUpperCase();
-                        if (nombre) nombreATomaMapa.set(nombre, toma);
+                        const apellidosNombres = val(2).toString().trim();
+                        if (!apellidosNombres) continue;
+
+                        const numTexto = (c) => { const v = val(c); return v === '' ? null : v.toString().trim(); };
+                        const numValor = (c) => { const v = val(c); return typeof v === 'number' ? v : (parseFloat(v) || null); };
+
+                        filas.push({
+                            tomaNombre: toma, numeroOrden,
+                            apellidosNombres,
+                            tipoDocumento: numTexto(3), numeroDocumento: numTexto(4),
+                            departamento: numTexto(5), provincia: numTexto(6), distrito: numTexto(7), localidad: numTexto(8),
+                            unidadCatastral: numTexto(9),
+                            areaTotalHa: numValor(10), areaBajoRiegoHa: numValor(11),
+                            subSectorHidraulico: numTexto(12), canalDerivacion: numTexto(13), fuenteAgua: numTexto(14),
+                            cutExpediente: numTexto(15), tipoUso: numTexto(16), volumenM3: numValor(17),
+                            conductorActual: numTexto(18), conductorTipoDocumento: numTexto(19), conductorNumeroDocumento: numTexto(20),
+                            estado: numTexto(21), ultimaFechaRiego: numTexto(22),
+                            este: numValor(23), norte: numValor(24), zona: numTexto(25),
+                            ucRef: numTexto(26), seUbicaBloque: numTexto(27), nombreBloqueRiego: numTexto(28), sector: numTexto(29),
+                            camposVerificacion: {
+                                cdCp: numTexto(30), l01: numTexto(31), l02: numTexto(32), l03: numTexto(33),
+                                l04: numTexto(34), l05: numTexto(35), l06: numTexto(36),
+                                areaTotalVerificadaHa: numValor(37), areaBajoRiegoVerificadaHa: numValor(38),
+                                cultivo1: numTexto(39), areaInstalada1: numValor(40),
+                                cultivo2: numTexto(41), areaInstalada2: numValor(42),
+                                cultivo3: numTexto(43), areaInstalada3: numValor(44),
+                                cultivo4: numTexto(45), areaInstalada4: numValor(46),
+                            },
+                            observaciones: numTexto(47),
+                            estadoVerificacion: null, // se completa en la Pasada 2
+                        });
                     }
                 });
 
-                // Pasada 2: 'Margen Izquierda' — fuente autoritativa (datos más completos + color).
-                const filas = [];
-                const sinToma = [];
-                for (let r = 1; r <= wsConsolidado.rowCount; r++) {
-                    const row = wsConsolidado.getRow(r);
-                    const val = _leerFilaInventarioComun(row);
-                    const numeroOrden = val(1);
-                    if (typeof numeroOrden !== 'number' || numeroOrden <= 0) continue;
-
-                    const apellidosNombres = val(2).toString().trim();
-                    if (!apellidosNombres) continue;
-                    const nombreNorm = apellidosNombres.toUpperCase();
-                    const tomaNombre = nombreATomaMapa.get(nombreNorm) || null;
-                    if (!tomaNombre) sinToma.push(apellidosNombres);
-
-                    // El color de verificación es uniforme en toda la fila (cols 18-47) —
-                    // basta con leer una celda representativa (col.18, Conductor).
-                    const argb = row.getCell(18).fill && row.getCell(18).fill.fgColor ? row.getCell(18).fill.fgColor.argb : null;
-                    const estadoVerificacion = COLORES_FORMATO_A2_LEVANTAMIENTO[argb] || null;
-
-                    const numTexto = (c) => { const v = val(c); return v === '' ? null : v.toString().trim(); };
-                    const numValor = (c) => { const v = val(c); return typeof v === 'number' ? v : (parseFloat(v) || null); };
-
-                    filas.push({
-                        tomaNombre, numeroOrden,
-                        apellidosNombres,
-                        tipoDocumento: numTexto(3), numeroDocumento: numTexto(4),
-                        departamento: numTexto(5), provincia: numTexto(6), distrito: numTexto(7), localidad: numTexto(8),
-                        unidadCatastral: numTexto(9),
-                        areaTotalHa: numValor(10), areaBajoRiegoHa: numValor(11),
-                        subSectorHidraulico: numTexto(12), canalDerivacion: numTexto(13), fuenteAgua: numTexto(14),
-                        cutExpediente: numTexto(15), tipoUso: numTexto(16), volumenM3: numValor(17),
-                        conductorActual: numTexto(18), conductorTipoDocumento: numTexto(19), conductorNumeroDocumento: numTexto(20),
-                        estado: numTexto(21), ultimaFechaRiego: numTexto(22),
-                        este: numValor(23), norte: numValor(24), zona: numTexto(25),
-                        ucRef: numTexto(26), seUbicaBloque: numTexto(27), nombreBloqueRiego: numTexto(28), sector: numTexto(29),
-                        camposVerificacion: {
-                            cdCp: numTexto(30), l01: numTexto(31), l02: numTexto(32), l03: numTexto(33),
-                            l04: numTexto(34), l05: numTexto(35), l06: numTexto(36),
-                            areaTotalVerificadaHa: numValor(37), areaBajoRiegoVerificadaHa: numValor(38),
-                            cultivo1: numTexto(39), areaInstalada1: numValor(40),
-                            cultivo2: numTexto(41), areaInstalada2: numValor(42),
-                            cultivo3: numTexto(43), areaInstalada3: numValor(44),
-                            cultivo4: numTexto(45), areaInstalada4: numValor(46),
-                        },
-                        observaciones: numTexto(47),
-                        estadoVerificacion,
-                    });
+                if (hojasEncontradas === 0) {
+                    alert('El archivo no tiene ninguna de las hojas por toma esperadas (SD3, SD4... SI7) — verifica que sea el Excel de Levantamiento del Formato A-2.');
+                    return;
+                }
+                if (filas.length === 0) {
+                    alert('No se encontraron registros reconocibles en las hojas por toma. Verifica que sea el Excel de Levantamiento del Formato A-2 (mismo diseño de encabezados fusionados).');
+                    return;
                 }
 
-                if (filas.length === 0) {
-                    alert('No se encontraron registros reconocibles en la hoja "Margen Izquierda". Verifica que sea el Excel de Levantamiento del Formato A-2 (mismo diseño de encabezados fusionados).');
-                    return;
+                // Pasada 2: 'Margen Izquierda' — SOLO para el color de verificación
+                // (no existe en ninguna otra parte del archivo).
+                const wsConsolidado = wb.getWorksheet('Margen Izquierda');
+                let conColor = 0;
+                if (wsConsolidado) {
+                    const nombreAColorMapa = new Map();
+                    for (let r = 1; r <= wsConsolidado.rowCount; r++) {
+                        const row = wsConsolidado.getRow(r);
+                        const val = _leerFilaInventarioComun(row);
+                        const numeroOrden = val(1);
+                        if (typeof numeroOrden !== 'number' || numeroOrden <= 0) continue;
+                        const nombre = val(2).toString().trim().toUpperCase();
+                        if (!nombre) continue;
+                        // El color es uniforme en toda la fila (cols 18-47) — basta col.18.
+                        const argb = row.getCell(18).fill && row.getCell(18).fill.fgColor ? row.getCell(18).fill.fgColor.argb : null;
+                        const estado = COLORES_FORMATO_A2_LEVANTAMIENTO[argb] || null;
+                        if (estado) nombreAColorMapa.set(nombre, estado);
+                    }
+                    filas.forEach((f) => {
+                        const estado = nombreAColorMapa.get(f.apellidosNombres.toUpperCase());
+                        if (estado) { f.estadoVerificacion = estado; conColor++; }
+                    });
                 }
 
                 const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
@@ -3629,17 +3693,24 @@ const COMISIONES = {
                     return;
                 }
 
+                // Guarda el archivo original tal cual como plantilla reutilizable —
+                // el exportador la vuelve a abrir y solo reescribe filas de datos. Si
+                // falla, se avisa nomás — los datos ya quedaron importados arriba, no
+                // hay nada que revertir.
+                let avisoPlantilla = '';
+                const resultadoPlantilla = await CusshmiDatos.subirPlantillaFormatoA2Levantamiento(comisionKey, file);
+                if (!resultadoPlantilla.ok) {
+                    avisoPlantilla = '\n\n⚠️ No se pudo guardar la plantilla para exportar: ' + resultadoPlantilla.error;
+                }
+
                 const porColor = { verde: 0, naranja: 0, amarillo: 0, sin_color: 0 };
                 filas.forEach((f) => { porColor[f.estadoVerificacion || 'sin_color']++; });
-                let mensaje = '✅ Formato A-2 (Levantamiento) sincronizado: ' + resultado.guardados + ' registros de ' + filas.length + ' leídos.\n\n' +
+                let mensaje = '✅ Formato A-2 (Levantamiento) sincronizado: ' + resultado.guardados + ' registros de ' + filas.length + ' leídos, desde ' + hojasEncontradas + ' hoja(s) por toma.\n\n' +
                     '🟢 Verde (DNI exacto en SIGA): ' + porColor.verde + '\n' +
                     '🟠 Naranja (nombre/otra toma, a confirmar): ' + porColor.naranja + '\n' +
                     '🟡 Amarillo (sin info digital): ' + porColor.amarillo +
-                    (porColor.sin_color ? '\n⚪ Sin color reconocido: ' + porColor.sin_color : '');
-                if (sinToma.length > 0) {
-                    mensaje += '\n\n⚠️ ' + sinToma.length + ' usuario(s) sin toma identificada (no aparecen en ninguna de las 15 hojas por toma) — revisa el Excel fuente:\n' +
-                        sinToma.slice(0, 20).join('\n') + (sinToma.length > 20 ? '\n… y ' + (sinToma.length - 20) + ' más.' : '');
-                }
+                    (porColor.sin_color ? '\n⚪ Sin color reconocido: ' + porColor.sin_color : '') +
+                    avisoPlantilla;
                 alert(mensaje);
             } catch (e) {
                 console.error('Error al importar Formato A-2 (Levantamiento):', e);
@@ -3647,6 +3718,129 @@ const COMISIONES = {
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
                 event.target.value = '';
+            }
+        }
+
+        // 'numeroOrden' -> 'numero_orden', 'apellidosNombres' -> 'apellidos_nombres', etc. —
+        // convierte cualquier `campo` (camelCase) de COLUMNAS_FORMATO_A2_LEVANTAMIENTO a la
+        // columna real de Supabase (snake_case), para leer filas ya guardadas al exportar.
+        function _campoASnakeCase(campo) {
+            return campo.replace(/([A-Z])/g, '_$1').toLowerCase();
+        }
+
+        // Vuelve a abrir el Excel ORIGINAL guardado como plantilla (mismo archivo que se
+        // subió, filas 1-15 de cada hoja intactas) y reescribe SOLO las filas de datos (16+)
+        // con el estado actual de formato_a2_levantamiento — así el formato institucional,
+        // encabezados fusionados, anchos de columna y estilos quedan garantizados idénticos
+        // al oficial (es literalmente el mismo archivo, no una reconstrucción).
+        async function exportarFormatoA2LevantamientoActualizado() {
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+
+            const btn = document.getElementById('btnExportarFormatoA2Levantamiento');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📥 Generando…'; }
+
+            try {
+                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+
+                const resultadoPlantilla = await CusshmiDatos.obtenerPlantillaFormatoA2Levantamiento(comisionKey);
+                if (!resultadoPlantilla.ok) { alert('⚠️ ' + resultadoPlantilla.error); return; }
+
+                const resultadoRegistros = await CusshmiDatos.cargarFormatoA2LevantamientoParaExportar(comisionKey);
+                if (!resultadoRegistros.ok) { alert('⚠️ No se pudo cargar los registros: ' + resultadoRegistros.error); return; }
+                const registros = resultadoRegistros.registros || [];
+                if (registros.length === 0) { alert('No hay registros de Formato A-2 (Levantamiento) sincronizados todavía.'); return; }
+
+                const buffer = await resultadoPlantilla.blob.arrayBuffer();
+                const wb = new ExcelJS.Workbook();
+                await wb.xlsx.load(buffer);
+
+                function valorCampo(registro, col) {
+                    if (col.enJson) {
+                        const v = (registro.campos_verificacion || {})[col.campo];
+                        return (v === undefined) ? null : v;
+                    }
+                    const v = registro[_campoASnakeCase(col.campo)];
+                    return (v === undefined) ? null : v;
+                }
+
+                function escribirFila(ws, filaExcel, registro, numeroOrdenOverride, aplicarColor) {
+                    const row = ws.getRow(filaExcel);
+                    COLUMNAS_FORMATO_A2_LEVANTAMIENTO.forEach((col) => {
+                        const valor = (col.campo === 'numeroOrden' && numeroOrdenOverride != null)
+                            ? numeroOrdenOverride
+                            : valorCampo(registro, col);
+                        row.getCell(col.col).value = valor;
+                    });
+                    if (aplicarColor) {
+                        const argb = { verde: 'FFD9EAD3', naranja: 'FFFCE5CD', amarillo: 'FFFFF2CC' }[registro.estado_verificacion];
+                        if (argb) {
+                            for (let c = 18; c <= 47; c++) {
+                                row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } };
+                            }
+                        }
+                    }
+                }
+
+                // Última fila con datos reales (col.2 = Apellidos y nombres) — para saber
+                // hasta dónde limpiar si la cantidad de registros nueva es menor que antes.
+                function ultimaFilaConDatos(ws) {
+                    let ultima = 15;
+                    for (let r = 16; r <= ws.rowCount; r++) {
+                        if (ws.getRow(r).getCell(2).value) ultima = r;
+                    }
+                    return ultima;
+                }
+
+                function limpiarFilasSobrantes(ws, desdeFila, hastaFila) {
+                    for (let r = desdeFila; r <= hastaFila; r++) {
+                        const row = ws.getRow(r);
+                        for (let c = 1; c <= 47; c++) { row.getCell(c).value = null; row.getCell(c).fill = null; }
+                    }
+                }
+
+                // ── 'Margen Izquierda': TODOS los registros, orden alfabético (igual que
+                // el archivo original), renumerados 1..N (es un consolidado, no hereda el
+                // número de ninguna toma), CON color de verificación.
+                const wsConsolidado = wb.getWorksheet('Margen Izquierda');
+                if (wsConsolidado) {
+                    const ultimaOriginal = ultimaFilaConDatos(wsConsolidado);
+                    const ordenados = registros.slice().sort((a, b) => (a.apellidos_nombres || '').localeCompare(b.apellidos_nombres || ''));
+                    ordenados.forEach((registro, idx) => { escribirFila(wsConsolidado, 16 + idx, registro, idx + 1, true); });
+                    const ultimaNueva = 15 + ordenados.length;
+                    if (ultimaOriginal > ultimaNueva) limpiarFilasSobrantes(wsConsolidado, ultimaNueva + 1, ultimaOriginal);
+                }
+
+                // ── Cada una de las 15 hojas por toma: solo sus propios registros, orden por
+                // el numero_orden ya guardado (el de esa misma toma), SIN color (igual que el
+                // archivo original, que nunca tuvo relleno en estas hojas).
+                let hojasActualizadas = wsConsolidado ? 1 : 0;
+                TOMAS_FORMATO_A2_LEVANTAMIENTO.forEach((toma) => {
+                    const ws = wb.getWorksheet(toma);
+                    if (!ws) return;
+                    const deEstaToma = registros.filter((r) => r.toma_nombre === toma)
+                        .sort((a, b) => (a.numero_orden || 0) - (b.numero_orden || 0));
+                    if (deEstaToma.length === 0) return;
+                    const ultimaOriginal = ultimaFilaConDatos(ws);
+                    deEstaToma.forEach((registro, idx) => { escribirFila(ws, 16 + idx, registro, null, false); });
+                    const ultimaNueva = 15 + deEstaToma.length;
+                    if (ultimaOriginal > ultimaNueva) limpiarFilasSobrantes(ws, ultimaNueva + 1, ultimaOriginal);
+                    hojasActualizadas++;
+                });
+
+                // Las hojas 'RESUMEN LEVANTAMIENTO'/'RESUMEN' (conteos/porcentajes) se
+                // exportan tal cual estaban en la plantilla — no se recalculan en esta
+                // vuelta, para no arriesgar un cálculo mal hecho en un documento oficial.
+                const nombreArchivo = 'Formato_A2_Levantamiento_actualizado_' + new Date().toISOString().slice(0, 10) + '.xlsx';
+                await _descargarWorkbook(wb, nombreArchivo);
+                alert('✅ Excel generado: ' + hojasActualizadas + ' hoja(s) actualizadas con ' + registros.length + ' registros en total.\n\n' +
+                    'Las hojas "RESUMEN LEVANTAMIENTO" y "RESUMEN" quedan tal cual estaban en el archivo original (sin recalcular).');
+            } catch (e) {
+                console.error('Error al exportar Formato A-2 (Levantamiento):', e);
+                alert('No se pudo generar el Excel: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
             }
         }
 

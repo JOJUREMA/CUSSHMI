@@ -89,8 +89,19 @@ create table if not exists formato_a2_levantamiento (
     creado_en timestamptz not null default now(),
     actualizado_en timestamptz not null default now(),
 
-    unique (comision_id, apellidos_nombres)
+    unique (comision_id, toma_nombre, numero_orden)
 );
+
+-- Reintento seguro para quien ya haya creado la tabla con la clave anterior
+-- (comision_id, apellidos_nombres) — esa clave colisiona en la práctica: una
+-- misma persona/asociación puede aparecer varias veces en la MISMA hoja de
+-- toma (varios predios, ej. "ASOCIACION TIERRAS NUEVAS AGRICOLAS" 7 filas en
+-- SD11), y (comision_id, toma_nombre, numero_orden) sí las distingue siempre
+-- (numero_orden es la posición real de cada fila en su propia hoja).
+alter table formato_a2_levantamiento drop constraint if exists formato_a2_levantamiento_comision_id_apellidos_nombres_key;
+alter table formato_a2_levantamiento drop constraint if exists formato_a2_levantamiento_comision_id_toma_nombre_numero_orden_key;
+alter table formato_a2_levantamiento add constraint formato_a2_levantamiento_comision_id_toma_nombre_numero_orden_key
+    unique (comision_id, toma_nombre, numero_orden);
 
 create index if not exists idx_formatoA2Lev_comision_toma on formato_a2_levantamiento (comision_id, toma_nombre);
 create index if not exists idx_formatoA2Lev_solicitud on formato_a2_levantamiento (comision_id, solicitud_edicion) where solicitud_edicion = true;
