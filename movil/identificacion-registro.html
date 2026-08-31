@@ -325,6 +325,8 @@
             <button class="boton-secundario" id="btnVolverEleccionDesdeSelectorA2" style="max-width:420px;">← Volver</button>
             <h1 style="margin-top:14px; font-size:16px;">Formato A-2 — Levantamiento de Observaciones</h1>
 
+            <button class="boton" id="btnVerSolicitudesA2" style="max-width:420px; display:none; margin-top:14px; background:#c0392b;">🔔 Solicitudes de edición pendientes</button>
+
             <div class="campo" style="width:100%; max-width:420px; margin-top:8px;">
                 <label for="selectTomaA2Levantamiento">Toma / Consolidado</label>
                 <select id="selectTomaA2Levantamiento">
@@ -332,6 +334,15 @@
                 </select>
             </div>
             <div class="estado-busqueda" id="estadoSelectorA2Levantamiento"></div>
+        </div>
+
+        <!-- ── Formato A-2: solicitudes de edición pendientes (admin) ── -->
+        <div id="vistaSolicitudesA2Levantamiento" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverSelectorDesdeSolicitudesA2" style="max-width:420px;">← Volver al selector</button>
+            <h1 style="margin-top:14px; font-size:16px;">Formato A-2 — Solicitudes de edición pendientes</h1>
+
+            <div class="estado-busqueda" id="estadoSolicitudesA2Levantamiento"></div>
+            <div class="resultados" id="listaSolicitudesA2Levantamiento"></div>
         </div>
 
         <!-- ── Formato A-2: lista de usuarios observados ── -->
@@ -467,6 +478,7 @@
             document.getElementById('vistaSelectorA2Levantamiento').style.display = 'none';
             document.getElementById('vistaListaA2Levantamiento').style.display = 'none';
             document.getElementById('vistaEdicionA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaSolicitudesA2Levantamiento').style.display = 'none';
             document.getElementById('vistaTomas').style.display = 'flex';
             document.getElementById('vistaBusqueda').style.display = 'none';
             document.getElementById('vistaFormulario').style.display = 'none';
@@ -1214,6 +1226,7 @@
             document.getElementById('vistaSelectorA2Levantamiento').style.display = 'none';
             document.getElementById('vistaListaA2Levantamiento').style.display = 'none';
             document.getElementById('vistaEdicionA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaSolicitudesA2Levantamiento').style.display = 'none';
             document.getElementById('vistaEleccionFormato').style.display = 'flex';
         }
         document.getElementById('btnElegirFormatoA1').addEventListener('click', mostrarVistaTomas);
@@ -1223,7 +1236,9 @@
         // ═══ Selector de toma / Consolidado ═══
         async function mostrarVistaSelectorA2Levantamiento() {
             document.getElementById('vistaEleccionFormato').style.display = 'none';
+            document.getElementById('vistaSolicitudesA2Levantamiento').style.display = 'none';
             document.getElementById('vistaSelectorA2Levantamiento').style.display = 'flex';
+            if (esAdmin) actualizarBotonSolicitudesA2();
             var elEstado = document.getElementById('estadoSelectorA2Levantamiento');
             var elSelect = document.getElementById('selectTomaA2Levantamiento');
             elEstado.textContent = 'Cargando avance…';
@@ -1256,6 +1271,98 @@
         }
         document.getElementById('selectTomaA2Levantamiento').addEventListener('change', function (e) {
             if (e.target.value) abrirListaA2Levantamiento(e.target.value);
+        });
+
+        // ═══ Admin — solicitudes de edición pendientes (Formato A-2) ═══
+        // Mismo patrón exacto que actualizarBotonSolicitudes/mostrarVistaSolicitudes/
+        // renderizarListaSolicitudes de arriba (Formato A-1), aplicado a
+        // formato_a2_levantamiento — un programador puede pedir habilitación desde
+        // la ficha (btnSolicitarEdicionA2), pero el administrador no
+        // necesariamente está mirando ese registro puntual cuando eso pasa.
+        async function actualizarBotonSolicitudesA2() {
+            var btn = document.getElementById('btnVerSolicitudesA2');
+            var resultado = await CusshmiDatos.listarSolicitudesEdicionFormatoA2Levantamiento(comisionKeyActual);
+            var n = (resultado.ok && resultado.solicitudes) ? resultado.solicitudes.length : 0;
+            if (n > 0) {
+                btn.textContent = '🔔 Solicitudes de edición pendientes (' + n + ')';
+                btn.style.display = 'block';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        async function mostrarVistaSolicitudesA2() {
+            document.getElementById('vistaSelectorA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaSolicitudesA2Levantamiento').style.display = 'flex';
+            await renderizarListaSolicitudesA2();
+        }
+
+        async function renderizarListaSolicitudesA2() {
+            var elEstado = document.getElementById('estadoSolicitudesA2Levantamiento');
+            var elLista = document.getElementById('listaSolicitudesA2Levantamiento');
+            elEstado.textContent = 'Cargando solicitudes…';
+            elLista.innerHTML = '';
+
+            var resultado = await CusshmiDatos.listarSolicitudesEdicionFormatoA2Levantamiento(comisionKeyActual);
+            if (!resultado.ok) { elEstado.textContent = resultado.error || 'No se pudo cargar las solicitudes.'; return; }
+            var solicitudes = resultado.solicitudes || [];
+            if (solicitudes.length === 0) {
+                elEstado.textContent = 'No hay solicitudes de edición pendientes.';
+                return;
+            }
+            elEstado.textContent = '';
+
+            solicitudes.forEach(function (s) {
+                var fila = document.createElement('div');
+                fila.className = 'fila-resultado';
+                var fecha = s.solicitud_edicion_en ? new Date(s.solicitud_edicion_en).toLocaleString('es-PE') : '-';
+                fila.innerHTML =
+                    '<div class="nombre-resultado">' + escapeHtml(s.apellidos_nombres || '-') + '</div>' +
+                    '<div class="detalle-resultado">Toma ' + escapeHtml(s.toma_nombre || '-') + ' · UC: ' + escapeHtml(s.unidad_catastral || '-') + '</div>' +
+                    '<div class="detalle-resultado">Solicitado por ' + escapeHtml(s.solicitud_edicion_por_nombre || 'un programador') + ' — ' + escapeHtml(fecha) + '</div>';
+
+                var acciones = document.createElement('div');
+                acciones.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
+
+                var btnHabilitar = document.createElement('button');
+                btnHabilitar.className = 'boton';
+                btnHabilitar.type = 'button';
+                btnHabilitar.style.cssText = 'max-width:none; flex:1; padding:8px; font-size:12px;';
+                btnHabilitar.textContent = '✅ Habilitar';
+                btnHabilitar.addEventListener('click', async function (ev) {
+                    ev.stopPropagation();
+                    btnHabilitar.disabled = true;
+                    var r = await CusshmiDatos.desbloquearRegistroFormatoA2Levantamiento(s.id);
+                    if (!r.ok) { alert(r.error); btnHabilitar.disabled = false; return; }
+                    renderizarListaSolicitudesA2();
+                    actualizarBotonSolicitudesA2();
+                });
+
+                var btnRechazar = document.createElement('button');
+                btnRechazar.className = 'boton-secundario';
+                btnRechazar.type = 'button';
+                btnRechazar.style.cssText = 'max-width:none; flex:1; padding:8px; font-size:12px;';
+                btnRechazar.textContent = '❌ Rechazar';
+                btnRechazar.addEventListener('click', async function (ev) {
+                    ev.stopPropagation();
+                    btnRechazar.disabled = true;
+                    var r = await CusshmiDatos.rechazarSolicitudEdicionFormatoA2Levantamiento(s.id);
+                    if (!r.ok) { alert(r.error); btnRechazar.disabled = false; return; }
+                    renderizarListaSolicitudesA2();
+                    actualizarBotonSolicitudesA2();
+                });
+
+                acciones.appendChild(btnHabilitar);
+                acciones.appendChild(btnRechazar);
+                fila.appendChild(acciones);
+                elLista.appendChild(fila);
+            });
+        }
+
+        document.getElementById('btnVerSolicitudesA2').addEventListener('click', mostrarVistaSolicitudesA2);
+        document.getElementById('btnVolverSelectorDesdeSolicitudesA2').addEventListener('click', function () {
+            document.getElementById('vistaSolicitudesA2Levantamiento').style.display = 'none';
+            mostrarVistaSelectorA2Levantamiento();
         });
 
         // ═══ Lista de usuarios observados ═══
