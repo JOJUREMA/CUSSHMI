@@ -2410,6 +2410,316 @@
         return { ok: true, actualizado: (data || []).length > 0 };
     }
 
+    // ── Formato A-2 — Levantamiento de Observaciones ANA ────────────────────
+    // Distinto de identificacion_registros.clasificacion (A-1/A-2 calculado
+    // del formulario existente) — esto es el ejercicio puntual de
+    // cumplimiento (Oficio Múltiple N°101-2026-JUSHMCH): usuarios que ANA ya
+    // "observó", cargados desde un Excel oficial ya parcialmente cruzado
+    // contra el padrón digital SIGA, que el sectorista termina de
+    // verificar/completar en campo. Mismo patrón de candado que
+    // identificacion_registros (arriba), tabla propia
+    // `formato_a2_levantamiento` (ver assets/supabase/sql/026_formato_a2_levantamiento.sql).
+
+    // Upsert masivo desde el importador de escritorio — mismo patrón que
+    // guardarPadronOficialA1: deduplica en cliente por la clave de
+    // conflicto (acá apellidos_nombres, normalizado por el llamador) porque
+    // Postgres rechaza un upsert con claves repetidas en el mismo lote, y
+    // envía en lotes de 500.
+    async function guardarFormatoA2LevantamientoRegistros(comisionKey, filasEntrada) {
+        if (!comisionKey) return { ok: false, error: 'Falta comisión.' };
+        if (!Array.isArray(filasEntrada) || filasEntrada.length === 0) return { ok: true, guardados: 0 };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const filas = filasEntrada.map((f) => ({
+            comision_id: comisionId,
+            toma_nombre: f.tomaNombre || null,
+            numero_orden: Number.isFinite(parseInt(f.numeroOrden, 10)) ? parseInt(f.numeroOrden, 10) : null,
+            apellidos_nombres: (f.apellidosNombres || '-').toString(),
+            tipo_documento: f.tipoDocumento || null,
+            numero_documento: f.numeroDocumento != null ? f.numeroDocumento.toString() : null,
+            departamento: f.departamento || null,
+            provincia: f.provincia || null,
+            distrito: f.distrito || null,
+            localidad: f.localidad || null,
+            unidad_catastral: (f.unidadCatastral != null && f.unidadCatastral !== '') ? f.unidadCatastral.toString() : null,
+            area_total_ha: Number.isFinite(parseFloat(f.areaTotalHa)) ? parseFloat(f.areaTotalHa) : null,
+            area_bajo_riego_ha: Number.isFinite(parseFloat(f.areaBajoRiegoHa)) ? parseFloat(f.areaBajoRiegoHa) : null,
+            sub_sector_hidraulico: f.subSectorHidraulico || null,
+            canal_derivacion: f.canalDerivacion || null,
+            fuente_agua: f.fuenteAgua || null,
+            cut_expediente: f.cutExpediente || null,
+            tipo_uso: f.tipoUso || null,
+            volumen_m3: Number.isFinite(parseFloat(f.volumenM3)) ? parseFloat(f.volumenM3) : null,
+            conductor_actual: f.conductorActual || null,
+            conductor_tipo_documento: f.conductorTipoDocumento || null,
+            conductor_numero_documento: f.conductorNumeroDocumento || null,
+            estado: f.estado || null,
+            ultima_fecha_riego: f.ultimaFechaRiego != null ? f.ultimaFechaRiego.toString() : null,
+            este: Number.isFinite(parseFloat(f.este)) ? parseFloat(f.este) : null,
+            norte: Number.isFinite(parseFloat(f.norte)) ? parseFloat(f.norte) : null,
+            zona: f.zona || null,
+            uc_ref: f.ucRef != null ? f.ucRef.toString() : null,
+            se_ubica_bloque: f.seUbicaBloque || null,
+            nombre_bloque_riego: f.nombreBloqueRiego || null,
+            sector: f.sector || null,
+            observaciones: f.observaciones || null,
+            campos_verificacion: f.camposVerificacion || {},
+            estado_verificacion: f.estadoVerificacion || null,
+            actualizado_por: usuarioId,
+        }));
+
+        const filasPorClave = new Map();
+        filas.forEach((fila) => {
+            filasPorClave.set(fila.apellidos_nombres.toString().trim().toUpperCase(), fila);
+        });
+        const filasSinDuplicados = Array.from(filasPorClave.values());
+
+        const TAMANO_LOTE = 500;
+        let guardados = 0;
+        for (let i = 0; i < filasSinDuplicados.length; i += TAMANO_LOTE) {
+            const lote = filasSinDuplicados.slice(i, i + TAMANO_LOTE);
+            const { error } = await client.from('formato_a2_levantamiento').upsert(lote, { onConflict: 'comision_id,apellidos_nombres' });
+            if (error) return { ok: false, error: error.message, guardados };
+            guardados += lote.length;
+        }
+        return { ok: true, guardados };
+    }
+
+    // Para el selector móvil "por toma / Consolidado": cuántos registros y
+    // cuántos ya marcados `verificado_en_campo` hay por toma, más una
+    // entrada sintética 'CONSOLIDADO' con la suma de todas — mismo sentinela
+    // que ya usa el importador de tomas en escritorio
+    // (Sistema_Riego_CUSSHMI_14.html, 'CONSOLIDADO' = todas las tomas).
+    async function obtenerAvanceFormatoA2LevantamientoPorToma(comisionKey) {
+        if (!comisionKey) return { ok: true, avance: {} };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, avance: {}, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const TAMANO_PAGINA = 1000;
+        const filas = [];
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from('formato_a2_levantamiento')
+                    .select('toma_nombre, verificado_en_campo')
+                    .eq('comision_id', comisionId)
+                    .range(desde, desde + TAMANO_PAGINA - 1),
+                'contar formato A-2 (levantamiento) por toma'
+            );
+            if (error || !data) return { ok: false, avance: {}, error: error ? error.mensaje : 'No se pudo calcular el avance.' };
+            filas.push(...data);
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+
+        const avance = {};
+        const consolidado = { total: 0, verificados: 0 };
+        filas.forEach((f) => {
+            const toma = f.toma_nombre || 'SIN TOMA';
+            if (!avance[toma]) avance[toma] = { total: 0, verificados: 0 };
+            avance[toma].total++;
+            if (f.verificado_en_campo) avance[toma].verificados++;
+            consolidado.total++;
+            if (f.verificado_en_campo) consolidado.verificados++;
+        });
+        avance.CONSOLIDADO = consolidado;
+        return { ok: true, avance };
+    }
+
+    // Lista de usuarios observados de una toma (o de todas, si tomaNombre es
+    // null/'CONSOLIDADO') — Pantalla de lista del selector A-2.
+    async function listarRegistrosFormatoA2Levantamiento(comisionKey, tomaNombre) {
+        if (!comisionKey) return { ok: true, registros: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, registros: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const filtrarPorToma = tomaNombre && tomaNombre !== 'CONSOLIDADO';
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => {
+                let q = client.from('formato_a2_levantamiento')
+                    .select('id, toma_nombre, apellidos_nombres, unidad_catastral, estado_verificacion, verificado_en_campo, confirmado')
+                    .eq('comision_id', comisionId)
+                    .order('apellidos_nombres', { ascending: true });
+                if (filtrarPorToma) q = q.eq('toma_nombre', tomaNombre);
+                return q;
+            },
+            'listar registros de Formato A-2 (levantamiento)'
+        );
+        if (error) return { ok: false, registros: [], error: error.mensaje || 'No se pudo listar los registros.' };
+        return { ok: true, registros: data || [] };
+    }
+
+    // Un registro completo por id — para abrir la ficha de edición.
+    async function cargarRegistroFormatoA2Levantamiento(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('formato_a2_levantamiento').select('*').eq('id', id).maybeSingle(),
+            'cargar registro de Formato A-2 (levantamiento)'
+        );
+        if (error) return { ok: false, error: error.mensaje };
+        if (!data) return { ok: false, error: 'Registro no encontrado.' };
+        return { ok: true, registro: data };
+    }
+
+    // Guarda SOLO los campos editables (cols 18-47 del Excel) — nunca toca
+    // los campos de "datos observados" (cols 1-17), que quedan de solo
+    // lectura en el móvil por diseño.
+    // `datos`: {id, este?, norte?, zona?, estado?, conductorActual?,
+    //   conductorTipoDocumento?, conductorNumeroDocumento?,
+    //   ultimaFechaRiego?, ucRef?, seUbicaBloque?, nombreBloqueRiego?,
+    //   sector?, observaciones?, camposVerificacion?}.
+    async function guardarRegistroFormatoA2Levantamiento(datos) {
+        if (!datos || !datos.id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+
+        const cambios = { actualizado_por: usuarioId, actualizado_en: new Date().toISOString() };
+        const CAMPOS_EDITABLES = ['conductorActual', 'conductorTipoDocumento', 'conductorNumeroDocumento',
+            'estado', 'ultimaFechaRiego', 'este', 'norte', 'zona', 'ucRef', 'seUbicaBloque',
+            'nombreBloqueRiego', 'sector', 'observaciones', 'camposVerificacion'];
+        const MAPA_COLUMNA = {
+            conductorActual: 'conductor_actual', conductorTipoDocumento: 'conductor_tipo_documento',
+            conductorNumeroDocumento: 'conductor_numero_documento', estado: 'estado',
+            ultimaFechaRiego: 'ultima_fecha_riego', este: 'este', norte: 'norte', zona: 'zona',
+            ucRef: 'uc_ref', seUbicaBloque: 'se_ubica_bloque', nombreBloqueRiego: 'nombre_bloque_riego',
+            sector: 'sector', observaciones: 'observaciones', camposVerificacion: 'campos_verificacion',
+        };
+        CAMPOS_EDITABLES.forEach((clave) => {
+            if (Object.prototype.hasOwnProperty.call(datos, clave)) cambios[MAPA_COLUMNA[clave]] = datos[clave];
+        });
+
+        const { error } = await client.from('formato_a2_levantamiento').update(cambios).eq('id', datos.id);
+        if (error) return { ok: false, error: error.message };
+        return { ok: true, id: datos.id };
+    }
+
+    let debounceTimerFormatoA2Lev = null;
+
+    // Autoguardado de un campo editado en la ficha — mismo criterio de 1s de
+    // espera que guardarRegistroIdentificacionDebounced.
+    function guardarRegistroFormatoA2LevantamientoDebounced(datos, onEstado) {
+        if (debounceTimerFormatoA2Lev) clearTimeout(debounceTimerFormatoA2Lev);
+        if (onEstado) onEstado('escribiendo');
+        debounceTimerFormatoA2Lev = setTimeout(async () => {
+            if (onEstado) onEstado('guardando');
+            const resultado = await guardarRegistroFormatoA2Levantamiento(datos);
+            if (onEstado) onEstado(resultado.ok ? 'guardado' : 'error');
+        }, 1000);
+    }
+
+    async function confirmarRegistroFormatoA2Levantamiento(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('formato_a2_levantamiento')
+            .update({ confirmado: true, confirmado_en: new Date().toISOString() })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo confirmar: el registro no existe o ya no se puede editar.' };
+        return { ok: true };
+    }
+
+    // Solo admin — mismo doble candado (RLS + gating de interfaz) que
+    // desbloquearRegistroIdentificacion.
+    async function desbloquearRegistroFormatoA2Levantamiento(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('formato_a2_levantamiento')
+            .update({ confirmado: false, solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo desbloquear: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+
+    async function solicitarEdicionFormatoA2Levantamiento(id, nombreSolicitante) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        const { error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.rpc('solicitar_edicion_formato_a2_levantamiento', { registro_id: id, nombre_solicitante: nombreSolicitante || null }),
+            'solicitar edición de registro de Formato A-2 (levantamiento)'
+        );
+        if (error) return { ok: false, error: error.mensaje || 'No se pudo enviar la solicitud.' };
+        return { ok: true };
+    }
+
+    async function listarSolicitudesEdicionFormatoA2Levantamiento(comisionKey) {
+        if (!comisionKey) return { ok: true, solicitudes: [] };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, solicitudes: [], error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+            (client) => client.from('formato_a2_levantamiento')
+                .select('id, toma_nombre, apellidos_nombres, unidad_catastral, solicitud_edicion_por_nombre, solicitud_edicion_en')
+                .eq('comision_id', comisionId)
+                .eq('solicitud_edicion', true)
+                .order('solicitud_edicion_en', { ascending: true }),
+            'listar solicitudes de edición de Formato A-2 (levantamiento)'
+        );
+        if (error) return { ok: false, solicitudes: [], error: error.mensaje || 'No se pudo listar las solicitudes.' };
+        return { ok: true, solicitudes: data || [] };
+    }
+
+    async function rechazarSolicitudEdicionFormatoA2Levantamiento(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data, error } = await client.from('formato_a2_levantamiento')
+            .update({ solicitud_edicion: false, solicitud_edicion_por: null, solicitud_edicion_por_nombre: null, solicitud_edicion_en: null })
+            .eq('id', id).select('id').maybeSingle();
+        if (error) return { ok: false, error: error.message };
+        if (!data) return { ok: false, error: 'No se pudo rechazar: revisa que tengas permiso de administrador.' };
+        return { ok: true };
+    }
+
+    // Bandera manual separada del color importado (estado_verificacion) — el
+    // sectorista confirma "ya lo revisé en campo" sin reinterpretar el color
+    // de ANA/SIGA.
+    async function marcarVerificadoEnCampoFormatoA2Levantamiento(id) {
+        if (!id) return { ok: false, error: 'Falta el identificador del registro.' };
+        let client;
+        try {
+            client = window.CusshmiSupabase.getClient();
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+        const { data: sessionData } = await client.auth.getSession();
+        const usuarioId = sessionData?.session?.user?.id || null;
+        const { error } = await client.from('formato_a2_levantamiento')
+            .update({ verificado_en_campo: true, verificado_en_campo_en: new Date().toISOString(), verificado_en_campo_por: usuarioId })
+            .eq('id', id);
+        if (error) return { ok: false, error: error.message };
+        return { ok: true };
+    }
+
     window.CusshmiDatos = {
         cargarNotaAnexoG2,
         guardarNotaAnexoG2,
@@ -2509,5 +2819,17 @@
         reasignarUsuarioCanal,
         incorporarUsuarioNuevoAPadronOficialA1,
         actualizarPadronOficialA1DesdeRegistro,
+        guardarFormatoA2LevantamientoRegistros,
+        obtenerAvanceFormatoA2LevantamientoPorToma,
+        listarRegistrosFormatoA2Levantamiento,
+        cargarRegistroFormatoA2Levantamiento,
+        guardarRegistroFormatoA2Levantamiento,
+        guardarRegistroFormatoA2LevantamientoDebounced,
+        confirmarRegistroFormatoA2Levantamiento,
+        desbloquearRegistroFormatoA2Levantamiento,
+        solicitarEdicionFormatoA2Levantamiento,
+        listarSolicitudesEdicionFormatoA2Levantamiento,
+        rechazarSolicitudEdicionFormatoA2Levantamiento,
+        marcarVerificadoEnCampoFormatoA2Levantamiento,
     };
 })();

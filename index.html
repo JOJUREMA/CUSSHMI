@@ -1387,6 +1387,18 @@
                 📊 Exportar Formatos A-1/A-2
             </button>
 
+            <hr style="margin:16px 0;border:none;border-top:1px solid #ddd;">
+            <p class="info-text" style="text-align:left;">
+                <strong>Levantamiento de Observaciones — Formato A-2:</strong> distinto de lo de
+                arriba — es el Excel de cumplimiento puntual ("... LEVANTADO") con los usuarios que
+                ANA observó y que hay que verificar/completar en campo desde "Identificación y
+                registro" (móvil) → Formato A-2.
+            </p>
+            <button class="btn btn-primary" id="btnSincronizarFormatoA2Levantamiento" onclick="document.getElementById('inputFormatoA2Levantamiento').click()" style="width: 100%;" title="Sube el Excel 'Formato A2 ... LEVANTADO' (usuarios observados por ANA, ya cruzados contra el padrón digital SIGA) para verificarlos/completarlos en campo desde el móvil">
+                🗂️ Sincronizar Formato A-2 (Levantamiento)
+            </button>
+            <input type="file" id="inputFormatoA2Levantamiento" accept=".xlsx" style="display:none;" onchange="importarFormatoA2Levantamiento(event)">
+
             <button class="btn btn-secondary" onclick="cerrarModalPadronA1()" style="width: 100%; margin-top: 12px;">
                 ❌ Cerrar
             </button>
@@ -3498,6 +3510,139 @@ const COMISIONES = {
                     'Los demás no coincidieron por unidad catastral ni nombre — probablemente aún no están en ese padrón.');
             } catch (e) {
                 console.error('Error al importar padrón oficial A-1:', e);
+                alert('No se pudo leer el archivo: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+                event.target.value = '';
+            }
+        }
+
+        // ══ Formato A-2 — Levantamiento de Observaciones ANA ══
+        // Distinto de importarPadronOficialA1 (arriba) — esto es el Excel de
+        // cumplimiento puntual "... LEVANTADO" (Oficio Múltiple
+        // N°101-2026-JUSHMCH): 18 hojas — 'RESUMEN LEVANTAMIENTO',
+        // 'Margen Izquierda' (consolidado, fuente autoritativa: tiene los
+        // datos más completos Y el color de verificación, pero NO trae
+        // columna de toma), 15 hojas por toma (solo sirven acá para saber la
+        // toma de cada usuario por nombre), 'RESUMEN'. Verificado que la
+        // misma versión de ExcelJS vendorizada arriba (4.4.0) abre este
+        // archivo sin problema (a diferencia del Formato A-1 crudo de ANA,
+        // que sí necesita SheetJS — ver comentario en importarPadronOficialA1).
+        const TOMAS_FORMATO_A2_LEVANTAMIENTO = ['SD3', 'SD4', 'SD5', 'SD6', 'SD7', 'SD8', 'SD8.1', 'SD9', 'SD10', 'SD12', 'SI4', 'SD11', 'SD14', 'SI5', 'SI7'];
+        const COLORES_FORMATO_A2_LEVANTAMIENTO = { FFD9EAD3: 'verde', FFFCE5CD: 'naranja', FFFFF2CC: 'amarillo' };
+
+        async function importarFormatoA2Levantamiento(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); event.target.value = ''; return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); event.target.value = ''; return; }
+
+            const btn = document.getElementById('btnSincronizarFormatoA2Levantamiento');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📡 Leyendo archivo…'; }
+
+            try {
+                const buffer = await file.arrayBuffer();
+                const wb = new ExcelJS.Workbook();
+                await wb.xlsx.load(buffer);
+
+                const wsConsolidado = wb.getWorksheet('Margen Izquierda');
+                if (!wsConsolidado) {
+                    alert('El archivo no tiene la hoja "Margen Izquierda" — verifica que sea el Excel de Levantamiento del Formato A-2.');
+                    return;
+                }
+
+                // Pasada 1: nombre -> toma, recorriendo las 15 hojas conocidas por toma.
+                const nombreATomaMapa = new Map();
+                TOMAS_FORMATO_A2_LEVANTAMIENTO.forEach((toma) => {
+                    const ws = wb.getWorksheet(toma);
+                    if (!ws) return;
+                    for (let r = 1; r <= ws.rowCount; r++) {
+                        const val = _leerFilaInventarioComun(ws.getRow(r));
+                        const numeroOrden = val(1);
+                        if (typeof numeroOrden !== 'number' || numeroOrden <= 0) continue;
+                        const nombre = val(2).toString().trim().toUpperCase();
+                        if (nombre) nombreATomaMapa.set(nombre, toma);
+                    }
+                });
+
+                // Pasada 2: 'Margen Izquierda' — fuente autoritativa (datos más completos + color).
+                const filas = [];
+                const sinToma = [];
+                for (let r = 1; r <= wsConsolidado.rowCount; r++) {
+                    const row = wsConsolidado.getRow(r);
+                    const val = _leerFilaInventarioComun(row);
+                    const numeroOrden = val(1);
+                    if (typeof numeroOrden !== 'number' || numeroOrden <= 0) continue;
+
+                    const apellidosNombres = val(2).toString().trim();
+                    if (!apellidosNombres) continue;
+                    const nombreNorm = apellidosNombres.toUpperCase();
+                    const tomaNombre = nombreATomaMapa.get(nombreNorm) || null;
+                    if (!tomaNombre) sinToma.push(apellidosNombres);
+
+                    // El color de verificación es uniforme en toda la fila (cols 18-47) —
+                    // basta con leer una celda representativa (col.18, Conductor).
+                    const argb = row.getCell(18).fill && row.getCell(18).fill.fgColor ? row.getCell(18).fill.fgColor.argb : null;
+                    const estadoVerificacion = COLORES_FORMATO_A2_LEVANTAMIENTO[argb] || null;
+
+                    const numTexto = (c) => { const v = val(c); return v === '' ? null : v.toString().trim(); };
+                    const numValor = (c) => { const v = val(c); return typeof v === 'number' ? v : (parseFloat(v) || null); };
+
+                    filas.push({
+                        tomaNombre, numeroOrden,
+                        apellidosNombres,
+                        tipoDocumento: numTexto(3), numeroDocumento: numTexto(4),
+                        departamento: numTexto(5), provincia: numTexto(6), distrito: numTexto(7), localidad: numTexto(8),
+                        unidadCatastral: numTexto(9),
+                        areaTotalHa: numValor(10), areaBajoRiegoHa: numValor(11),
+                        subSectorHidraulico: numTexto(12), canalDerivacion: numTexto(13), fuenteAgua: numTexto(14),
+                        cutExpediente: numTexto(15), tipoUso: numTexto(16), volumenM3: numValor(17),
+                        conductorActual: numTexto(18), conductorTipoDocumento: numTexto(19), conductorNumeroDocumento: numTexto(20),
+                        estado: numTexto(21), ultimaFechaRiego: numTexto(22),
+                        este: numValor(23), norte: numValor(24), zona: numTexto(25),
+                        ucRef: numTexto(26), seUbicaBloque: numTexto(27), nombreBloqueRiego: numTexto(28), sector: numTexto(29),
+                        camposVerificacion: {
+                            cdCp: numTexto(30), l01: numTexto(31), l02: numTexto(32), l03: numTexto(33),
+                            l04: numTexto(34), l05: numTexto(35), l06: numTexto(36),
+                            areaTotalVerificadaHa: numValor(37), areaBajoRiegoVerificadaHa: numValor(38),
+                            cultivo1: numTexto(39), areaInstalada1: numValor(40),
+                            cultivo2: numTexto(41), areaInstalada2: numValor(42),
+                            cultivo3: numTexto(43), areaInstalada3: numValor(44),
+                            cultivo4: numTexto(45), areaInstalada4: numValor(46),
+                        },
+                        observaciones: numTexto(47),
+                        estadoVerificacion,
+                    });
+                }
+
+                if (filas.length === 0) {
+                    alert('No se encontraron registros reconocibles en la hoja "Margen Izquierda". Verifica que sea el Excel de Levantamiento del Formato A-2 (mismo diseño de encabezados fusionados).');
+                    return;
+                }
+
+                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                const resultado = await CusshmiDatos.guardarFormatoA2LevantamientoRegistros(comisionKey, filas);
+                if (!resultado.ok) {
+                    alert('⚠️ No se pudo sincronizar el Formato A-2 (Levantamiento): ' + (resultado.error || 'error desconocido') +
+                        (resultado.guardados ? ('\n\n(' + resultado.guardados + ' registros sí se guardaron antes del error.)') : ''));
+                    return;
+                }
+
+                const porColor = { verde: 0, naranja: 0, amarillo: 0, sin_color: 0 };
+                filas.forEach((f) => { porColor[f.estadoVerificacion || 'sin_color']++; });
+                let mensaje = '✅ Formato A-2 (Levantamiento) sincronizado: ' + resultado.guardados + ' registros de ' + filas.length + ' leídos.\n\n' +
+                    '🟢 Verde (DNI exacto en SIGA): ' + porColor.verde + '\n' +
+                    '🟠 Naranja (nombre/otra toma, a confirmar): ' + porColor.naranja + '\n' +
+                    '🟡 Amarillo (sin info digital): ' + porColor.amarillo +
+                    (porColor.sin_color ? '\n⚪ Sin color reconocido: ' + porColor.sin_color : '');
+                if (sinToma.length > 0) {
+                    mensaje += '\n\n⚠️ ' + sinToma.length + ' usuario(s) sin toma identificada (no aparecen en ninguna de las 15 hojas por toma) — revisa el Excel fuente:\n' +
+                        sinToma.slice(0, 20).join('\n') + (sinToma.length > 20 ? '\n… y ' + (sinToma.length - 20) + ' más.' : '');
+                }
+                alert(mensaje);
+            } catch (e) {
+                console.error('Error al importar Formato A-2 (Levantamiento):', e);
                 alert('No se pudo leer el archivo: ' + (e.message || e));
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }

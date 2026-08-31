@@ -25,6 +25,7 @@
     <script src="../assets/core/utilidades.js"></script>
     <script src="../assets/core/anexoG2.js"></script>
     <script src="../assets/core/mapa.js"></script>
+    <script src="../assets/core/coordenadasUtm.js"></script>
 
     <style>
         .campo textarea {
@@ -92,6 +93,14 @@
         }
         .indicador-clasificacion.a1 { background: rgba(30, 126, 52, 0.25); border-color: #1e7e34; }
         .indicador-clasificacion.a2 { background: rgba(192, 57, 43, 0.25); border-color: #c0392b; }
+        .indicador-clasificacion.verif-verde { background: rgba(30, 126, 52, 0.25); border-color: #1e7e34; }
+        .indicador-clasificacion.verif-naranja { background: rgba(214, 137, 16, 0.25); border-color: #d68910; }
+        .indicador-clasificacion.verif-amarillo { background: rgba(200, 168, 75, 0.25); border-color: #c8a84b; }
+        /* Insignia de 3 colores para Formato A-2 (Levantamiento) — mismo pill que
+           .badge-registrado, sobreescribiendo solo el color de fondo/texto. */
+        .badge-verde { background: #1e7e34; }
+        .badge-naranja { background: #d68910; }
+        .badge-amarillo { background: #c8a84b; color: #002555; }
         .aviso-bloqueado {
             width: 100%;
             max-width: 420px;
@@ -301,6 +310,74 @@
             <div class="estado-busqueda" id="estadoSolicitudes"></div>
             <div class="resultados" id="listaSolicitudes"></div>
         </div>
+
+        <!-- ── Pantalla 1: elegir Formato A-1 / Formato A-2 ── -->
+        <div id="vistaEleccionFormato" style="width:100%; display:flex; flex-direction:column; align-items:center;">
+            <p style="text-align:center; max-width:420px; margin-bottom:16px; opacity:0.85; font-size:13px;">
+                Elige qué formato deseas trabajar.
+            </p>
+            <button class="boton" id="btnElegirFormatoA1" style="max-width:420px;">📋 Formato A-1</button>
+            <button class="boton" id="btnElegirFormatoA2" style="max-width:420px; margin-top:12px;">🗂️ Formato A-2 (Levantamiento de Observaciones)</button>
+        </div>
+
+        <!-- ── Formato A-2: selector de toma / Consolidado ── -->
+        <div id="vistaSelectorA2Levantamiento" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverEleccionDesdeSelectorA2" style="max-width:420px;">← Volver</button>
+            <h1 style="margin-top:14px; font-size:16px;">Formato A-2 — Levantamiento de Observaciones</h1>
+
+            <div class="campo" style="width:100%; max-width:420px; margin-top:8px;">
+                <label for="selectTomaA2Levantamiento">Toma / Consolidado</label>
+                <select id="selectTomaA2Levantamiento">
+                    <option value="">-- Selecciona --</option>
+                </select>
+            </div>
+            <div class="estado-busqueda" id="estadoSelectorA2Levantamiento"></div>
+        </div>
+
+        <!-- ── Formato A-2: lista de usuarios observados ── -->
+        <div id="vistaListaA2Levantamiento" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverSelectorDesdeListaA2" style="max-width:420px;">← Volver al selector</button>
+            <h1 id="tituloListaA2Levantamiento" style="margin-top:14px; font-size:16px;"></h1>
+            <div class="estado-busqueda" id="estadoListaA2Levantamiento"></div>
+            <div class="resultados" id="listaA2Levantamiento"></div>
+        </div>
+
+        <!-- ── Formato A-2: ficha de un usuario observado ── -->
+        <div id="vistaEdicionA2Levantamiento" style="display:none; width:100%; flex-direction:column; align-items:center;">
+            <button class="boton-secundario" id="btnVolverListaDesdeEdicionA2" style="max-width:420px;">← Volver a la lista</button>
+            <h1 id="tituloEdicionA2Levantamiento" style="margin-top:14px; font-size:16px; text-align:center;"></h1>
+            <div id="badgeVerificacionA2" class="indicador-clasificacion" style="display:none;"></div>
+
+            <div class="aviso-bloqueado" id="avisoBloqueadoA2" style="display:none;">
+                🔒 Registro confirmado. Para editar solicite habilitación al administrador.
+            </div>
+
+            <div class="seccion-titulo" style="margin-top:10px;">Datos observados (ANA) — solo lectura</div>
+            <div class="tarjeta" style="max-width:420px;">
+                <div id="datosObservadosA2"></div>
+            </div>
+
+            <div class="seccion-titulo">Datos de verificación (editar/completar en campo)</div>
+            <div class="tarjeta" style="max-width:420px;">
+                <div id="datosVerificacionA2"></div>
+            </div>
+
+            <button class="boton-secundario" id="btnGpsA2" style="max-width:420px; margin-top:14px;">📍 Capturar Este/Norte por GPS</button>
+            <div class="estado-busqueda" id="estadoGpsA2"></div>
+
+            <button class="boton-secundario" id="btnMarcarVerificadoCampoA2" style="max-width:420px; margin-top:10px;">✅ Marcar verificado en campo</button>
+
+            <div class="aviso-bloqueado" id="avisoSolicitudEnviadaA2" style="display:none; margin-top:10px; background: rgba(200,168,75,0.2);">
+                🕓 Solicitud de edición enviada — esperando aprobación del administrador.
+            </div>
+            <div class="aviso-bloqueado" id="avisoSolicitudPendienteAdminA2" style="display:none; margin-top:10px; background: rgba(200,168,75,0.2);"></div>
+
+            <div class="estado-busqueda" id="estadoConfirmacionA2"></div>
+            <button class="boton" id="btnConfirmarA2" style="max-width:420px; margin-top:10px;">✔ Confirmar</button>
+            <button class="boton-secundario" id="btnSolicitarEdicionA2" style="max-width:420px; display:none;">🔓 Solicitar habilitación de edición</button>
+            <button class="boton-secundario" id="btnDesbloquearA2" style="max-width:420px; display:none;">✅ Habilitar edición (admin)</button>
+            <button class="boton-secundario" id="btnRechazarSolicitudA2" style="max-width:420px; display:none; margin-top:10px;">❌ Rechazar solicitud (admin)</button>
+        </div>
     </div>
 
     <script>
@@ -386,6 +463,10 @@
 
         // ═══ Pantalla 2 — selección de toma ═══
         async function mostrarVistaTomas() {
+            document.getElementById('vistaEleccionFormato').style.display = 'none';
+            document.getElementById('vistaSelectorA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaListaA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaEdicionA2Levantamiento').style.display = 'none';
             document.getElementById('vistaTomas').style.display = 'flex';
             document.getElementById('vistaBusqueda').style.display = 'none';
             document.getElementById('vistaFormulario').style.display = 'none';
@@ -1074,6 +1155,408 @@
             mostrarConfirmacion();
         });
 
+        // ═══ Formato A-2 — Levantamiento de Observaciones (ANA) ═══
+        // Distinto del flujo de arriba (identificacion_registros / clasificacion
+        // A-1-A-2 calculada) — esto es el ejercicio de cumplimiento puntual
+        // (Oficio Múltiple N°101-2026-JUSHMCH), tabla propia
+        // formato_a2_levantamiento. Estado propio (registroA2Actual, distinto
+        // de registroActual) para no mezclarse con el flujo A-1 de arriba.
+        var formatoA2TomaSeleccionada = '';
+        var registrosA2Lista = [];
+        var registroA2Actual = null;
+
+        var ETIQUETAS_ESTADO_VERIFICACION_A2 = { verde: '🟢 Verificado por DNI', naranja: '🟠 A confirmar', amarillo: '🟡 Sin info digital' };
+
+        // Campos editables (cols 18-47 del Excel oficial) — los únicos que un
+        // sectorista puede tocar. `enJson: true` = vive dentro de
+        // registroA2Actual.camposVerificacion (columna campos_verificacion,
+        // jsonb) en vez de una columna dedicada.
+        var CAMPOS_FORMATO_A2_LEVANTAMIENTO = [
+            { clave: 'conductorActual', etiqueta: 'Conductor actual', tipo: 'texto' },
+            { clave: 'conductorTipoDocumento', etiqueta: 'Conductor — Tipo documento', tipo: 'texto' },
+            { clave: 'conductorNumeroDocumento', etiqueta: 'Conductor — N° documento', tipo: 'texto' },
+            { clave: 'estado', etiqueta: 'Estado', tipo: 'texto' },
+            { clave: 'ultimaFechaRiego', etiqueta: 'Última fecha de riego', tipo: 'texto' },
+            { clave: 'este', etiqueta: 'Este (UTM)', tipo: 'numero' },
+            { clave: 'norte', etiqueta: 'Norte (UTM)', tipo: 'numero' },
+            { clave: 'zona', etiqueta: 'Zona', tipo: 'texto' },
+            { clave: 'ucRef', etiqueta: 'UC N° / Ref UC N°', tipo: 'texto' },
+            { clave: 'seUbicaBloque', etiqueta: 'Se ubica dentro del bloque', tipo: 'texto' },
+            { clave: 'nombreBloqueRiego', etiqueta: 'Nombre de Bloque de Riego', tipo: 'texto' },
+            { clave: 'sector', etiqueta: 'Sector', tipo: 'texto' },
+            { clave: 'cdCp', etiqueta: 'CD/CP', tipo: 'texto', enJson: true },
+            { clave: 'l01', etiqueta: 'L01', tipo: 'texto', enJson: true },
+            { clave: 'l02', etiqueta: 'L02', tipo: 'texto', enJson: true },
+            { clave: 'l03', etiqueta: 'L03', tipo: 'texto', enJson: true },
+            { clave: 'l04', etiqueta: 'L04', tipo: 'texto', enJson: true },
+            { clave: 'l05', etiqueta: 'L05', tipo: 'texto', enJson: true },
+            { clave: 'l06', etiqueta: 'L06', tipo: 'texto', enJson: true },
+            { clave: 'areaTotalVerificadaHa', etiqueta: 'Área total verificada (ha)', tipo: 'numero', enJson: true },
+            { clave: 'areaBajoRiegoVerificadaHa', etiqueta: 'Área bajo riego verificada (ha)', tipo: 'numero', enJson: true },
+            { clave: 'cultivo1', etiqueta: 'Cultivo 1', tipo: 'texto', enJson: true },
+            { clave: 'areaInstalada1', etiqueta: 'Área instalada 1 (ha)', tipo: 'numero', enJson: true },
+            { clave: 'cultivo2', etiqueta: 'Cultivo 2', tipo: 'texto', enJson: true },
+            { clave: 'areaInstalada2', etiqueta: 'Área instalada 2 (ha)', tipo: 'numero', enJson: true },
+            { clave: 'cultivo3', etiqueta: 'Cultivo 3', tipo: 'texto', enJson: true },
+            { clave: 'areaInstalada3', etiqueta: 'Área instalada 3 (ha)', tipo: 'numero', enJson: true },
+            { clave: 'cultivo4', etiqueta: 'Cultivo 4', tipo: 'texto', enJson: true },
+            { clave: 'areaInstalada4', etiqueta: 'Área instalada 4 (ha)', tipo: 'numero', enJson: true },
+            { clave: 'observaciones', etiqueta: 'Observaciones', tipo: 'texto' },
+        ];
+
+        // ═══ Pantalla 1 — elegir Formato A-1 / Formato A-2 ═══
+        function mostrarVistaEleccionFormato() {
+            document.getElementById('vistaTomas').style.display = 'none';
+            document.getElementById('vistaBusqueda').style.display = 'none';
+            document.getElementById('vistaFormulario').style.display = 'none';
+            document.getElementById('vistaConfirmacion').style.display = 'none';
+            document.getElementById('vistaSolicitudes').style.display = 'none';
+            document.getElementById('vistaSelectorA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaListaA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaEdicionA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaEleccionFormato').style.display = 'flex';
+        }
+        document.getElementById('btnElegirFormatoA1').addEventListener('click', mostrarVistaTomas);
+        document.getElementById('btnElegirFormatoA2').addEventListener('click', mostrarVistaSelectorA2Levantamiento);
+        document.getElementById('btnVolverEleccionDesdeSelectorA2').addEventListener('click', mostrarVistaEleccionFormato);
+
+        // ═══ Selector de toma / Consolidado ═══
+        async function mostrarVistaSelectorA2Levantamiento() {
+            document.getElementById('vistaEleccionFormato').style.display = 'none';
+            document.getElementById('vistaSelectorA2Levantamiento').style.display = 'flex';
+            var elEstado = document.getElementById('estadoSelectorA2Levantamiento');
+            var elSelect = document.getElementById('selectTomaA2Levantamiento');
+            elEstado.textContent = 'Cargando avance…';
+            elSelect.innerHTML = '<option value="">-- Selecciona --</option>';
+
+            var resultado = await CusshmiDatos.obtenerAvanceFormatoA2LevantamientoPorToma(comisionKeyActual);
+            if (!resultado.ok) { elEstado.textContent = resultado.error || 'No se pudo cargar el avance.'; return; }
+            var avance = resultado.avance || {};
+            var consolidado = avance.CONSOLIDADO || { total: 0, verificados: 0 };
+            if (consolidado.total === 0) {
+                elEstado.textContent = 'No hay registros de Formato A-2 (Levantamiento) sincronizados para tu comisión todavía. Pide al administrador que lo suba desde el escritorio.';
+                return;
+            }
+            elEstado.textContent = '';
+
+            var optConsolidado = document.createElement('option');
+            optConsolidado.value = 'CONSOLIDADO';
+            optConsolidado.textContent = '📊 TODAS LAS TOMAS (Consolidado) — ' + consolidado.verificados + '/' + consolidado.total + ' verificados';
+            elSelect.appendChild(optConsolidado);
+
+            Object.keys(avance).filter(function (t) { return t !== 'CONSOLIDADO'; })
+                .sort(function (a, b) { return compararOrdenTomas(a, b); })
+                .forEach(function (toma) {
+                    var a = avance[toma];
+                    var opt = document.createElement('option');
+                    opt.value = toma;
+                    opt.textContent = toma + ' — ' + a.verificados + '/' + a.total + ' verificados';
+                    elSelect.appendChild(opt);
+                });
+        }
+        document.getElementById('selectTomaA2Levantamiento').addEventListener('change', function (e) {
+            if (e.target.value) abrirListaA2Levantamiento(e.target.value);
+        });
+
+        // ═══ Lista de usuarios observados ═══
+        async function abrirListaA2Levantamiento(tomaNombre) {
+            formatoA2TomaSeleccionada = tomaNombre;
+            document.getElementById('vistaSelectorA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaListaA2Levantamiento').style.display = 'flex';
+            document.getElementById('tituloListaA2Levantamiento').textContent =
+                tomaNombre === 'CONSOLIDADO' ? 'Consolidado — todas las tomas' : 'Toma ' + tomaNombre;
+
+            var elEstado = document.getElementById('estadoListaA2Levantamiento');
+            var elLista = document.getElementById('listaA2Levantamiento');
+            elEstado.textContent = 'Cargando usuarios observados…';
+            elLista.innerHTML = '';
+
+            var resultado = await CusshmiDatos.listarRegistrosFormatoA2Levantamiento(comisionKeyActual, tomaNombre);
+            if (!resultado.ok) { elEstado.textContent = resultado.error || 'No se pudo cargar la lista.'; return; }
+            registrosA2Lista = resultado.registros || [];
+            if (registrosA2Lista.length === 0) {
+                elEstado.textContent = 'No hay usuarios observados para esta toma.';
+                return;
+            }
+            elEstado.textContent = '';
+
+            registrosA2Lista.forEach(function (r) {
+                var fila = document.createElement('div');
+                fila.className = 'fila-resultado';
+                var badgeTexto = ETIQUETAS_ESTADO_VERIFICACION_A2[r.estado_verificacion] || '';
+                var badgeClase = r.estado_verificacion ? ('badge-registrado badge-' + r.estado_verificacion) : '';
+                fila.innerHTML =
+                    '<div class="nombre-resultado">' + escapeHtml(r.apellidos_nombres || '-') +
+                    (badgeTexto ? '<span class="' + badgeClase + '">' + badgeTexto + '</span>' : '') +
+                    (r.verificado_en_campo ? '<span class="badge-registrado" style="background:#1e7e34;">✅ verificado</span>' : '') +
+                    '</div>' +
+                    '<div class="detalle-resultado">' +
+                    (tomaNombre === 'CONSOLIDADO' ? 'Toma ' + escapeHtml(r.toma_nombre || '-') + ' · ' : '') +
+                    'UC: ' + escapeHtml(r.unidad_catastral || '-') + '</div>';
+                fila.addEventListener('click', function () { abrirEdicionA2Levantamiento(r.id); });
+                elLista.appendChild(fila);
+            });
+        }
+        document.getElementById('btnVolverSelectorDesdeListaA2').addEventListener('click', function () {
+            document.getElementById('vistaListaA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaSelectorA2Levantamiento').style.display = 'flex';
+        });
+
+        // ═══ Ficha de un usuario observado ═══
+        function filaResumenA2(etiqueta, valor) {
+            var texto = (valor === null || valor === undefined || valor === '') ? '-' : valor.toString();
+            return '<div class="resumen-fila"><span class="etiqueta-resumen">' + escapeHtml(etiqueta) + '</span>' +
+                '<span class="valor-resumen">' + escapeHtml(texto) + '</span></div>';
+        }
+
+        async function abrirEdicionA2Levantamiento(id) {
+            var resultado = await CusshmiDatos.cargarRegistroFormatoA2Levantamiento(id);
+            if (!resultado.ok) { alert(resultado.error || 'No se pudo abrir el registro.'); return; }
+            var r = resultado.registro;
+            registroA2Actual = {
+                id: r.id, tomaNombre: r.toma_nombre,
+                numeroOrden: r.numero_orden, apellidosNombres: r.apellidos_nombres,
+                tipoDocumento: r.tipo_documento, numeroDocumento: r.numero_documento,
+                departamento: r.departamento, provincia: r.provincia, distrito: r.distrito, localidad: r.localidad,
+                unidadCatastral: r.unidad_catastral, areaTotalHa: r.area_total_ha, areaBajoRiegoHa: r.area_bajo_riego_ha,
+                subSectorHidraulico: r.sub_sector_hidraulico, canalDerivacion: r.canal_derivacion, fuenteAgua: r.fuente_agua,
+                cutExpediente: r.cut_expediente, tipoUso: r.tipo_uso, volumenM3: r.volumen_m3,
+
+                conductorActual: r.conductor_actual, conductorTipoDocumento: r.conductor_tipo_documento,
+                conductorNumeroDocumento: r.conductor_numero_documento, estado: r.estado, ultimaFechaRiego: r.ultima_fecha_riego,
+                este: r.este, norte: r.norte, zona: r.zona, ucRef: r.uc_ref, seUbicaBloque: r.se_ubica_bloque,
+                nombreBloqueRiego: r.nombre_bloque_riego, sector: r.sector, observaciones: r.observaciones,
+                camposVerificacion: r.campos_verificacion || {},
+
+                estadoVerificacion: r.estado_verificacion,
+                verificadoEnCampo: !!r.verificado_en_campo,
+                confirmado: !!r.confirmado,
+                solicitudEdicion: !!r.solicitud_edicion,
+                solicitudEdicionPorNombre: r.solicitud_edicion_por_nombre || '',
+                solicitudEdicionEn: r.solicitud_edicion_en || null,
+            };
+            pintarEdicionA2Levantamiento();
+            document.getElementById('vistaListaA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaEdicionA2Levantamiento').style.display = 'flex';
+        }
+        document.getElementById('btnVolverListaDesdeEdicionA2').addEventListener('click', function () {
+            document.getElementById('vistaEdicionA2Levantamiento').style.display = 'none';
+            abrirListaA2Levantamiento(formatoA2TomaSeleccionada); // refresca badges/verificado
+        });
+
+        // Guarda de inmediato (sin debounce compartido — cada campo se
+        // confirma en su propio blur, así que no hay riesgo de que el
+        // guardado de un campo pise el de otro editado casi al mismo tiempo,
+        // a diferencia del formulario A-1 de arriba que sí comparte un timer
+        // porque todos sus campos están visibles y editándose a la vez).
+        function guardarCampoA2(datosParciales) {
+            CusshmiDatos.guardarRegistroFormatoA2Levantamiento(datosParciales).then(function (r) {
+                if (!r.ok) alert('⚠️ No se pudo guardar: ' + r.error);
+            });
+        }
+
+        // Tocar el valor -> input/select inline -> blur guarda. Mismo patrón
+        // que _filaCampoEditable de movil/inventario-infraestructura.html,
+        // adaptado a registroA2Actual (sin diccionario: los campos de
+        // verificación son texto/número libres, no códigos de catálogo).
+        function _filaCampoEditableA2(campo) {
+            var valorActual = campo.enJson ? (registroA2Actual.camposVerificacion || {})[campo.clave] : registroA2Actual[campo.clave];
+            var fila = document.createElement('div');
+            fila.className = 'resumen-fila';
+            var elEtiqueta = document.createElement('span');
+            elEtiqueta.className = 'etiqueta-resumen';
+            elEtiqueta.textContent = campo.etiqueta;
+            fila.appendChild(elEtiqueta);
+
+            function textoMostrado(v) { return (v === undefined || v === null || v === '') ? '— (tocar para editar)' : String(v); }
+
+            var elValor = document.createElement('button');
+            elValor.type = 'button';
+            elValor.className = 'valor-resumen';
+            elValor.style.cssText = 'background:none; border:none; color:inherit; text-decoration:underline dotted; cursor:pointer; font:inherit; padding:0; text-align:right;';
+            elValor.textContent = textoMostrado(valorActual);
+            elValor.addEventListener('click', function () {
+                if (registroA2Actual.confirmado) return;
+                var input = document.createElement('input');
+                input.type = campo.tipo === 'numero' ? 'number' : 'text';
+                if (campo.tipo === 'numero') input.step = '0.01';
+                input.value = valorActual != null ? valorActual : '';
+                input.style.cssText = 'max-width:170px; padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.95); color:#002555; font-size:13px;';
+                fila.replaceChild(input, elValor);
+                input.focus();
+                var yaConfirmado = false;
+                function confirmar() {
+                    if (yaConfirmado) return;
+                    yaConfirmado = true;
+                    var nuevo = input.value === '' ? null : (campo.tipo === 'numero' ? parseFloat(input.value) : input.value);
+                    valorActual = nuevo;
+                    if (campo.enJson) {
+                        registroA2Actual.camposVerificacion = registroA2Actual.camposVerificacion || {};
+                        registroA2Actual.camposVerificacion[campo.clave] = nuevo;
+                        guardarCampoA2({ id: registroA2Actual.id, camposVerificacion: registroA2Actual.camposVerificacion });
+                    } else {
+                        registroA2Actual[campo.clave] = nuevo;
+                        var datosGuardar = { id: registroA2Actual.id };
+                        datosGuardar[campo.clave] = nuevo;
+                        guardarCampoA2(datosGuardar);
+                    }
+                    elValor.textContent = textoMostrado(nuevo);
+                    if (fila.contains(input)) fila.replaceChild(elValor, input);
+                }
+                input.addEventListener('blur', confirmar);
+                input.addEventListener('keydown', function (e) { if (e.key === 'Enter') input.blur(); });
+            });
+            fila.appendChild(elValor);
+            return fila;
+        }
+
+        function pintarEdicionA2Levantamiento() {
+            var r = registroA2Actual;
+            document.getElementById('tituloEdicionA2Levantamiento').textContent =
+                r.apellidosNombres + (r.tomaNombre ? ' — Toma ' + r.tomaNombre : '');
+
+            var elBadge = document.getElementById('badgeVerificacionA2');
+            if (r.estadoVerificacion) {
+                elBadge.style.display = 'block';
+                elBadge.className = 'indicador-clasificacion verif-' + r.estadoVerificacion;
+                elBadge.textContent = ETIQUETAS_ESTADO_VERIFICACION_A2[r.estadoVerificacion] || r.estadoVerificacion;
+            } else {
+                elBadge.style.display = 'none';
+            }
+
+            document.getElementById('avisoBloqueadoA2').style.display = r.confirmado ? 'block' : 'none';
+
+            document.getElementById('datosObservadosA2').innerHTML =
+                filaResumenA2('N° de orden', r.numeroOrden) +
+                filaResumenA2('Apellidos y nombres', r.apellidosNombres) +
+                filaResumenA2('Tipo documento', r.tipoDocumento) +
+                filaResumenA2('N° documento', r.numeroDocumento) +
+                filaResumenA2('Departamento', r.departamento) +
+                filaResumenA2('Provincia', r.provincia) +
+                filaResumenA2('Distrito', r.distrito) +
+                filaResumenA2('Localidad', r.localidad) +
+                filaResumenA2('Unidad catastral', r.unidadCatastral) +
+                filaResumenA2('Área total (ha)', r.areaTotalHa) +
+                filaResumenA2('Área bajo riego (ha)', r.areaBajoRiegoHa) +
+                filaResumenA2('Sub Sector Hidráulico', r.subSectorHidraulico) +
+                filaResumenA2('Canal de Derivación', r.canalDerivacion) +
+                filaResumenA2('Fuente de Agua', r.fuenteAgua) +
+                filaResumenA2('CUT expediente', r.cutExpediente) +
+                filaResumenA2('Tipo de uso', r.tipoUso) +
+                filaResumenA2('Volumen (m³)', r.volumenM3);
+
+            var elVerif = document.getElementById('datosVerificacionA2');
+            elVerif.innerHTML = '';
+            CAMPOS_FORMATO_A2_LEVANTAMIENTO.forEach(function (campo) {
+                elVerif.appendChild(_filaCampoEditableA2(campo));
+            });
+
+            document.getElementById('btnMarcarVerificadoCampoA2').textContent = r.verificadoEnCampo ? '✅ Verificado en campo' : '✅ Marcar verificado en campo';
+            document.getElementById('btnMarcarVerificadoCampoA2').disabled = r.verificadoEnCampo || r.confirmado;
+            document.getElementById('btnGpsA2').disabled = r.confirmado;
+
+            var bloqueado = r.confirmado;
+            var solicitado = !!r.solicitudEdicion;
+            document.getElementById('btnConfirmarA2').style.display = bloqueado ? 'none' : 'block';
+            document.getElementById('btnSolicitarEdicionA2').style.display = (bloqueado && !esAdmin && !solicitado) ? 'block' : 'none';
+            document.getElementById('avisoSolicitudEnviadaA2').style.display = (bloqueado && !esAdmin && solicitado) ? 'block' : 'none';
+            document.getElementById('btnDesbloquearA2').style.display = (bloqueado && esAdmin) ? 'block' : 'none';
+            document.getElementById('btnDesbloquearA2').textContent = solicitado ? '✅ Habilitar edición (admin)' : '🔓 Desbloquear (admin)';
+            document.getElementById('btnRechazarSolicitudA2').style.display = (bloqueado && esAdmin && solicitado) ? 'block' : 'none';
+            var elAvisoAdmin = document.getElementById('avisoSolicitudPendienteAdminA2');
+            if (bloqueado && esAdmin && solicitado) {
+                var fecha = r.solicitudEdicionEn ? new Date(r.solicitudEdicionEn).toLocaleString('es-PE') : '';
+                elAvisoAdmin.textContent = '📩 ' + (r.solicitudEdicionPorNombre || 'Un programador') + ' solicitó habilitar la edición' + (fecha ? ' — ' + fecha : '') + '.';
+                elAvisoAdmin.style.display = 'block';
+            } else {
+                elAvisoAdmin.style.display = 'none';
+            }
+            document.getElementById('estadoConfirmacionA2').textContent = '';
+            document.getElementById('estadoGpsA2').textContent = '';
+        }
+
+        document.getElementById('btnGpsA2').addEventListener('click', function () {
+            if (!navigator.geolocation) { alert('Este dispositivo no soporta geolocalización.'); return; }
+            if (registroA2Actual.confirmado) return;
+            var elEstado = document.getElementById('estadoGpsA2');
+            elEstado.textContent = 'Obteniendo ubicación…';
+            navigator.geolocation.getCurrentPosition(function (pos) {
+                var utm = latLonAUtm17S(pos.coords.latitude, pos.coords.longitude);
+                registroA2Actual.este = utm.easting;
+                registroA2Actual.norte = utm.northing;
+                registroA2Actual.zona = registroA2Actual.zona || '17-S';
+                guardarCampoA2({ id: registroA2Actual.id, este: utm.easting, norte: utm.northing, zona: registroA2Actual.zona });
+                elEstado.textContent = '✅ Ubicación capturada (Este: ' + utm.easting.toFixed(1) + ', Norte: ' + utm.northing.toFixed(1) + ').';
+                pintarEdicionA2Levantamiento();
+                document.getElementById('estadoGpsA2').textContent = '✅ Ubicación capturada.';
+            }, function (err) {
+                elEstado.textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '.';
+            }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+        });
+
+        document.getElementById('btnMarcarVerificadoCampoA2').addEventListener('click', async function () {
+            var resultado = await CusshmiDatos.marcarVerificadoEnCampoFormatoA2Levantamiento(registroA2Actual.id);
+            if (!resultado.ok) { alert('⚠️ ' + resultado.error); return; }
+            registroA2Actual.verificadoEnCampo = true;
+            pintarEdicionA2Levantamiento();
+        });
+
+        document.getElementById('btnConfirmarA2').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacionA2');
+            elEstado.textContent = 'Confirmando…';
+            var resultado = await CusshmiDatos.confirmarRegistroFormatoA2Levantamiento(registroA2Actual.id);
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroA2Actual.confirmado = true;
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Confirmación', 'Formato A-2 (Levantamiento)', registroA2Actual.apellidosNombres + ' — Toma ' + registroA2Actual.tomaNombre);
+            }
+            pintarEdicionA2Levantamiento();
+        });
+
+        document.getElementById('btnDesbloquearA2').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacionA2');
+            elEstado.textContent = 'Desbloqueando…';
+            var resultado = await CusshmiDatos.desbloquearRegistroFormatoA2Levantamiento(registroA2Actual.id);
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroA2Actual.confirmado = false;
+            registroA2Actual.solicitudEdicion = false;
+            registroA2Actual.solicitudEdicionPorNombre = '';
+            registroA2Actual.solicitudEdicionEn = null;
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Desbloqueo', 'Formato A-2 (Levantamiento)', registroA2Actual.apellidosNombres + ' — Toma ' + registroA2Actual.tomaNombre);
+            }
+            pintarEdicionA2Levantamiento();
+        });
+
+        document.getElementById('btnRechazarSolicitudA2').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacionA2');
+            elEstado.textContent = 'Rechazando solicitud…';
+            var resultado = await CusshmiDatos.rechazarSolicitudEdicionFormatoA2Levantamiento(registroA2Actual.id);
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroA2Actual.solicitudEdicion = false;
+            registroA2Actual.solicitudEdicionPorNombre = '';
+            registroA2Actual.solicitudEdicionEn = null;
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Rechazo de solicitud de edición', 'Formato A-2 (Levantamiento)', registroA2Actual.apellidosNombres + ' — Toma ' + registroA2Actual.tomaNombre);
+            }
+            pintarEdicionA2Levantamiento();
+            document.getElementById('estadoConfirmacionA2').textContent = 'Solicitud rechazada. El registro sigue bloqueado.';
+        });
+
+        document.getElementById('btnSolicitarEdicionA2').addEventListener('click', async function () {
+            var elEstado = document.getElementById('estadoConfirmacionA2');
+            elEstado.textContent = 'Enviando solicitud…';
+            var resultado = await CusshmiDatos.solicitarEdicionFormatoA2Levantamiento(registroA2Actual.id, perfilActual ? perfilActual.nombre : '');
+            if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+            registroA2Actual.solicitudEdicion = true;
+            registroA2Actual.solicitudEdicionPorNombre = perfilActual ? perfilActual.nombre : '';
+            registroA2Actual.solicitudEdicionEn = new Date().toISOString();
+            if (window.CusshmiAuditoria) {
+                CusshmiAuditoria.registrarAuditoria('Solicitud de edición', 'Formato A-2 (Levantamiento)', registroA2Actual.apellidosNombres + ' — Toma ' + registroA2Actual.tomaNombre);
+            }
+            pintarEdicionA2Levantamiento();
+        });
+
         // ═══ Arranque ═══
         (async function iniciar() {
             if (typeof CusshmiAuth === 'undefined') {
@@ -1093,7 +1576,7 @@
                 elEstadoTomas.textContent = 'Tu usuario no tiene permiso para este módulo.';
                 return;
             }
-            mostrarVistaTomas();
+            mostrarVistaEleccionFormato();
         })();
     </script>
 </body>
