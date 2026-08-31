@@ -11,6 +11,7 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="stylesheet" href="estilos.css">
+    <link rel="stylesheet" href="vendor/leaflet.css">
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script src="../assets/supabase/supabase-config.js"></script>
@@ -26,8 +27,41 @@
     <script src="../assets/core/anexoG2.js"></script>
     <script src="../assets/core/mapa.js"></script>
     <script src="../assets/core/coordenadasUtm.js"></script>
+    <script src="vendor/leaflet.js"></script>
 
     <style>
+        /* Editor de ubicación a pantalla completa — mismo patrón que .editor-poligono
+           en movil/sinceramiento-areas.html / movil/inventario-infraestructura.html. */
+        .editor-poligono {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            background: #001830;
+            flex-direction: column;
+        }
+        .editor-poligono-header, .editor-poligono-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            flex-shrink: 0;
+        }
+        .editor-poligono-header { color: #ffffff; font-weight: 700; font-size: 13px; }
+        .editor-poligono-footer { flex-direction: column; gap: 6px; }
+        .editor-poligono-footer .estado-busqueda { color: #ffffff; opacity: 0.85; }
+        .editor-poligono-mapa { flex: 1; min-height: 0; }
+        .marcador-vertice-editor {
+            background: #003876;
+            color: #ffffff;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
         .campo textarea {
             width: 100%;
             padding: 11px 12px;
@@ -373,7 +407,7 @@
                 <div id="datosVerificacionA2"></div>
             </div>
 
-            <button class="boton-secundario" id="btnGpsA2" style="max-width:420px; margin-top:14px;">📍 Capturar Este/Norte por GPS</button>
+            <button class="boton-secundario" id="btnGpsA2" style="max-width:420px; margin-top:14px;">🗺️ Ubicar Este/Norte en el mapa</button>
             <div class="estado-busqueda" id="estadoGpsA2"></div>
 
             <button class="boton-secundario" id="btnMarcarVerificadoCampoA2" style="max-width:420px; margin-top:10px;">✅ Marcar verificado en campo</button>
@@ -388,6 +422,39 @@
             <button class="boton-secundario" id="btnSolicitarEdicionA2" style="max-width:420px; display:none;">🔓 Solicitar habilitación de edición</button>
             <button class="boton-secundario" id="btnDesbloquearA2" style="max-width:420px; display:none;">✅ Habilitar edición (admin)</button>
             <button class="boton-secundario" id="btnRechazarSolicitudA2" style="max-width:420px; display:none; margin-top:10px;">❌ Rechazar solicitud (admin)</button>
+        </div>
+
+        <!-- ── Formato A-2: editor de mapa a pantalla completa — Este/Norte (GPS en vivo o
+             manual) + medición opcional de área. Mismo esqueleto que .editor-poligono de
+             movil/sinceramiento-areas.html / movil/inventario-infraestructura.html. ── -->
+        <div id="vistaEditorUbicacionA2" class="editor-poligono" style="display:none;">
+            <div class="editor-poligono-header">
+                <button class="boton-secundario" id="btnCerrarEditorUbicacionA2" style="max-width:none; padding:6px 10px; font-size:12px;">✕ Cerrar</button>
+                <span id="tituloEditorUbicacionA2">Ubicación (Este/Norte)</span>
+                <button class="boton" id="btnFinalizarEditorUbicacionA2" style="max-width:none; padding:6px 10px; font-size:12px;">✔ Finalizar</button>
+            </div>
+            <div id="mapaEditorUbicacionA2" class="editor-poligono-mapa"></div>
+            <div class="editor-poligono-footer">
+                <div class="estado-busqueda" id="estadoEditorUbicacionA2" style="max-width:none;"></div>
+                <!-- Modo Punto (por defecto) -->
+                <div id="controlesModoPuntoA2" style="display:flex; flex-direction:column; gap:6px;">
+                    <button class="boton" id="btnFijarGpsUbicacionA2" style="max-width:none;">📍 Fijar mi ubicación aquí</button>
+                    <button class="boton-secundario" id="btnMedirAreaA2" style="max-width:none;">📐 Medir área (opcional)</button>
+                </div>
+                <!-- Modo Medir área -->
+                <div id="controlesModoAreaA2" style="display:none; flex-direction:column; gap:6px;">
+                    <button class="boton-secundario" id="btnDeshacerVerticeAreaA2" style="max-width:none;">↩️ Deshacer último punto</button>
+                    <button class="boton" id="btnTerminarMedicionA2" style="max-width:none;">✔ Terminar medición</button>
+                    <button class="boton-secundario" id="btnVolverModoPuntoA2" style="max-width:none;">← Volver al punto (sin guardar área)</button>
+                </div>
+                <!-- Resultado tras "Terminar medición" -->
+                <div id="resultadoAreaA2" style="display:none; flex-direction:column; gap:6px;">
+                    <div id="textoResultadoAreaA2" style="text-align:center; color:#ffffff; font-weight:600; font-size:13px;"></div>
+                    <button class="boton" id="btnUsarAreaTotalA2" style="max-width:none;">Usar como Área Total verificada</button>
+                    <button class="boton" id="btnUsarAreaBajoRiegoA2" style="max-width:none;">Usar como Área Bajo Riego verificada</button>
+                    <button class="boton-secundario" id="btnDescartarAreaA2" style="max-width:none;">Descartar medición</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1188,7 +1255,7 @@
             { clave: 'conductorTipoDocumento', etiqueta: 'Conductor — Tipo documento', tipo: 'texto' },
             { clave: 'conductorNumeroDocumento', etiqueta: 'Conductor — N° documento', tipo: 'texto' },
             { clave: 'estado', etiqueta: 'Estado', tipo: 'texto' },
-            { clave: 'ultimaFechaRiego', etiqueta: 'Última fecha de riego', tipo: 'texto' },
+            { clave: 'ultimaFechaRiego', etiqueta: 'Última fecha de riego', tipo: 'fecha' },
             { clave: 'este', etiqueta: 'Este (UTM)', tipo: 'numero' },
             { clave: 'norte', etiqueta: 'Norte (UTM)', tipo: 'numero' },
             { clave: 'zona', etiqueta: 'Zona', tipo: 'texto' },
@@ -1485,8 +1552,11 @@
             elValor.addEventListener('click', function () {
                 if (registroA2Actual.confirmado) return;
                 var input = document.createElement('input');
-                input.type = campo.tipo === 'numero' ? 'number' : 'text';
+                input.type = campo.tipo === 'numero' ? 'number' : (campo.tipo === 'fecha' ? 'date' : 'text');
                 if (campo.tipo === 'numero') input.step = '0.01';
+                // Un valor previo que no calce con YYYY-MM-DD (formato de fecha
+                // inconsistente en el Excel fuente) simplemente abre el selector
+                // vacío en vez de fallar — el sectorista elige una fecha nueva.
                 input.value = valorActual != null ? valorActual : '';
                 input.style.cssText = 'max-width:170px; padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.95); color:#002555; font-size:13px;';
                 fila.replaceChild(input, elValor);
@@ -1512,6 +1582,9 @@
                 }
                 input.addEventListener('blur', confirmar);
                 input.addEventListener('keydown', function (e) { if (e.key === 'Enter') input.blur(); });
+                // El selector nativo de fecha no siempre dispara "blur" justo al
+                // cerrarse en Android — "change" es el evento confiable ahí.
+                if (campo.tipo === 'fecha') input.addEventListener('change', confirmar);
             });
             fila.appendChild(elValor);
             return fila;
@@ -1582,23 +1655,236 @@
             document.getElementById('estadoGpsA2').textContent = '';
         }
 
-        document.getElementById('btnGpsA2').addEventListener('click', function () {
-            if (!navigator.geolocation) { alert('Este dispositivo no soporta geolocalización.'); return; }
-            if (registroA2Actual.confirmado) return;
-            var elEstado = document.getElementById('estadoGpsA2');
-            elEstado.textContent = 'Obteniendo ubicación…';
-            navigator.geolocation.getCurrentPosition(function (pos) {
-                var utm = latLonAUtm17S(pos.coords.latitude, pos.coords.longitude);
-                registroA2Actual.este = utm.easting;
-                registroA2Actual.norte = utm.northing;
-                registroA2Actual.zona = registroA2Actual.zona || '17-S';
-                guardarCampoA2({ id: registroA2Actual.id, este: utm.easting, norte: utm.northing, zona: registroA2Actual.zona });
-                elEstado.textContent = '✅ Ubicación capturada (Este: ' + utm.easting.toFixed(1) + ', Norte: ' + utm.northing.toFixed(1) + ').';
-                pintarEdicionA2Levantamiento();
-                document.getElementById('estadoGpsA2').textContent = '✅ Ubicación capturada.';
+        // ═══ Editor de ubicación a pantalla completa (Este/Norte) + medición
+        // opcional de área — mismo esqueleto que el editor de polígono de
+        // Sinceramiento de Áreas y el editor de punto/línea de Inventario de
+        // Infraestructura (movil/sinceramiento-areas.html,
+        // movil/inventario-infraestructura.html:1334-1539), combinados en una
+        // sola pantalla con un interruptor de modo: 'punto' (GPS en vivo +
+        // tocar/arrastrar, para Este/Norte) y 'area' (tocar para agregar
+        // vértices de un polígono, solo para medir hectáreas — no se guarda
+        // ningún polígono, solo el número de área si el sectorista elige
+        // "usarlo" en uno de los 2 campos de área verificada). ═══
+        function iniciarSeguimientoGpsA2(onActualizar, onError) {
+            if (!navigator.geolocation) { onError(new Error('Este dispositivo no soporta geolocalización.')); return null; }
+            return navigator.geolocation.watchPosition(onActualizar, onError, { enableHighAccuracy: true, maximumAge: 2000 });
+        }
+        function detenerSeguimientoGpsA2(watchId) {
+            if (watchId != null && navigator.geolocation) navigator.geolocation.clearWatch(watchId);
+        }
+
+        var mapaEditorUbicacionA2 = null;
+        var watchIdEditorUbicacionA2 = null;
+        var marcadorGpsEditorUbicacionA2 = null;
+        var posicionGpsEditorUbicacionA2Actual = null; // {easting, northing, lat, lon}
+        var modoEditorUbicacionA2 = 'punto'; // 'punto' | 'area'
+        var puntoTempA2 = null; // {easting, northing, lat, lon} o null
+        var marcadorPuntoEditorA2 = null;
+        var verticesAreaTempA2 = []; // [{easting, northing, lat, lon}, ...]
+        var marcadoresAreaEditorA2 = [];
+        var capaAreaEditorA2 = null;
+        var ultimaAreaMedidaA2 = null; // ha, tras "Terminar medición"
+
+        function _iconoEditorUbicacionA2(letra) {
+            return L.divIcon({ className: 'marcador-vertice-editor', html: letra, iconSize: [26, 26], iconAnchor: [13, 13] });
+        }
+        function _construirVerticeAreaA2(lat, lon) {
+            var utm = latLonAUtm17S(lat, lon);
+            return { easting: utm.easting, northing: utm.northing, lat: lat, lon: lon };
+        }
+
+        function inicializarMapaEditorUbicacionA2SiHaceFalta() {
+            if (mapaEditorUbicacionA2) return;
+            mapaEditorUbicacionA2 = L.map('mapaEditorUbicacionA2', { preferCanvas: true }).setView([-4.9, -80.6], 12);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            }).addTo(mapaEditorUbicacionA2);
+            mapaEditorUbicacionA2.on('click', function (e) {
+                if (modoEditorUbicacionA2 === 'punto') {
+                    puntoTempA2 = Object.assign(latLonAUtm17S(e.latlng.lat, e.latlng.lng), { lat: e.latlng.lat, lon: e.latlng.lng });
+                    redibujarPuntoEditorA2();
+                } else {
+                    verticesAreaTempA2.push(_construirVerticeAreaA2(e.latlng.lat, e.latlng.lng));
+                    redibujarAreaEditorA2();
+                }
+            });
+        }
+
+        function redibujarPuntoEditorA2() {
+            setTimeout(function () { mapaEditorUbicacionA2.invalidateSize(); }, 50);
+            if (marcadorPuntoEditorA2) { mapaEditorUbicacionA2.removeLayer(marcadorPuntoEditorA2); marcadorPuntoEditorA2 = null; }
+            if (puntoTempA2) {
+                marcadorPuntoEditorA2 = L.marker([puntoTempA2.lat, puntoTempA2.lon], { draggable: true, icon: _iconoEditorUbicacionA2('📍') }).addTo(mapaEditorUbicacionA2);
+                marcadorPuntoEditorA2.on('dragend', function (e) {
+                    var ll = e.target.getLatLng();
+                    puntoTempA2 = Object.assign(latLonAUtm17S(ll.lat, ll.lng), { lat: ll.lat, lon: ll.lng });
+                    actualizarEstadoEditorUbicacionA2();
+                });
+                mapaEditorUbicacionA2.setView([puntoTempA2.lat, puntoTempA2.lon], Math.max(mapaEditorUbicacionA2.getZoom(), 17));
+            }
+            actualizarEstadoEditorUbicacionA2();
+        }
+
+        function redibujarAreaEditorA2() {
+            setTimeout(function () { mapaEditorUbicacionA2.invalidateSize(); }, 50);
+            if (capaAreaEditorA2) { mapaEditorUbicacionA2.removeLayer(capaAreaEditorA2); capaAreaEditorA2 = null; }
+            marcadoresAreaEditorA2.forEach(function (m) { mapaEditorUbicacionA2.removeLayer(m); });
+            marcadoresAreaEditorA2 = [];
+
+            var latlngs = verticesAreaTempA2.map(function (v) { return [v.lat, v.lon]; });
+            if (latlngs.length >= 3) {
+                capaAreaEditorA2 = L.polygon(latlngs, { color: '#c8a84b', fillColor: '#c8a84b', fillOpacity: 0.35, weight: 2 }).addTo(mapaEditorUbicacionA2);
+            } else if (latlngs.length === 2) {
+                capaAreaEditorA2 = L.polyline(latlngs, { color: '#c8a84b', weight: 2 }).addTo(mapaEditorUbicacionA2);
+            }
+            verticesAreaTempA2.forEach(function (v, idx) {
+                var marcador = L.marker([v.lat, v.lon], { draggable: true, icon: _iconoEditorUbicacionA2(String(idx + 1)) }).addTo(mapaEditorUbicacionA2);
+                marcador.on('dragend', function (e) {
+                    var ll = e.target.getLatLng();
+                    var utm = latLonAUtm17S(ll.lat, ll.lng);
+                    v.lat = ll.lat; v.lon = ll.lng; v.easting = utm.easting; v.northing = utm.northing;
+                    if (capaAreaEditorA2) capaAreaEditorA2.setLatLngs(verticesAreaTempA2.map(function (vv) { return [vv.lat, vv.lon]; }));
+                    actualizarEstadoEditorUbicacionA2();
+                });
+                marcadoresAreaEditorA2.push(marcador);
+            });
+            if (latlngs.length > 0) {
+                var capas = marcadoresAreaEditorA2.slice();
+                if (capaAreaEditorA2) capas.push(capaAreaEditorA2);
+                mapaEditorUbicacionA2.fitBounds(L.featureGroup(capas).getBounds(), { padding: [40, 40], maxZoom: 19 });
+            }
+            actualizarEstadoEditorUbicacionA2();
+        }
+
+        function actualizarEstadoEditorUbicacionA2() {
+            var elEstado = document.getElementById('estadoEditorUbicacionA2');
+            if (modoEditorUbicacionA2 === 'punto') {
+                elEstado.textContent = puntoTempA2
+                    ? 'Punto colocado — arrástralo o toca el mapa para moverlo.'
+                    : 'Toca el mapa para colocar el punto, o usa "Fijar mi ubicación aquí".';
+                var btnFijar = document.getElementById('btnFijarGpsUbicacionA2');
+                if (btnFijar) btnFijar.disabled = !posicionGpsEditorUbicacionA2Actual;
+            } else {
+                var area = verticesAreaTempA2.length >= 3
+                    ? calcularAreaPoligonoHa(verticesAreaTempA2.map(function (v) { return { easting: v.easting, northing: v.northing }; }))
+                    : null;
+                elEstado.textContent = verticesAreaTempA2.length + ' vértice(s)' +
+                    (area != null ? ' · Área: ' + area.toFixed(2) + ' ha' : ' · faltan al menos 3 para calcular el área');
+            }
+        }
+
+        function cambiarModoEditorUbicacionA2(modo) {
+            modoEditorUbicacionA2 = modo;
+            document.getElementById('controlesModoPuntoA2').style.display = modo === 'punto' ? 'flex' : 'none';
+            document.getElementById('controlesModoAreaA2').style.display = modo === 'area' ? 'flex' : 'none';
+            document.getElementById('resultadoAreaA2').style.display = 'none';
+            document.getElementById('tituloEditorUbicacionA2').textContent = modo === 'punto' ? 'Ubicación (Este/Norte)' : 'Medir área';
+            actualizarEstadoEditorUbicacionA2();
+        }
+
+        function abrirEditorUbicacionA2() {
+            if (!registroA2Actual || registroA2Actual.confirmado) return;
+            var r = registroA2Actual;
+            puntoTempA2 = (r.este != null && r.norte != null && Number.isFinite(Number(r.este)) && Number.isFinite(Number(r.norte)))
+                ? Object.assign(utm17SALatLon(Number(r.este), Number(r.norte)), { easting: Number(r.este), northing: Number(r.norte) })
+                : null;
+            verticesAreaTempA2 = [];
+            ultimaAreaMedidaA2 = null;
+            document.getElementById('vistaEdicionA2Levantamiento').style.display = 'none';
+            document.getElementById('vistaEditorUbicacionA2').style.display = 'flex';
+            inicializarMapaEditorUbicacionA2SiHaceFalta();
+            cambiarModoEditorUbicacionA2('punto');
+            redibujarPuntoEditorA2();
+            redibujarAreaEditorA2();
+
+            posicionGpsEditorUbicacionA2Actual = null;
+            watchIdEditorUbicacionA2 = iniciarSeguimientoGpsA2(function (pos) {
+                posicionGpsEditorUbicacionA2Actual = latLonAUtm17S(pos.coords.latitude, pos.coords.longitude);
+                posicionGpsEditorUbicacionA2Actual.lat = pos.coords.latitude; posicionGpsEditorUbicacionA2Actual.lon = pos.coords.longitude;
+                if (marcadorGpsEditorUbicacionA2) mapaEditorUbicacionA2.removeLayer(marcadorGpsEditorUbicacionA2);
+                marcadorGpsEditorUbicacionA2 = L.circleMarker([pos.coords.latitude, pos.coords.longitude], {
+                    radius: 8, color: '#ffffff', weight: 2, fillColor: '#2563eb', fillOpacity: 0.9
+                }).addTo(mapaEditorUbicacionA2).bindTooltip('Tu ubicación (±' + Math.round(pos.coords.accuracy) + ' m)');
+                actualizarEstadoEditorUbicacionA2();
             }, function (err) {
-                elEstado.textContent = '⚠️ No se pudo obtener ubicación: ' + (err.message || 'error desconocido') + '.';
-            }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+                document.getElementById('estadoEditorUbicacionA2').textContent = '⚠️ GPS: ' + (err.message || 'no se pudo obtener ubicación') + '.';
+            });
+        }
+
+        function cerrarEditorUbicacionA2() {
+            detenerSeguimientoGpsA2(watchIdEditorUbicacionA2);
+            watchIdEditorUbicacionA2 = null;
+            marcadorGpsEditorUbicacionA2 = null;
+            document.getElementById('vistaEditorUbicacionA2').style.display = 'none';
+            document.getElementById('vistaEdicionA2Levantamiento').style.display = 'flex';
+            // Repinta siempre — una medición de área "usada" (Área Total/Bajo Riego
+            // verificada) ya se guardó en el momento aunque el punto Este/Norte se
+            // haya descartado con "✕ Cerrar", así que la ficha debe reflejarla.
+            pintarEdicionA2Levantamiento();
+        }
+
+        document.getElementById('btnGpsA2').addEventListener('click', abrirEditorUbicacionA2);
+        document.getElementById('btnCerrarEditorUbicacionA2').addEventListener('click', cerrarEditorUbicacionA2);
+
+        document.getElementById('btnFinalizarEditorUbicacionA2').addEventListener('click', function () {
+            if (!puntoTempA2) { alert('Toca el mapa o usa "Fijar mi ubicación aquí" para colocar el punto antes de finalizar.'); return; }
+            var este = Number(puntoTempA2.easting.toFixed(2));
+            var norte = Number(puntoTempA2.northing.toFixed(2));
+            registroA2Actual.este = este;
+            registroA2Actual.norte = norte;
+            registroA2Actual.zona = registroA2Actual.zona || '17-S';
+            guardarCampoA2({ id: registroA2Actual.id, este: este, norte: norte, zona: registroA2Actual.zona });
+            cerrarEditorUbicacionA2();
+        });
+
+        document.getElementById('btnFijarGpsUbicacionA2').addEventListener('click', function () {
+            if (!posicionGpsEditorUbicacionA2Actual) return;
+            puntoTempA2 = Object.assign({}, posicionGpsEditorUbicacionA2Actual);
+            redibujarPuntoEditorA2();
+        });
+
+        document.getElementById('btnMedirAreaA2').addEventListener('click', function () {
+            verticesAreaTempA2 = [];
+            redibujarAreaEditorA2();
+            cambiarModoEditorUbicacionA2('area');
+        });
+        document.getElementById('btnVolverModoPuntoA2').addEventListener('click', function () {
+            verticesAreaTempA2 = [];
+            redibujarAreaEditorA2();
+            cambiarModoEditorUbicacionA2('punto');
+        });
+        document.getElementById('btnDeshacerVerticeAreaA2').addEventListener('click', function () {
+            if (verticesAreaTempA2.length === 0) return;
+            verticesAreaTempA2.pop();
+            redibujarAreaEditorA2();
+        });
+        document.getElementById('btnTerminarMedicionA2').addEventListener('click', function () {
+            if (verticesAreaTempA2.length < 3) { alert('Agrega al menos 3 vértices para medir un área.'); return; }
+            var area = calcularAreaPoligonoHa(verticesAreaTempA2.map(function (v) { return { easting: v.easting, northing: v.northing }; }));
+            ultimaAreaMedidaA2 = area;
+            document.getElementById('textoResultadoAreaA2').textContent = 'Área medida: ' + area.toFixed(2) + ' ha (' + verticesAreaTempA2.length + ' vértices)';
+            document.getElementById('controlesModoAreaA2').style.display = 'none';
+            document.getElementById('resultadoAreaA2').style.display = 'flex';
+        });
+
+        function _usarAreaMedidaComoA2(claveJson) {
+            if (ultimaAreaMedidaA2 == null) return;
+            registroA2Actual.camposVerificacion = registroA2Actual.camposVerificacion || {};
+            registroA2Actual.camposVerificacion[claveJson] = Number(ultimaAreaMedidaA2.toFixed(2));
+            guardarCampoA2({ id: registroA2Actual.id, camposVerificacion: registroA2Actual.camposVerificacion });
+            verticesAreaTempA2 = [];
+            ultimaAreaMedidaA2 = null;
+            redibujarAreaEditorA2();
+            cambiarModoEditorUbicacionA2('punto');
+        }
+        document.getElementById('btnUsarAreaTotalA2').addEventListener('click', function () { _usarAreaMedidaComoA2('areaTotalVerificadaHa'); });
+        document.getElementById('btnUsarAreaBajoRiegoA2').addEventListener('click', function () { _usarAreaMedidaComoA2('areaBajoRiegoVerificadaHa'); });
+        document.getElementById('btnDescartarAreaA2').addEventListener('click', function () {
+            verticesAreaTempA2 = [];
+            ultimaAreaMedidaA2 = null;
+            redibujarAreaEditorA2();
+            cambiarModoEditorUbicacionA2('punto');
         });
 
         document.getElementById('btnMarcarVerificadoCampoA2').addEventListener('click', async function () {
