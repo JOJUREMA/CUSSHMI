@@ -1401,8 +1401,11 @@
             <button class="btn btn-success" id="btnExportarFormatoA2Levantamiento" onclick="exportarFormatoA2LevantamientoActualizado()" style="width: 100%; margin-top: 12px;" title="Descarga el Excel del Formato A-2 (16 hojas) con lo verificado/completado en campo hasta ahora, en el mismo formato exacto del oficial — para imprimir/entregar">
                 📥 Exportar Formato A-2 actualizado (para imprimir)
             </button>
-            <button class="btn btn-success" id="btnExportarPoligonosFormatoA2Levantamiento" onclick="exportarPoligonosFormatoA2Levantamiento()" style="width: 100%; margin-top: 12px;" title="Descarga en KML los polígonos de área medidos en campo (móvil) para el Formato A-2, cada uno con los 47 datos del usuario">
+            <button class="btn btn-success" id="btnExportarPoligonosFormatoA2Levantamiento" onclick="exportarPoligonosFormatoA2Levantamiento()" style="width: 100%; margin-top: 12px;" title="Descarga en KML los polígonos de área medidos en campo (móvil) para el Formato A-2, con los datos de verificación (cols 18-47) del usuario">
                 🗺️ Exportar Polígonos (KML)
+            </button>
+            <button class="btn btn-primary" id="btnAvanceFormatoA2Levantamiento" onclick="mostrarPanelAvanceFormatoA2Levantamiento()" style="width: 100%; margin-top: 12px;" title="Avance del levantamiento de observaciones por toma y consolidado, con exportación a Excel">
+                📊 Avance Levantamiento A-2
             </button>
 
             <button class="btn btn-secondary" onclick="cerrarModalPadronA1()" style="width: 100%; margin-top: 12px;">
@@ -2907,19 +2910,6 @@ const COMISIONES = {
                 if (headerText) headerText.appendChild(btnSinceramiento);
             }
             btnSinceramiento.style.display = esAdminOProgramador ? 'inline-block' : 'none';
-
-            // Botón panel de Avance del Levantamiento A-2 — admin o
-            // programador (avance por toma/consolidado + tabla verde/rojo).
-            let btnAvanceA2 = document.getElementById('btnAvanceFormatoA2Levantamiento');
-            if (!btnAvanceA2) {
-                btnAvanceA2 = document.createElement('button');
-                btnAvanceA2.id = 'btnAvanceFormatoA2Levantamiento';
-                btnAvanceA2.textContent = '📊 Avance Levantamiento A-2';
-                btnAvanceA2.onclick = mostrarPanelAvanceFormatoA2Levantamiento;
-                const headerText = document.querySelector('.header-text');
-                if (headerText) headerText.appendChild(btnAvanceA2);
-            }
-            btnAvanceA2.style.display = esAdminOProgramador ? 'inline-block' : 'none';
         }
 
         async function iniciarSistemaComisiones() {
