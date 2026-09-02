@@ -1398,6 +1398,9 @@
                 🗂️ Sincronizar Formato A-2 (Levantamiento)
             </button>
             <input type="file" id="inputFormatoA2Levantamiento" accept=".xlsx" style="display:none;" onchange="importarFormatoA2Levantamiento(event)">
+            <button class="btn btn-primary" id="btnLevantamientoA2Registros" onclick="mostrarPanelLevantamientoA2()" style="width: 100%; margin-top: 12px;" title="Ver y editar los registros del Formato A-2 (Levantamiento) uno por uno, con candado de confirmación — mismo flujo que el móvil">
+                🗂️ Ver / Editar Registros (Formato A-2)
+            </button>
             <button class="btn btn-success" id="btnExportarFormatoA2Levantamiento" onclick="exportarFormatoA2LevantamientoActualizado()" style="width: 100%; margin-top: 12px;" title="Descarga el Excel del Formato A-2 (16 hojas) con lo verificado/completado en campo hasta ahora, en el mismo formato exacto del oficial — para imprimir/entregar">
                 📥 Exportar Formato A-2 actualizado (para imprimir)
             </button>
@@ -4142,6 +4145,751 @@ const COMISIONES = {
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
             }
+        }
+
+        // ── Panel "Formato A-2 (Levantamiento) — Ver/Editar Registros" (escritorio) ──
+        // Mismo flujo que el móvil (movil/identificacion-registro.html,
+        // pantallas Formato A-2): toma/consolidado -> lista de usuarios
+        // observados -> ficha (datos observados de solo lectura + datos de
+        // verificación editables) -> candado de confirmación/solicitud de
+        // edición -> editor de mapa para Este/Norte y área/polígono. A
+        // diferencia del móvil, el editor de mapa acá es SOLO clic/arrastre
+        // manual — el escritorio no tiene GPS en vivo como un celular, así
+        // que no se porta nada de iniciarSeguimientoGpsA2/watchPosition/
+        // "Fijar mi ubicación"/"Fijar vértice con mi ubicación".
+
+        const ETIQUETAS_ESTADO_VERIFICACION_A2 = { verde: '🟢 Verificado por DNI', naranja: '🟠 A confirmar', amarillo: '🟡 Sin info digital' };
+
+        // Campos editables (cols 18-47 del Excel oficial) — copiado tal cual
+        // del móvil (CAMPOS_FORMATO_A2_LEVANTAMIENTO,
+        // movil/identificacion-registro.html) para reutilizar las mismas
+        // etiquetas legibles, en vez de derivarlas del nombre de columna
+        // snake_case de COLUMNAS_FORMATO_A2_LEVANTAMIENTO.
+        const CAMPOS_FORMATO_A2_LEVANTAMIENTO = [
+            { clave: 'conductorActual', etiqueta: 'Conductor actual', tipo: 'texto' },
+            { clave: 'conductorTipoDocumento', etiqueta: 'Conductor — Tipo documento', tipo: 'texto' },
+            { clave: 'conductorNumeroDocumento', etiqueta: 'Conductor — N° documento', tipo: 'texto' },
+            { clave: 'estado', etiqueta: 'Estado', tipo: 'texto' },
+            { clave: 'ultimaFechaRiego', etiqueta: 'Última fecha de riego', tipo: 'fecha' },
+            { clave: 'este', etiqueta: 'Este (UTM)', tipo: 'numero' },
+            { clave: 'norte', etiqueta: 'Norte (UTM)', tipo: 'numero' },
+            { clave: 'zona', etiqueta: 'Zona', tipo: 'texto' },
+            { clave: 'ucRef', etiqueta: 'UC N° / Ref UC N°', tipo: 'texto' },
+            { clave: 'seUbicaBloque', etiqueta: 'Se ubica dentro del bloque', tipo: 'texto' },
+            { clave: 'nombreBloqueRiego', etiqueta: 'Nombre de Bloque de Riego', tipo: 'texto' },
+            { clave: 'sector', etiqueta: 'Sector', tipo: 'texto' },
+            { clave: 'cdCp', etiqueta: 'CD/CP', tipo: 'texto', enJson: true },
+            { clave: 'l01', etiqueta: 'L01', tipo: 'texto', enJson: true },
+            { clave: 'l02', etiqueta: 'L02', tipo: 'texto', enJson: true },
+            { clave: 'l03', etiqueta: 'L03', tipo: 'texto', enJson: true },
+            { clave: 'l04', etiqueta: 'L04', tipo: 'texto', enJson: true },
+            { clave: 'l05', etiqueta: 'L05', tipo: 'texto', enJson: true },
+            { clave: 'l06', etiqueta: 'L06', tipo: 'texto', enJson: true },
+            { clave: 'areaTotalVerificadaHa', etiqueta: 'Área total verificada (ha)', tipo: 'numero', enJson: true },
+            { clave: 'areaBajoRiegoVerificadaHa', etiqueta: 'Área bajo riego verificada (ha)', tipo: 'numero', enJson: true },
+            { clave: 'cultivo1', etiqueta: 'Cultivo 1', tipo: 'texto', enJson: true },
+            { clave: 'areaInstalada1', etiqueta: 'Área instalada 1 (ha)', tipo: 'numero', enJson: true },
+            { clave: 'cultivo2', etiqueta: 'Cultivo 2', tipo: 'texto', enJson: true },
+            { clave: 'areaInstalada2', etiqueta: 'Área instalada 2 (ha)', tipo: 'numero', enJson: true },
+            { clave: 'cultivo3', etiqueta: 'Cultivo 3', tipo: 'texto', enJson: true },
+            { clave: 'areaInstalada3', etiqueta: 'Área instalada 3 (ha)', tipo: 'numero', enJson: true },
+            { clave: 'cultivo4', etiqueta: 'Cultivo 4', tipo: 'texto', enJson: true },
+            { clave: 'areaInstalada4', etiqueta: 'Área instalada 4 (ha)', tipo: 'numero', enJson: true },
+            { clave: 'observaciones', etiqueta: 'Observaciones', tipo: 'texto' },
+        ];
+
+        let _levantamientoA2Estado = { comisionKey: null, tomaActual: 'CONSOLIDADO', registroActual: null };
+
+        function _cerrarPanelLevantamientoA2Esc() {
+            const modal = document.getElementById('modalLevantamientoA2Esc');
+            if (modal) modal.remove();
+            const editor = document.getElementById('modalEditorUbicacionLevantamientoA2Esc');
+            if (editor) editor.remove();
+            _mapaEditorLevantamientoA2Esc = null;
+            _levantamientoA2Estado = { comisionKey: null, tomaActual: 'CONSOLIDADO', registroActual: null };
+        }
+
+        async function mostrarPanelLevantamientoA2() {
+            const comisionKey = localStorage.getItem('cusshmi_comision');
+            if (!comisionKey) { alert('Selecciona una comisión primero.'); return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+
+            _cerrarPanelLevantamientoA2Esc();
+            _levantamientoA2Estado.comisionKey = comisionKey;
+
+            const resultadoAvance = await CusshmiDatos.obtenerAvanceFormatoA2LevantamientoPorToma(comisionKey);
+            const avance = resultadoAvance.ok ? resultadoAvance.avance : {};
+            const opcionesTomas = TOMAS_FORMATO_A2_LEVANTAMIENTO.map((t) => {
+                const a = avance[t];
+                const conteo = a ? (' (' + a.verificados + '/' + a.total + ')') : '';
+                return `<option value="${t}">${t}${conteo}</option>`;
+            }).join('');
+            const consolidadoConteo = avance.CONSOLIDADO ? (' (' + avance.CONSOLIDADO.verificados + '/' + avance.CONSOLIDADO.total + ')') : '';
+
+            const modalHtml = `
+                <div id="modalLevantamientoA2Esc" class="modal-overlay active" style="z-index:99998;background:rgba(0,20,50,0.85);">
+                    <div class="modal-container" style="max-width:1100px;max-height:90vh;overflow-y:auto;">
+                        <h3>🗂️ Formato A-2 (Levantamiento) — ${COMISIONES[comisionKey]?.nombre || comisionKey}</h3>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end;">
+                            <div style="flex:1;min-width:220px;">
+                                <label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">Toma</label>
+                                <select id="selectTomaLevantamientoA2Esc" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:4px;">
+                                    <option value="CONSOLIDADO">📊 TODAS LAS TOMAS (Consolidado)${consolidadoConteo}</option>
+                                    ${opcionesTomas}
+                                </select>
+                            </div>
+                            <button id="btnSolicitudesLevantamientoA2Esc" onclick="_mostrarSolicitudesLevantamientoA2Esc()"
+                                style="padding:9px 14px;background:#e2e8f0;color:#4a5568;border:none;border-radius:4px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap;">
+                                🔔 Solicitudes pendientes
+                            </button>
+                        </div>
+                        <div id="contenidoLevantamientoA2Esc">
+                            <div style="text-align:center;color:#888;padding:20px;">Cargando…</div>
+                        </div>
+                        <div style="display:flex;gap:10px;margin-top:16px;">
+                            <button onclick="_cerrarPanelLevantamientoA2Esc()"
+                                style="padding:9px 18px;background:#003876;color:white;border:none;border-radius:4px;font-weight:600;font-size:13px;cursor:pointer;">
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+
+            const div = document.createElement('div');
+            div.innerHTML = modalHtml;
+            document.body.appendChild(div.firstElementChild);
+
+            document.getElementById('selectTomaLevantamientoA2Esc').addEventListener('change', (e) => {
+                _levantamientoA2Estado.tomaActual = e.target.value;
+                _renderizarListaLevantamientoA2Esc(comisionKey, e.target.value);
+            });
+
+            _actualizarBotonSolicitudesLevantamientoA2Esc(comisionKey);
+            await _renderizarListaLevantamientoA2Esc(comisionKey, 'CONSOLIDADO');
+        }
+
+        async function _actualizarBotonSolicitudesLevantamientoA2Esc(comisionKey) {
+            const btn = document.getElementById('btnSolicitudesLevantamientoA2Esc');
+            if (!btn) return;
+            const resultado = await CusshmiDatos.listarSolicitudesEdicionFormatoA2Levantamiento(comisionKey);
+            const n = resultado.ok ? (resultado.solicitudes || []).length : 0;
+            btn.textContent = n > 0 ? ('🔔 Solicitudes pendientes (' + n + ')') : '🔔 Solicitudes pendientes';
+            btn.style.background = n > 0 ? '#c0392b' : '#e2e8f0';
+            btn.style.color = n > 0 ? '#fff' : '#4a5568';
+        }
+
+        // ── Vista Lista ──
+        async function _renderizarListaLevantamientoA2Esc(comisionKey, tomaNombre) {
+            const contenedor = document.getElementById('contenidoLevantamientoA2Esc');
+            if (!contenedor) return;
+            contenedor.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Cargando…</div>';
+
+            const resultado = await CusshmiDatos.listarRegistrosFormatoA2Levantamiento(comisionKey, tomaNombre);
+            if (!resultado.ok) {
+                contenedor.innerHTML = `<div style="text-align:center;color:#c0392b;padding:20px;">No se pudo cargar la lista: ${resultado.error || 'error desconocido'}</div>`;
+                return;
+            }
+            const registros = resultado.registros || [];
+            if (registros.length === 0) {
+                contenedor.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Sin registros para esta toma.</div>';
+                return;
+            }
+
+            const consolidado = tomaNombre === 'CONSOLIDADO';
+            const filas = registros.map((r) => {
+                const badgeTexto = ETIQUETAS_ESTADO_VERIFICACION_A2[r.estado_verificacion] || '';
+                const badgeColor = { verde: '#1a6e3c', naranja: '#c0761f', amarillo: '#a68b00' }[r.estado_verificacion] || '#888';
+                return `
+                    <tr>
+                        <td style="padding:7px;">${escapeHtml(r.apellidos_nombres || '-')}</td>
+                        ${consolidado ? `<td style="padding:7px;text-align:center;">${escapeHtml(r.toma_nombre || '-')}</td>` : ''}
+                        <td style="padding:7px;text-align:center;">${escapeHtml(r.unidad_catastral || '-')}</td>
+                        <td style="padding:7px;text-align:center;">${badgeTexto ? `<span style="color:${badgeColor};font-weight:600;font-size:12px;">${badgeTexto}</span>` : '-'}</td>
+                        <td style="padding:7px;text-align:center;">${r.verificado_en_campo ? '✅' : '—'}</td>
+                        <td style="padding:7px;text-align:center;">${r.confirmado ? '🔒' : '—'}</td>
+                        <td style="padding:7px;text-align:center;"><button onclick="_abrirFichaLevantamientoA2Esc('${r.id}')" style="padding:5px 10px;background:#003876;color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">✏️ Ver/Editar</button></td>
+                    </tr>`;
+            }).join('');
+
+            contenedor.innerHTML = `
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead>
+                            <tr style="background:#003876;color:white;">
+                                <th style="padding:7px;text-align:left;">Usuario</th>
+                                ${consolidado ? '<th style="padding:7px;">Toma</th>' : ''}
+                                <th style="padding:7px;">U. Catastral</th>
+                                <th style="padding:7px;">Verificación</th>
+                                <th style="padding:7px;">✅</th>
+                                <th style="padding:7px;">🔒</th>
+                                <th style="padding:7px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>${filas}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        function _volverListaDesdeFichaLevantamientoA2Esc() {
+            _levantamientoA2Estado.registroActual = null;
+            _renderizarListaLevantamientoA2Esc(_levantamientoA2Estado.comisionKey, _levantamientoA2Estado.tomaActual);
+        }
+
+        // ── Vista Ficha ──
+        async function _abrirFichaLevantamientoA2Esc(id) {
+            const resultado = await CusshmiDatos.cargarRegistroFormatoA2Levantamiento(id);
+            if (!resultado.ok) { alert(resultado.error || 'No se pudo abrir el registro.'); return; }
+            const r = resultado.registro;
+            _levantamientoA2Estado.registroActual = {
+                id: r.id, tomaNombre: r.toma_nombre,
+                numeroOrden: r.numero_orden, apellidosNombres: r.apellidos_nombres,
+                tipoDocumento: r.tipo_documento, numeroDocumento: r.numero_documento,
+                departamento: r.departamento, provincia: r.provincia, distrito: r.distrito, localidad: r.localidad,
+                unidadCatastral: r.unidad_catastral, areaTotalHa: r.area_total_ha, areaBajoRiegoHa: r.area_bajo_riego_ha,
+                subSectorHidraulico: r.sub_sector_hidraulico, canalDerivacion: r.canal_derivacion, fuenteAgua: r.fuente_agua,
+                cutExpediente: r.cut_expediente, tipoUso: r.tipo_uso, volumenM3: r.volumen_m3,
+                conductorActual: r.conductor_actual, conductorTipoDocumento: r.conductor_tipo_documento,
+                conductorNumeroDocumento: r.conductor_numero_documento, estado: r.estado, ultimaFechaRiego: r.ultima_fecha_riego,
+                este: r.este, norte: r.norte, zona: r.zona, ucRef: r.uc_ref, seUbicaBloque: r.se_ubica_bloque,
+                nombreBloqueRiego: r.nombre_bloque_riego, sector: r.sector, observaciones: r.observaciones,
+                camposVerificacion: r.campos_verificacion || {},
+                verticesUtm: Array.isArray(r.vertices_utm) ? r.vertices_utm : [],
+                estadoVerificacion: r.estado_verificacion,
+                verificadoEnCampo: !!r.verificado_en_campo,
+                confirmado: !!r.confirmado,
+                solicitudEdicion: !!r.solicitud_edicion,
+                solicitudEdicionPorNombre: r.solicitud_edicion_por_nombre || '',
+                solicitudEdicionEn: r.solicitud_edicion_en || null,
+            };
+            _renderizarFichaLevantamientoA2Esc();
+        }
+
+        function _filaResumenLevantamientoA2Esc(etiqueta, valor) {
+            const texto = (valor === null || valor === undefined || valor === '') ? '-' : valor.toString();
+            return `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid #eee;font-size:13px;">
+                <span style="color:#666;">${escapeHtml(etiqueta)}</span><span style="font-weight:600;text-align:right;">${escapeHtml(texto)}</span></div>`;
+        }
+
+        function _renderizarFichaLevantamientoA2Esc() {
+            const r = _levantamientoA2Estado.registroActual;
+            const contenedor = document.getElementById('contenidoLevantamientoA2Esc');
+            if (!r || !contenedor) return;
+
+            const badgeHtml = r.estadoVerificacion
+                ? `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;background:#f0f0f0;margin-left:8px;">${ETIQUETAS_ESTADO_VERIFICACION_A2[r.estadoVerificacion] || r.estadoVerificacion}</span>`
+                : '';
+            const bloqueado = r.confirmado;
+
+            const datosObservadosHtml = [
+                ['N° de orden', r.numeroOrden], ['Apellidos y nombres', r.apellidosNombres],
+                ['Tipo documento', r.tipoDocumento], ['N° documento', r.numeroDocumento],
+                ['Departamento', r.departamento], ['Provincia', r.provincia], ['Distrito', r.distrito], ['Localidad', r.localidad],
+                ['Unidad catastral', r.unidadCatastral], ['Área total (ha)', r.areaTotalHa], ['Área bajo riego (ha)', r.areaBajoRiegoHa],
+                ['Sub Sector Hidráulico', r.subSectorHidraulico], ['Canal de Derivación', r.canalDerivacion], ['Fuente de Agua', r.fuenteAgua],
+                ['CUT expediente', r.cutExpediente], ['Tipo de uso', r.tipoUso], ['Volumen (m³)', r.volumenM3],
+            ].map(([etiqueta, valor]) => _filaResumenLevantamientoA2Esc(etiqueta, valor)).join('');
+
+            contenedor.innerHTML = `
+                <button onclick="_volverListaDesdeFichaLevantamientoA2Esc()" style="padding:7px 12px;background:#e2e8f0;color:#4a5568;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:12px;">← Volver a la lista</button>
+                <h4 style="margin:0 0 10px;color:#003876;">${escapeHtml(r.apellidosNombres || '-')}${r.tomaNombre ? ' — Toma ' + escapeHtml(r.tomaNombre) : ''}${badgeHtml}</h4>
+                ${bloqueado ? '<div style="background:rgba(192,57,43,0.10);border:1px solid rgba(192,57,43,0.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#7a2418;margin-bottom:12px;">🔒 Este registro está confirmado — bloqueado para edición.</div>' : ''}
+                <div style="display:flex;gap:14px;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:280px;">
+                        <div style="font-size:12px;font-weight:700;color:#003876;margin-bottom:6px;">Datos observados (ANA) — solo lectura</div>
+                        <div style="border:1px solid #e0e0e0;border-radius:6px;padding:8px 12px;">${datosObservadosHtml}</div>
+                    </div>
+                    <div style="flex:1;min-width:280px;">
+                        <div style="font-size:12px;font-weight:700;color:#003876;margin-bottom:6px;">Datos de verificación (editar/completar)</div>
+                        <div id="datosVerificacionLevantamientoA2Esc" style="border:1px solid #e0e0e0;border-radius:6px;padding:8px 12px;"></div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
+                    <button id="btnMarcarVerificadoLevantamientoA2Esc" style="padding:8px 14px;background:#1a6e3c;color:#fff;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;" ${(r.verificadoEnCampo || r.confirmado) ? 'disabled' : ''}>
+                        ${r.verificadoEnCampo ? '✅ Verificado en campo' : '✅ Marcar verificado en campo'}
+                    </button>
+                    <button id="btnEditarUbicacionLevantamientoA2Esc" style="padding:8px 14px;background:#c8a84b;color:#1a1a1a;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;" ${r.confirmado ? 'disabled' : ''}>
+                        ⛶ Editar ubicación en el mapa (Este/Norte y área)
+                    </button>
+                </div>
+                <div id="bloqueCandadoLevantamientoA2Esc" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;"></div>
+                <div id="estadoAccionLevantamientoA2Esc" style="font-size:12px;color:#666;margin-top:6px;"></div>`;
+
+            const elVerif = document.getElementById('datosVerificacionLevantamientoA2Esc');
+            CAMPOS_FORMATO_A2_LEVANTAMIENTO.forEach((campo) => { elVerif.appendChild(_filaCampoEditableLevantamientoA2Esc(campo)); });
+
+            _renderizarCandadoLevantamientoA2Esc();
+
+            document.getElementById('btnMarcarVerificadoLevantamientoA2Esc').addEventListener('click', async () => {
+                const resultado = await CusshmiDatos.marcarVerificadoEnCampoFormatoA2Levantamiento(r.id);
+                if (!resultado.ok) { alert('⚠️ ' + resultado.error); return; }
+                _levantamientoA2Estado.registroActual.verificadoEnCampo = true;
+                _renderizarFichaLevantamientoA2Esc();
+            });
+            document.getElementById('btnEditarUbicacionLevantamientoA2Esc').addEventListener('click', _abrirEditorUbicacionLevantamientoA2Esc);
+        }
+
+        // Guarda de inmediato (sin debounce compartido — cada campo se
+        // confirma en su propio blur, mismo criterio que guardarCampoA2 del
+        // móvil).
+        function _guardarCampoLevantamientoA2Esc(datosParciales) {
+            CusshmiDatos.guardarRegistroFormatoA2Levantamiento(datosParciales).then((r) => {
+                if (!r.ok) alert('⚠️ No se pudo guardar: ' + r.error);
+            });
+        }
+
+        // Fila tocar-para-editar — mismo patrón que _filaCampoEditableA2 del
+        // móvil, adaptado a estilos de escritorio (sin depender de las
+        // clases .resumen-fila/.valor-resumen del móvil).
+        function _filaCampoEditableLevantamientoA2Esc(campo) {
+            const registro = _levantamientoA2Estado.registroActual;
+            let valorActual = campo.enJson ? (registro.camposVerificacion || {})[campo.clave] : registro[campo.clave];
+            const fila = document.createElement('div');
+            fila.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #eee;font-size:13px;';
+            const elEtiqueta = document.createElement('span');
+            elEtiqueta.style.color = '#666';
+            elEtiqueta.textContent = campo.etiqueta;
+            fila.appendChild(elEtiqueta);
+
+            function textoMostrado(v) { return (v === undefined || v === null || v === '') ? '— (clic para editar)' : String(v); }
+
+            const elValor = document.createElement('button');
+            elValor.type = 'button';
+            elValor.style.cssText = 'background:none;border:none;color:#002555;font-weight:600;text-decoration:underline dotted;cursor:pointer;font:inherit;padding:0;text-align:right;';
+            elValor.textContent = textoMostrado(valorActual);
+            elValor.addEventListener('click', () => {
+                if (registro.confirmado) return;
+                const input = document.createElement('input');
+                input.type = campo.tipo === 'numero' ? 'number' : (campo.tipo === 'fecha' ? 'date' : 'text');
+                if (campo.tipo === 'numero') input.step = '0.01';
+                input.value = valorActual != null ? valorActual : '';
+                input.style.cssText = 'max-width:160px;padding:5px 7px;border-radius:4px;border:1px solid #ccc;font-size:13px;';
+                fila.replaceChild(input, elValor);
+                input.focus();
+                let yaConfirmado = false;
+                function confirmar() {
+                    if (yaConfirmado) return;
+                    yaConfirmado = true;
+                    const nuevo = input.value === '' ? null : (campo.tipo === 'numero' ? parseFloat(input.value) : input.value);
+                    valorActual = nuevo;
+                    if (campo.enJson) {
+                        registro.camposVerificacion = registro.camposVerificacion || {};
+                        registro.camposVerificacion[campo.clave] = nuevo;
+                        _guardarCampoLevantamientoA2Esc({ id: registro.id, camposVerificacion: registro.camposVerificacion });
+                    } else {
+                        registro[campo.clave] = nuevo;
+                        const datosGuardar = { id: registro.id };
+                        datosGuardar[campo.clave] = nuevo;
+                        _guardarCampoLevantamientoA2Esc(datosGuardar);
+                    }
+                    elValor.textContent = textoMostrado(nuevo);
+                    if (fila.contains(input)) fila.replaceChild(elValor, input);
+                }
+                input.addEventListener('blur', confirmar);
+                input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
+                if (campo.tipo === 'fecha') input.addEventListener('change', confirmar);
+            });
+            fila.appendChild(elValor);
+            return fila;
+        }
+
+        // ── Candado (confirmar/desbloquear/solicitar/rechazar) — mismo
+        // criterio exacto que el móvil (pintarEdicionA2Levantamiento,
+        // movil/identificacion-registro.html:1641-1656).
+        function _renderizarCandadoLevantamientoA2Esc() {
+            const r = _levantamientoA2Estado.registroActual;
+            const cont = document.getElementById('bloqueCandadoLevantamientoA2Esc');
+            if (!r || !cont) return;
+            const bloqueado = r.confirmado;
+            const solicitado = !!r.solicitudEdicion;
+            let html = '';
+            if (!bloqueado) {
+                html += `<button id="btnConfirmarLevantamientoA2Esc" style="padding:8px 14px;background:#003876;color:#fff;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">🔒 Confirmar</button>`;
+            } else if (esAdmin) {
+                html += `<button id="btnDesbloquearLevantamientoA2Esc" style="padding:8px 14px;background:#c0392b;color:#fff;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">${solicitado ? '✅ Habilitar edición (admin)' : '🔓 Desbloquear (admin)'}</button>`;
+                if (solicitado) {
+                    html += `<button id="btnRechazarSolicitudLevantamientoA2Esc" style="padding:8px 14px;background:#888;color:#fff;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">❌ Rechazar solicitud</button>`;
+                    const fecha = r.solicitudEdicionEn ? new Date(r.solicitudEdicionEn).toLocaleString('es-PE') : '';
+                    html += `<div style="font-size:12px;color:#7a2418;width:100%;">📩 ${escapeHtml(r.solicitudEdicionPorNombre || 'Un programador')} solicitó habilitar la edición${fecha ? ' — ' + fecha : ''}.</div>`;
+                }
+            } else if (!solicitado) {
+                html += `<button id="btnSolicitarEdicionLevantamientoA2Esc" style="padding:8px 14px;background:#c8a84b;color:#1a1a1a;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">📩 Solicitar edición</button>`;
+            } else {
+                html += `<div style="font-size:12px;color:#666;">⏳ Solicitud enviada, esperando aprobación del administrador.</div>`;
+            }
+            cont.innerHTML = html;
+
+            const elEstado = document.getElementById('estadoAccionLevantamientoA2Esc');
+
+            const btnConfirmar = document.getElementById('btnConfirmarLevantamientoA2Esc');
+            if (btnConfirmar) btnConfirmar.addEventListener('click', async () => {
+                elEstado.textContent = 'Confirmando…';
+                const resultado = await CusshmiDatos.confirmarRegistroFormatoA2Levantamiento(r.id);
+                if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+                r.confirmado = true;
+                if (window.CusshmiAuditoria) CusshmiAuditoria.registrarAuditoria('Confirmación', 'Formato A-2 (Levantamiento)', r.apellidosNombres + ' — Toma ' + r.tomaNombre);
+                _renderizarFichaLevantamientoA2Esc();
+            });
+
+            const btnDesbloquear = document.getElementById('btnDesbloquearLevantamientoA2Esc');
+            if (btnDesbloquear) btnDesbloquear.addEventListener('click', async () => {
+                elEstado.textContent = 'Desbloqueando…';
+                const resultado = await CusshmiDatos.desbloquearRegistroFormatoA2Levantamiento(r.id);
+                if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+                r.confirmado = false; r.solicitudEdicion = false; r.solicitudEdicionPorNombre = ''; r.solicitudEdicionEn = null;
+                if (window.CusshmiAuditoria) CusshmiAuditoria.registrarAuditoria('Desbloqueo', 'Formato A-2 (Levantamiento)', r.apellidosNombres + ' — Toma ' + r.tomaNombre);
+                _renderizarFichaLevantamientoA2Esc();
+            });
+
+            const btnRechazar = document.getElementById('btnRechazarSolicitudLevantamientoA2Esc');
+            if (btnRechazar) btnRechazar.addEventListener('click', async () => {
+                elEstado.textContent = 'Rechazando solicitud…';
+                const resultado = await CusshmiDatos.rechazarSolicitudEdicionFormatoA2Levantamiento(r.id);
+                if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+                r.solicitudEdicion = false; r.solicitudEdicionPorNombre = ''; r.solicitudEdicionEn = null;
+                if (window.CusshmiAuditoria) CusshmiAuditoria.registrarAuditoria('Rechazo de solicitud de edición', 'Formato A-2 (Levantamiento)', r.apellidosNombres + ' — Toma ' + r.tomaNombre);
+                _renderizarFichaLevantamientoA2Esc();
+                const el2 = document.getElementById('estadoAccionLevantamientoA2Esc');
+                if (el2) el2.textContent = 'Solicitud rechazada. El registro sigue bloqueado.';
+            });
+
+            const btnSolicitar = document.getElementById('btnSolicitarEdicionLevantamientoA2Esc');
+            if (btnSolicitar) btnSolicitar.addEventListener('click', async () => {
+                elEstado.textContent = 'Enviando solicitud…';
+                const resultado = await CusshmiDatos.solicitarEdicionFormatoA2Levantamiento(r.id, window.perfilActual ? window.perfilActual.nombre : '');
+                if (!resultado.ok) { elEstado.textContent = '⚠️ ' + resultado.error; return; }
+                r.solicitudEdicion = true; r.solicitudEdicionPorNombre = window.perfilActual ? window.perfilActual.nombre : ''; r.solicitudEdicionEn = new Date().toISOString();
+                if (window.CusshmiAuditoria) CusshmiAuditoria.registrarAuditoria('Solicitud de edición', 'Formato A-2 (Levantamiento)', r.apellidosNombres + ' — Toma ' + r.tomaNombre);
+                _renderizarFichaLevantamientoA2Esc();
+            });
+        }
+
+        // ── Vista Solicitudes pendientes (admin) ──
+        async function _mostrarSolicitudesLevantamientoA2Esc() {
+            const comisionKey = _levantamientoA2Estado.comisionKey;
+            if (!comisionKey) return;
+            const contenedor = document.getElementById('contenidoLevantamientoA2Esc');
+            if (!contenedor) return;
+            contenedor.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Cargando…</div>';
+
+            const resultado = await CusshmiDatos.listarSolicitudesEdicionFormatoA2Levantamiento(comisionKey);
+            const volverBtn = `<button onclick="_volverListaDesdeSolicitudesLevantamientoA2Esc()" style="padding:7px 12px;background:#e2e8f0;color:#4a5568;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:12px;">← Volver</button>`;
+            if (!resultado.ok) {
+                contenedor.innerHTML = volverBtn + `<div style="text-align:center;color:#c0392b;padding:20px;">No se pudo cargar: ${resultado.error}</div>`;
+                return;
+            }
+            const solicitudes = resultado.solicitudes || [];
+            if (solicitudes.length === 0) {
+                contenedor.innerHTML = volverBtn + '<div style="text-align:center;color:#888;padding:20px;">No hay solicitudes de edición pendientes.</div>';
+                return;
+            }
+
+            const filas = solicitudes.map((s) => {
+                const fecha = s.solicitud_edicion_en ? new Date(s.solicitud_edicion_en).toLocaleString('es-PE') : '-';
+                return `
+                    <tr>
+                        <td style="padding:7px;">${escapeHtml(s.apellidos_nombres || '-')}</td>
+                        <td style="padding:7px;text-align:center;">${escapeHtml(s.toma_nombre || '-')}</td>
+                        <td style="padding:7px;text-align:center;">${escapeHtml(s.unidad_catastral || '-')}</td>
+                        <td style="padding:7px;text-align:center;">${escapeHtml(s.solicitud_edicion_por_nombre || '-')}</td>
+                        <td style="padding:7px;text-align:center;font-size:11px;">${fecha}</td>
+                        <td style="padding:7px;text-align:center;white-space:nowrap;">
+                            <button onclick="_habilitarSolicitudLevantamientoA2Esc('${s.id}')" style="padding:5px 8px;background:#1a6e3c;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-right:4px;">✅ Habilitar</button>
+                            <button onclick="_rechazarSolicitudListaLevantamientoA2Esc('${s.id}')" style="padding:5px 8px;background:#888;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;">❌ Rechazar</button>
+                        </td>
+                    </tr>`;
+            }).join('');
+
+            contenedor.innerHTML = volverBtn + `
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead><tr style="background:#003876;color:white;">
+                            <th style="padding:7px;text-align:left;">Usuario</th><th style="padding:7px;">Toma</th>
+                            <th style="padding:7px;">U. Catastral</th><th style="padding:7px;">Solicitado por</th>
+                            <th style="padding:7px;">Fecha</th><th style="padding:7px;"></th>
+                        </tr></thead>
+                        <tbody>${filas}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        async function _habilitarSolicitudLevantamientoA2Esc(id) {
+            const resultado = await CusshmiDatos.desbloquearRegistroFormatoA2Levantamiento(id);
+            if (!resultado.ok) { alert('⚠️ ' + resultado.error); return; }
+            if (window.CusshmiAuditoria) CusshmiAuditoria.registrarAuditoria('Desbloqueo', 'Formato A-2 (Levantamiento)', 'Solicitud habilitada (id ' + id + ')');
+            _actualizarBotonSolicitudesLevantamientoA2Esc(_levantamientoA2Estado.comisionKey);
+            _mostrarSolicitudesLevantamientoA2Esc();
+        }
+        async function _rechazarSolicitudListaLevantamientoA2Esc(id) {
+            const resultado = await CusshmiDatos.rechazarSolicitudEdicionFormatoA2Levantamiento(id);
+            if (!resultado.ok) { alert('⚠️ ' + resultado.error); return; }
+            if (window.CusshmiAuditoria) CusshmiAuditoria.registrarAuditoria('Rechazo de solicitud de edición', 'Formato A-2 (Levantamiento)', 'Solicitud rechazada (id ' + id + ')');
+            _actualizarBotonSolicitudesLevantamientoA2Esc(_levantamientoA2Estado.comisionKey);
+            _mostrarSolicitudesLevantamientoA2Esc();
+        }
+        function _volverListaDesdeSolicitudesLevantamientoA2Esc() {
+            _renderizarListaLevantamientoA2Esc(_levantamientoA2Estado.comisionKey, _levantamientoA2Estado.tomaActual);
+        }
+
+        // ── Editor de mapa (Este/Norte + área/polígono) — SOLO clic/arrastre
+        // manual, sin GPS. Puerto 1:1 del editor del móvil
+        // (movil/identificacion-registro.html:1661-1946), quitando todo lo de
+        // iniciarSeguimientoGpsA2/watchPosition/"Fijar mi ubicación"/"Fijar
+        // vértice con mi ubicación" (no aplica a una PC de oficina).
+        let _mapaEditorLevantamientoA2Esc = null;
+        let _modoEditorLevantamientoA2Esc = 'punto'; // 'punto' | 'area'
+        let _puntoTempLevantamientoA2Esc = null; // {easting, northing, lat, lon} o null
+        let _marcadorPuntoEditorLevantamientoA2Esc = null;
+        let _verticesAreaTempLevantamientoA2Esc = []; // [{easting, northing, lat, lon}, ...]
+        let _marcadoresAreaEditorLevantamientoA2Esc = [];
+        let _capaAreaEditorLevantamientoA2Esc = null;
+        let _ultimaAreaMedidaLevantamientoA2Esc = null; // ha, tras "Cerrar polígono"
+
+        function _iconoEditorLevantamientoA2Esc(letra) {
+            return L.divIcon({
+                html: '<div style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#c8a84b;color:#1a1a1a;font-weight:700;font-size:12px;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4);">' + letra + '</div>',
+                className: '', iconSize: [26, 26], iconAnchor: [13, 13],
+            });
+        }
+        function _construirVerticeAreaLevantamientoA2Esc(lat, lon) {
+            const utm = latLonAUtm17S(lat, lon);
+            return { easting: utm.easting, northing: utm.northing, lat: lat, lon: lon };
+        }
+
+        function _construirEditorUbicacionLevantamientoA2EscSiHaceFalta() {
+            if (document.getElementById('modalEditorUbicacionLevantamientoA2Esc')) return;
+            const html = `
+                <div id="modalEditorUbicacionLevantamientoA2Esc" style="position:fixed;inset:0;z-index:99999;background:#001830;display:none;flex-direction:column;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#003876;color:#fff;">
+                        <button id="btnCerrarEditorLevantamientoA2Esc" style="padding:7px 12px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">✕ Cerrar</button>
+                        <span id="tituloEditorLevantamientoA2Esc" style="font-weight:600;">Ubicación (Este/Norte)</span>
+                        <button id="btnFinalizarEditorLevantamientoA2Esc" style="padding:7px 12px;background:#c8a84b;color:#1a1a1a;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">✔ Finalizar</button>
+                    </div>
+                    <div id="mapaEditorLevantamientoA2Esc" style="flex:1;"></div>
+                    <div style="background:#00234d;color:#fff;padding:10px 16px;display:flex;flex-direction:column;gap:8px;">
+                        <div id="estadoEditorLevantamientoA2Esc" style="font-size:12px;color:#cfe0f5;"></div>
+                        <div id="controlesModoPuntoLevantamientoA2Esc" style="display:flex;gap:8px;">
+                            <button id="btnMedirAreaLevantamientoA2Esc" style="padding:8px 14px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">📐 Medir área (opcional)</button>
+                        </div>
+                        <div id="controlesModoAreaLevantamientoA2Esc" style="display:none;gap:8px;flex-wrap:wrap;">
+                            <button id="btnDeshacerVerticeLevantamientoA2Esc" style="padding:8px 14px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">↩️ Deshacer último punto</button>
+                            <button id="btnCerrarPoligonoLevantamientoA2Esc" style="padding:8px 14px;background:#c8a84b;color:#1a1a1a;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">✔ Cerrar polígono</button>
+                            <button id="btnVolverModoPuntoLevantamientoA2Esc" style="padding:8px 14px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">← Volver al punto</button>
+                        </div>
+                        <div id="resultadoAreaLevantamientoA2Esc" style="display:none;flex-direction:column;gap:8px;">
+                            <div id="textoResultadoAreaLevantamientoA2Esc" style="text-align:center;font-weight:600;font-size:13px;"></div>
+                            <button id="btnUsarAreaTotalLevantamientoA2Esc" style="padding:8px 14px;background:#c8a84b;color:#1a1a1a;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">Usar como Área Total verificada</button>
+                            <button id="btnUsarAreaBajoRiegoLevantamientoA2Esc" style="padding:8px 14px;background:#c8a84b;color:#1a1a1a;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">Usar como Área Bajo Riego verificada</button>
+                            <button id="btnFijarCentroideLevantamientoA2Esc" style="padding:8px 14px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">🎯 Fijar como centroide (Este/Norte)</button>
+                            <button id="btnDescartarAreaLevantamientoA2Esc" style="padding:8px 14px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">Descartar medición</button>
+                        </div>
+                    </div>
+                </div>`;
+            const div = document.createElement('div');
+            div.innerHTML = html;
+            document.body.appendChild(div.firstElementChild);
+
+            document.getElementById('btnCerrarEditorLevantamientoA2Esc').addEventListener('click', _cerrarEditorUbicacionLevantamientoA2Esc);
+            document.getElementById('btnFinalizarEditorLevantamientoA2Esc').addEventListener('click', function () {
+                if (!_puntoTempLevantamientoA2Esc) { alert('Haz clic en el mapa para colocar el punto antes de finalizar.'); return; }
+                const r = _levantamientoA2Estado.registroActual;
+                const este = Number(_puntoTempLevantamientoA2Esc.easting.toFixed(2));
+                const norte = Number(_puntoTempLevantamientoA2Esc.northing.toFixed(2));
+                r.este = este; r.norte = norte; r.zona = r.zona || '17-S';
+                _guardarCampoLevantamientoA2Esc({ id: r.id, este: este, norte: norte, zona: r.zona });
+                _cerrarEditorUbicacionLevantamientoA2Esc();
+            });
+            document.getElementById('btnMedirAreaLevantamientoA2Esc').addEventListener('click', function () {
+                _verticesAreaTempLevantamientoA2Esc = [];
+                _redibujarAreaEditorLevantamientoA2Esc();
+                _cambiarModoEditorLevantamientoA2Esc('area');
+            });
+            document.getElementById('btnVolverModoPuntoLevantamientoA2Esc').addEventListener('click', function () {
+                _verticesAreaTempLevantamientoA2Esc = [];
+                _redibujarAreaEditorLevantamientoA2Esc();
+                _cambiarModoEditorLevantamientoA2Esc('punto');
+            });
+            document.getElementById('btnDeshacerVerticeLevantamientoA2Esc').addEventListener('click', function () {
+                if (_verticesAreaTempLevantamientoA2Esc.length === 0) return;
+                _verticesAreaTempLevantamientoA2Esc.pop();
+                _redibujarAreaEditorLevantamientoA2Esc();
+            });
+            document.getElementById('btnCerrarPoligonoLevantamientoA2Esc').addEventListener('click', _cerrarPoligonoAreaLevantamientoA2Esc);
+            document.getElementById('btnUsarAreaTotalLevantamientoA2Esc').addEventListener('click', function () { _usarAreaMedidaLevantamientoA2Esc('areaTotalVerificadaHa'); });
+            document.getElementById('btnUsarAreaBajoRiegoLevantamientoA2Esc').addEventListener('click', function () { _usarAreaMedidaLevantamientoA2Esc('areaBajoRiegoVerificadaHa'); });
+            document.getElementById('btnFijarCentroideLevantamientoA2Esc').addEventListener('click', function () {
+                const centroide = calcularCentroidePoligono(_verticesAreaTempLevantamientoA2Esc.map(function (v) { return { easting: v.easting, northing: v.northing }; }));
+                if (!centroide) { alert('No se pudo calcular el centroide de este polígono.'); return; }
+                const latlon = utm17SALatLon(centroide.easting, centroide.northing);
+                _puntoTempLevantamientoA2Esc = { easting: centroide.easting, northing: centroide.northing, lat: latlon.lat, lon: latlon.lon };
+                const r = _levantamientoA2Estado.registroActual;
+                const este = Number(centroide.easting.toFixed(2));
+                const norte = Number(centroide.northing.toFixed(2));
+                r.este = este; r.norte = norte; r.zona = r.zona || '17-S';
+                _guardarCampoLevantamientoA2Esc({ id: r.id, este: este, norte: norte, zona: r.zona });
+                _verticesAreaTempLevantamientoA2Esc = [];
+                _ultimaAreaMedidaLevantamientoA2Esc = null;
+                _redibujarAreaEditorLevantamientoA2Esc();
+                _cambiarModoEditorLevantamientoA2Esc('punto');
+                _redibujarPuntoEditorLevantamientoA2Esc();
+            });
+            document.getElementById('btnDescartarAreaLevantamientoA2Esc').addEventListener('click', function () {
+                _verticesAreaTempLevantamientoA2Esc = [];
+                _ultimaAreaMedidaLevantamientoA2Esc = null;
+                _redibujarAreaEditorLevantamientoA2Esc();
+                _cambiarModoEditorLevantamientoA2Esc('punto');
+            });
+        }
+
+        function _inicializarMapaEditorLevantamientoA2EscSiHaceFalta() {
+            if (_mapaEditorLevantamientoA2Esc) return;
+            _mapaEditorLevantamientoA2Esc = L.map('mapaEditorLevantamientoA2Esc', { preferCanvas: true }).setView([-4.9, -80.6], 12);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
+                maxZoom: 19
+            }).addTo(_mapaEditorLevantamientoA2Esc);
+            _mapaEditorLevantamientoA2Esc.on('click', function (e) {
+                if (_modoEditorLevantamientoA2Esc === 'punto') {
+                    _puntoTempLevantamientoA2Esc = Object.assign(latLonAUtm17S(e.latlng.lat, e.latlng.lng), { lat: e.latlng.lat, lon: e.latlng.lng });
+                    _redibujarPuntoEditorLevantamientoA2Esc();
+                } else {
+                    _verticesAreaTempLevantamientoA2Esc.push(_construirVerticeAreaLevantamientoA2Esc(e.latlng.lat, e.latlng.lng));
+                    _redibujarAreaEditorLevantamientoA2Esc();
+                }
+            });
+        }
+
+        function _redibujarPuntoEditorLevantamientoA2Esc() {
+            setTimeout(function () { _mapaEditorLevantamientoA2Esc.invalidateSize(); }, 50);
+            if (_marcadorPuntoEditorLevantamientoA2Esc) { _mapaEditorLevantamientoA2Esc.removeLayer(_marcadorPuntoEditorLevantamientoA2Esc); _marcadorPuntoEditorLevantamientoA2Esc = null; }
+            if (_puntoTempLevantamientoA2Esc) {
+                _marcadorPuntoEditorLevantamientoA2Esc = L.marker([_puntoTempLevantamientoA2Esc.lat, _puntoTempLevantamientoA2Esc.lon], { draggable: true, icon: _iconoEditorLevantamientoA2Esc('📍') }).addTo(_mapaEditorLevantamientoA2Esc);
+                _marcadorPuntoEditorLevantamientoA2Esc.on('dragend', function (e) {
+                    const ll = e.target.getLatLng();
+                    _puntoTempLevantamientoA2Esc = Object.assign(latLonAUtm17S(ll.lat, ll.lng), { lat: ll.lat, lon: ll.lng });
+                    _actualizarEstadoEditorLevantamientoA2Esc();
+                });
+                _mapaEditorLevantamientoA2Esc.setView([_puntoTempLevantamientoA2Esc.lat, _puntoTempLevantamientoA2Esc.lon], Math.max(_mapaEditorLevantamientoA2Esc.getZoom(), 17));
+            }
+            _actualizarEstadoEditorLevantamientoA2Esc();
+        }
+
+        function _redibujarAreaEditorLevantamientoA2Esc() {
+            setTimeout(function () { _mapaEditorLevantamientoA2Esc.invalidateSize(); }, 50);
+            if (_capaAreaEditorLevantamientoA2Esc) { _mapaEditorLevantamientoA2Esc.removeLayer(_capaAreaEditorLevantamientoA2Esc); _capaAreaEditorLevantamientoA2Esc = null; }
+            _marcadoresAreaEditorLevantamientoA2Esc.forEach(function (m) { _mapaEditorLevantamientoA2Esc.removeLayer(m); });
+            _marcadoresAreaEditorLevantamientoA2Esc = [];
+
+            const latlngs = _verticesAreaTempLevantamientoA2Esc.map(function (v) { return [v.lat, v.lon]; });
+            if (latlngs.length >= 3) {
+                _capaAreaEditorLevantamientoA2Esc = L.polygon(latlngs, { color: '#c8a84b', fillColor: '#c8a84b', fillOpacity: 0.35, weight: 2 }).addTo(_mapaEditorLevantamientoA2Esc);
+            } else if (latlngs.length === 2) {
+                _capaAreaEditorLevantamientoA2Esc = L.polyline(latlngs, { color: '#c8a84b', weight: 2 }).addTo(_mapaEditorLevantamientoA2Esc);
+            }
+            _verticesAreaTempLevantamientoA2Esc.forEach(function (v, idx) {
+                const marcador = L.marker([v.lat, v.lon], { draggable: true, icon: _iconoEditorLevantamientoA2Esc(String(idx + 1)) }).addTo(_mapaEditorLevantamientoA2Esc);
+                marcador.on('dragend', function (e) {
+                    const ll = e.target.getLatLng();
+                    const utm = latLonAUtm17S(ll.lat, ll.lng);
+                    v.lat = ll.lat; v.lon = ll.lng; v.easting = utm.easting; v.northing = utm.northing;
+                    if (_capaAreaEditorLevantamientoA2Esc) _capaAreaEditorLevantamientoA2Esc.setLatLngs(_verticesAreaTempLevantamientoA2Esc.map(function (vv) { return [vv.lat, vv.lon]; }));
+                    _actualizarEstadoEditorLevantamientoA2Esc();
+                });
+                // Tocar el PRIMER vértice (el "1") con ya al menos 3 puestos cierra
+                // el polígono, igual que el botón "✔ Cerrar polígono" — mismo
+                // guard que el móvil.
+                if (idx === 0) {
+                    marcador.on('click', function () {
+                        if (_verticesAreaTempLevantamientoA2Esc.length >= 3) _cerrarPoligonoAreaLevantamientoA2Esc();
+                    });
+                }
+                _marcadoresAreaEditorLevantamientoA2Esc.push(marcador);
+            });
+            if (latlngs.length > 0) {
+                const capas = _marcadoresAreaEditorLevantamientoA2Esc.slice();
+                if (_capaAreaEditorLevantamientoA2Esc) capas.push(_capaAreaEditorLevantamientoA2Esc);
+                _mapaEditorLevantamientoA2Esc.fitBounds(L.featureGroup(capas).getBounds(), { padding: [40, 40], maxZoom: 19 });
+            }
+            _actualizarEstadoEditorLevantamientoA2Esc();
+        }
+
+        function _actualizarEstadoEditorLevantamientoA2Esc() {
+            const elEstado = document.getElementById('estadoEditorLevantamientoA2Esc');
+            if (!elEstado) return;
+            if (_modoEditorLevantamientoA2Esc === 'punto') {
+                elEstado.textContent = _puntoTempLevantamientoA2Esc
+                    ? 'Punto colocado — arrástralo o haz clic en el mapa para moverlo.'
+                    : 'Haz clic en el mapa para colocar el punto.';
+            } else {
+                const area = _verticesAreaTempLevantamientoA2Esc.length >= 3
+                    ? calcularAreaPoligonoHa(_verticesAreaTempLevantamientoA2Esc.map(function (v) { return { easting: v.easting, northing: v.northing }; }))
+                    : null;
+                elEstado.textContent = _verticesAreaTempLevantamientoA2Esc.length + ' vértice(s)' +
+                    (area != null ? ' · Área: ' + area.toFixed(2) + ' ha' : ' · faltan al menos 3 para calcular el área');
+            }
+        }
+
+        function _cambiarModoEditorLevantamientoA2Esc(modo) {
+            _modoEditorLevantamientoA2Esc = modo;
+            document.getElementById('controlesModoPuntoLevantamientoA2Esc').style.display = modo === 'punto' ? 'flex' : 'none';
+            document.getElementById('controlesModoAreaLevantamientoA2Esc').style.display = modo === 'area' ? 'flex' : 'none';
+            document.getElementById('resultadoAreaLevantamientoA2Esc').style.display = 'none';
+            document.getElementById('tituloEditorLevantamientoA2Esc').textContent = modo === 'punto' ? 'Ubicación (Este/Norte)' : 'Medir área';
+            _actualizarEstadoEditorLevantamientoA2Esc();
+        }
+
+        function _abrirEditorUbicacionLevantamientoA2Esc() {
+            const r = _levantamientoA2Estado.registroActual;
+            if (!r || r.confirmado) return;
+            _construirEditorUbicacionLevantamientoA2EscSiHaceFalta();
+            _puntoTempLevantamientoA2Esc = (r.este != null && r.norte != null && Number.isFinite(Number(r.este)) && Number.isFinite(Number(r.norte)))
+                ? Object.assign(utm17SALatLon(Number(r.este), Number(r.norte)), { easting: Number(r.este), northing: Number(r.norte) })
+                : null;
+            _verticesAreaTempLevantamientoA2Esc = [];
+            _ultimaAreaMedidaLevantamientoA2Esc = null;
+            document.getElementById('modalEditorUbicacionLevantamientoA2Esc').style.display = 'flex';
+            _inicializarMapaEditorLevantamientoA2EscSiHaceFalta();
+            _cambiarModoEditorLevantamientoA2Esc('punto');
+            _redibujarPuntoEditorLevantamientoA2Esc();
+            _redibujarAreaEditorLevantamientoA2Esc();
+        }
+
+        function _cerrarEditorUbicacionLevantamientoA2Esc() {
+            const editor = document.getElementById('modalEditorUbicacionLevantamientoA2Esc');
+            if (editor) editor.style.display = 'none';
+            if (_levantamientoA2Estado.registroActual) _renderizarFichaLevantamientoA2Esc();
+        }
+
+        // Cierra el polígono en construcción: calcula el área, la deja lista
+        // para "Usar como..."/"Fijar como centroide", y GUARDA el polígono de
+        // inmediato en vertices_utm — antes de que se decida si se usa para
+        // algún campo de área. Llamada por el botón "✔ Cerrar polígono" y por
+        // tocar el marcador del primer vértice.
+        function _cerrarPoligonoAreaLevantamientoA2Esc() {
+            if (_verticesAreaTempLevantamientoA2Esc.length < 3) { alert('Agrega al menos 3 vértices para medir un área.'); return; }
+            const area = calcularAreaPoligonoHa(_verticesAreaTempLevantamientoA2Esc.map(function (v) { return { easting: v.easting, northing: v.northing }; }));
+            _ultimaAreaMedidaLevantamientoA2Esc = area;
+            document.getElementById('textoResultadoAreaLevantamientoA2Esc').textContent = 'Área medida: ' + area.toFixed(2) + ' ha (' + _verticesAreaTempLevantamientoA2Esc.length + ' vértices)';
+            document.getElementById('controlesModoAreaLevantamientoA2Esc').style.display = 'none';
+            document.getElementById('resultadoAreaLevantamientoA2Esc').style.display = 'flex';
+
+            const verticesParaGuardar = _verticesAreaTempLevantamientoA2Esc.map(function (v, idx) {
+                return { orden: idx + 1, easting: v.easting, northing: v.northing, lat: v.lat, lon: v.lon, origen: 'manual' };
+            });
+            const r = _levantamientoA2Estado.registroActual;
+            r.verticesUtm = verticesParaGuardar;
+            _guardarCampoLevantamientoA2Esc({ id: r.id, verticesUtm: verticesParaGuardar });
+        }
+
+        function _usarAreaMedidaLevantamientoA2Esc(claveJson) {
+            if (_ultimaAreaMedidaLevantamientoA2Esc == null) return;
+            const r = _levantamientoA2Estado.registroActual;
+            r.camposVerificacion = r.camposVerificacion || {};
+            r.camposVerificacion[claveJson] = Number(_ultimaAreaMedidaLevantamientoA2Esc.toFixed(2));
+            _guardarCampoLevantamientoA2Esc({ id: r.id, camposVerificacion: r.camposVerificacion });
+            _verticesAreaTempLevantamientoA2Esc = [];
+            _ultimaAreaMedidaLevantamientoA2Esc = null;
+            _redibujarAreaEditorLevantamientoA2Esc();
+            _cambiarModoEditorLevantamientoA2Esc('punto');
         }
 
         // ══ Inventario de Infraestructura — Fase 1 (Tomas y Compuertas) ══
