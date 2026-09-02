@@ -123,3 +123,24 @@ function calcularAreaPoligonoHa(vertices) {
     const areaM2 = Math.abs(sumaCruzada) / 2;
     return areaM2 / 10000;
 }
+
+// Centroide real de un polígono (no el promedio simple de vértices, que se
+// desvía en formas irregulares/no convexas) — fórmula estándar sobre las
+// mismas coordenadas UTM (easting/northing) ya usadas por
+// calcularAreaPoligonoHa. `vertices`: [{easting, northing}, ...]. Devuelve
+// { easting, northing } o `null` si no hay suficientes vértices o el área
+// firmada da cero (puntos degenerados/colineales).
+function calcularCentroidePoligono(vertices) {
+    if (!Array.isArray(vertices) || vertices.length < 3) return null;
+    let areaAcum = 0, cxAcum = 0, cyAcum = 0;
+    for (let i = 0; i < vertices.length; i++) {
+        const p1 = vertices[i], p2 = vertices[(i + 1) % vertices.length];
+        const cruzado = p1.easting * p2.northing - p2.easting * p1.northing;
+        areaAcum += cruzado;
+        cxAcum += (p1.easting + p2.easting) * cruzado;
+        cyAcum += (p1.northing + p2.northing) * cruzado;
+    }
+    const area = areaAcum / 2;
+    if (area === 0) return null;
+    return { easting: cxAcum / (6 * area), northing: cyAcum / (6 * area) };
+}

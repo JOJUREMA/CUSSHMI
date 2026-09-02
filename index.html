@@ -1401,6 +1401,9 @@
             <button class="btn btn-success" id="btnExportarFormatoA2Levantamiento" onclick="exportarFormatoA2LevantamientoActualizado()" style="width: 100%; margin-top: 12px;" title="Descarga el Excel del Formato A-2 (16 hojas) con lo verificado/completado en campo hasta ahora, en el mismo formato exacto del oficial — para imprimir/entregar">
                 📥 Exportar Formato A-2 actualizado (para imprimir)
             </button>
+            <button class="btn btn-success" id="btnExportarPoligonosFormatoA2Levantamiento" onclick="exportarPoligonosFormatoA2Levantamiento()" style="width: 100%; margin-top: 12px;" title="Descarga en KML los polígonos de área medidos en campo (móvil) para el Formato A-2, cada uno con los 47 datos del usuario">
+                🗺️ Exportar Polígonos (KML)
+            </button>
 
             <button class="btn btn-secondary" onclick="cerrarModalPadronA1()" style="width: 100%; margin-top: 12px;">
                 ❌ Cerrar
@@ -2904,6 +2907,19 @@ const COMISIONES = {
                 if (headerText) headerText.appendChild(btnSinceramiento);
             }
             btnSinceramiento.style.display = esAdminOProgramador ? 'inline-block' : 'none';
+
+            // Botón panel de Avance del Levantamiento A-2 — admin o
+            // programador (avance por toma/consolidado + tabla verde/rojo).
+            let btnAvanceA2 = document.getElementById('btnAvanceFormatoA2Levantamiento');
+            if (!btnAvanceA2) {
+                btnAvanceA2 = document.createElement('button');
+                btnAvanceA2.id = 'btnAvanceFormatoA2Levantamiento';
+                btnAvanceA2.textContent = '📊 Avance Levantamiento A-2';
+                btnAvanceA2.onclick = mostrarPanelAvanceFormatoA2Levantamiento;
+                const headerText = document.querySelector('.header-text');
+                if (headerText) headerText.appendChild(btnAvanceA2);
+            }
+            btnAvanceA2.style.display = esAdminOProgramador ? 'inline-block' : 'none';
         }
 
         async function iniciarSistemaComisiones() {
@@ -3841,6 +3857,292 @@ const COMISIONES = {
                     'Las hojas "RESUMEN LEVANTAMIENTO" y "RESUMEN" quedan tal cual estaban en el archivo original (sin recalcular).');
             } catch (e) {
                 console.error('Error al exportar Formato A-2 (Levantamiento):', e);
+                alert('No se pudo generar el Excel: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+            }
+        }
+
+        // Exporta a KML los polígonos medidos en el móvil (vertices_utm) para
+        // el Formato A-2 (Levantamiento) — cada polígono lleva los 47 datos
+        // del usuario como ExtendedData, reutilizando la misma
+        // COLUMNAS_FORMATO_A2_LEVANTAMIENTO/valorCampo que ya usa el
+        // exportador de Excel (evita mantener 2 listas de campos por
+        // separado). vertices_utm ya trae lat/lon por vértice (guardado así
+        // desde el móvil), sin necesitar convertir UTM->latlon acá.
+        async function exportarPoligonosFormatoA2Levantamiento() {
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+
+            const btn = document.getElementById('btnExportarPoligonosFormatoA2Levantamiento');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '🗺️ Generando…'; }
+
+            try {
+                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                const resultadoRegistros = await CusshmiDatos.cargarFormatoA2LevantamientoParaExportar(comisionKey);
+                if (!resultadoRegistros.ok) { alert('⚠️ No se pudo cargar los registros: ' + resultadoRegistros.error); return; }
+                const registros = (resultadoRegistros.registros || []).filter((r) => Array.isArray(r.vertices_utm) && r.vertices_utm.length >= 3);
+                if (registros.length === 0) {
+                    alert('Ningún usuario tiene un área medida todavía — usa "Medir área" desde el celular primero.');
+                    return;
+                }
+
+                function valorCampo(registro, col) {
+                    if (col.enJson) {
+                        const v = (registro.campos_verificacion || {})[col.campo];
+                        return (v === undefined || v === null) ? '' : v;
+                    }
+                    const v = registro[_campoASnakeCase(col.campo)];
+                    return (v === undefined || v === null) ? '' : v;
+                }
+
+                const colorOro = '#c8a84b';
+                const estiloId = 'estiloA2';
+                const estilo = construirEstiloPoligono(estiloId, colorOro, true);
+
+                const placemarks = registros.map((registro) => {
+                    const puntos = registro.vertices_utm
+                        .filter((v) => v.lat != null && v.lon != null)
+                        .sort((a, b) => (a.orden || 0) - (b.orden || 0))
+                        .map((v) => [v.lat, v.lon]);
+                    if (puntos.length < 3) return '';
+                    const camposObj = {};
+                    COLUMNAS_FORMATO_A2_LEVANTAMIENTO.forEach((col) => {
+                        camposObj[_campoASnakeCase(col.campo).toUpperCase()] = valorCampo(registro, col);
+                    });
+                    return construirPlacemarkPoligono(registro.apellidos_nombres || 'Sin nombre', puntos, estiloId, camposObj);
+                }).filter(Boolean);
+
+                if (placemarks.length === 0) {
+                    alert('Ningún polígono tiene suficientes vértices con coordenadas válidas para exportar.');
+                    return;
+                }
+
+                const kml = construirDocumentoKml(
+                    'Formato A-2 (Levantamiento) — Polígonos',
+                    [estilo],
+                    [{ nombre: 'Polígonos Formato A-2', placemarksXml: placemarks.join('') }]
+                );
+                const fecha = new Date().toISOString().split('T')[0];
+                _descargarTextoComoArchivo(kml, 'Poligonos_FormatoA2_' + fecha + '.kml', 'application/vnd.google-earth.kml+xml');
+            } catch (e) {
+                console.error('Error al exportar polígonos del Formato A-2 (Levantamiento):', e);
+                alert('No se pudo generar el KML: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+            }
+        }
+
+        // ── Panel "Avance Levantamiento A-2" (admin/programador) ────────────
+        // Estado del último panel abierto — reutilizado por el botón de
+        // exportar Excel (mismos datos ya cargados, sin volver a consultar).
+        let _avanceFormatoA2Estado = { avance: {}, registros: [] };
+
+        async function mostrarPanelAvanceFormatoA2Levantamiento() {
+            const comisionKey = localStorage.getItem('cusshmi_comision');
+            if (!comisionKey) { alert('Selecciona una comisión primero.'); return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+
+            const existente = document.getElementById('modalAvanceFormatoA2Levantamiento');
+            if (existente) existente.remove();
+
+            const modalHtml = `
+                <div id="modalAvanceFormatoA2Levantamiento" class="modal-overlay active" style="z-index:99998;background:rgba(0,20,50,0.85);">
+                    <div class="modal-container" style="max-width:900px;max-height:90vh;overflow-y:auto;">
+                        <h3>📊 Avance Levantamiento A-2 — ${COMISIONES[comisionKey]?.nombre || comisionKey}</h3>
+                        <p style="font-size:12px;color:#666;margin-top:-6px;">
+                            "Completado" = confirmado por el sectorista O marcado como verificado en campo.
+                        </p>
+                        <div id="contenidoAvanceFormatoA2Esc">
+                            <div style="text-align:center;color:#888;padding:20px;">Cargando…</div>
+                        </div>
+                        <div style="display:flex;gap:10px;margin-top:16px;">
+                            <button onclick="mostrarPanelAvanceFormatoA2Levantamiento()"
+                                style="flex:1;padding:9px;background:#e2e8f0;color:#4a5568;border:none;border-radius:4px;font-weight:600;font-size:13px;cursor:pointer;">
+                                🔄 Actualizar
+                            </button>
+                            <button id="btnExportarAvanceFormatoA2Esc" onclick="exportarAvanceFormatoA2Levantamiento()"
+                                style="padding:9px 14px;background:#c8a84b;color:#1a1a1a;border:none;border-radius:4px;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap;">
+                                📊 Exportar avance (Excel)
+                            </button>
+                            <button onclick="document.getElementById('modalAvanceFormatoA2Levantamiento').remove()"
+                                style="padding:9px 18px;background:#003876;color:white;border:none;border-radius:4px;font-weight:600;font-size:13px;cursor:pointer;">
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+
+            const div = document.createElement('div');
+            div.innerHTML = modalHtml;
+            document.body.appendChild(div.firstElementChild);
+
+            const [resultadoAvance, resultadoRegistros] = await Promise.all([
+                CusshmiDatos.obtenerAvanceFormatoA2LevantamientoDetallado(comisionKey),
+                CusshmiDatos.cargarFormatoA2LevantamientoParaExportar(comisionKey),
+            ]);
+
+            const contenedor = document.getElementById('contenidoAvanceFormatoA2Esc');
+            if (!contenedor) return; // el usuario cerró el modal antes de que respondiera Supabase
+
+            if (!resultadoAvance.ok) {
+                contenedor.innerHTML = `<div style="text-align:center;color:#c0392b;padding:20px;">No se pudo calcular el avance: ${resultadoAvance.error || 'error desconocido'}</div>`;
+                return;
+            }
+
+            const registros = resultadoRegistros.ok ? (resultadoRegistros.registros || []) : [];
+            _avanceFormatoA2Estado = { avance: resultadoAvance.avance, registros };
+            _renderizarAvanceFormatoA2LevantamientoEsc(resultadoAvance.avance, registros);
+        }
+
+        function _barraProgresoAvanceA2Html(completados, total) {
+            const porcentaje = total > 0 ? Math.round((completados / total) * 100) : 0;
+            return `
+                <div style="font-size:12px;color:#333;margin-bottom:3px;">${completados} / ${total} (${porcentaje}%)</div>
+                <div style="background:#e6e6e6;border-radius:6px;overflow:hidden;height:10px;">
+                    <div style="width:${porcentaje}%;background:#1a6e3c;height:100%;"></div>
+                </div>`;
+        }
+
+        function _renderizarAvanceFormatoA2LevantamientoEsc(avance, registros) {
+            const contenedor = document.getElementById('contenidoAvanceFormatoA2Esc');
+            if (!contenedor) return;
+
+            const consolidado = avance.CONSOLIDADO || { total: 0, completados: 0 };
+            const tomas = Object.keys(avance).filter((t) => t !== 'CONSOLIDADO').sort();
+
+            if (consolidado.total === 0) {
+                contenedor.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Sin registros de Formato A-2 (Levantamiento) sincronizados todavía.</div>';
+                return;
+            }
+
+            const tarjetaConsolidada = `
+                <div style="border-radius:8px;padding:14px;background:#f5f7fa;border:1px solid #dde3ea;margin-bottom:16px;">
+                    <div style="font-size:11px;color:#666;text-transform:uppercase;margin-bottom:4px;">Consolidado — todas las tomas</div>
+                    <div style="font-size:20px;font-weight:800;color:#003876;margin-bottom:6px;">${consolidado.completados} / ${consolidado.total} completados</div>
+                    ${_barraProgresoAvanceA2Html(consolidado.completados, consolidado.total)}
+                </div>`;
+
+            const tarjetasPorToma = tomas.map((toma) => {
+                const a = avance[toma];
+                return `
+                    <div style="border-radius:8px;padding:10px;background:#fff;border:1px solid #e0e0e0;">
+                        <div style="font-size:12px;font-weight:700;color:#003876;margin-bottom:4px;">Toma ${toma}</div>
+                        ${_barraProgresoAvanceA2Html(a.completados, a.total)}
+                    </div>`;
+            }).join('');
+
+            const filasTabla = registros
+                .slice()
+                .sort((a, b) => (a.toma_nombre || '').localeCompare(b.toma_nombre || '') || (a.apellidos_nombres || '').localeCompare(b.apellidos_nombres || ''))
+                .map((r) => {
+                    const completado = !!(r.confirmado || r.verificado_en_campo);
+                    const fondo = completado ? 'rgba(30,126,52,0.12)' : 'rgba(192,57,43,0.10)';
+                    const estadoTexto = r.confirmado ? '✅ Confirmado' : (r.verificado_en_campo ? '📝 Verificado en campo' : '— Pendiente');
+                    return `
+                        <tr style="background:${fondo};">
+                            <td style="padding:7px;">${r.apellidos_nombres || '-'}</td>
+                            <td style="padding:7px;text-align:center;">${r.toma_nombre || '-'}</td>
+                            <td style="padding:7px;text-align:center;">${r.unidad_catastral || '-'}</td>
+                            <td style="padding:7px;text-align:center;">${estadoTexto}</td>
+                        </tr>`;
+                }).join('');
+
+            contenedor.innerHTML = `
+                ${tarjetaConsolidada}
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px;">
+                    ${tarjetasPorToma}
+                </div>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead>
+                            <tr style="background:#003876;color:white;">
+                                <th style="padding:7px;text-align:left;">Usuario</th>
+                                <th style="padding:7px;">Toma</th>
+                                <th style="padding:7px;">U. Catastral</th>
+                                <th style="padding:7px;">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>${filasTabla}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        // Exportador liviano (una sola hoja, Toma/Total/Completados/Pendientes/%)
+        // — mismo esqueleto que exportarG3Excel, sin el peso de los
+        // exportadores de 47 columnas. Usa los datos ya cargados por el panel
+        // (sin volver a consultar Supabase).
+        async function exportarAvanceFormatoA2Levantamiento() {
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); return; }
+            const avance = _avanceFormatoA2Estado.avance || {};
+            const consolidado = avance.CONSOLIDADO || { total: 0, completados: 0 };
+            if (!consolidado.total) { alert('No hay datos de avance cargados todavía.'); return; }
+
+            const btn = document.getElementById('btnExportarAvanceFormatoA2Esc');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📊 Generando…'; }
+
+            try {
+                const NUM_COLS = 5;
+                const GRIS_ENCABEZADO = 'FFE6E6E6';
+                const NEGRO = 'FF000000';
+                const bordeFino = { style: 'thin', color: { argb: NEGRO } };
+                const bordeCompleto = { top: bordeFino, left: bordeFino, bottom: bordeFino, right: bordeFino };
+                function estiloEncabezado(celda) {
+                    celda.font = { bold: true, size: 10, color: { argb: NEGRO } };
+                    celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRIS_ENCABEZADO } };
+                    celda.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                    celda.border = bordeCompleto;
+                }
+
+                const wb = new ExcelJS.Workbook();
+                wb.creator = 'CUSSHMI';
+                wb.created = new Date();
+                const ws = wb.addWorksheet('Avance Levantamiento A-2', { views: [{ showGridLines: false }] });
+                ws.columns = [{ width: 20 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 12 }];
+
+                let r = 1;
+                ws.mergeCells(r, 1, r, NUM_COLS);
+                ws.getCell(r, 1).value = 'Avance Levantamiento A-2 — ' + new Date().toLocaleDateString('es-PE');
+                ws.getCell(r, 1).font = { bold: true, size: 13 };
+                ws.getCell(r, 1).alignment = { horizontal: 'center' };
+                r += 2;
+
+                ['Toma', 'Total', 'Completados', 'Pendientes', '%'].forEach((titulo, idx) => {
+                    const c = ws.getCell(r, idx + 1);
+                    c.value = titulo;
+                    estiloEncabezado(c);
+                });
+                r++;
+
+                const tomas = Object.keys(avance).filter((t) => t !== 'CONSOLIDADO').sort();
+                tomas.forEach((toma) => {
+                    const a = avance[toma];
+                    const fila = ws.getRow(r);
+                    fila.getCell(1).value = toma;
+                    fila.getCell(2).value = a.total;
+                    fila.getCell(3).value = a.completados;
+                    fila.getCell(4).value = a.total - a.completados;
+                    fila.getCell(5).value = a.total > 0 ? Math.round((a.completados / a.total) * 100) + '%' : '-';
+                    for (let c = 1; c <= NUM_COLS; c++) fila.getCell(c).border = bordeCompleto;
+                    r++;
+                });
+
+                const filaConsolidado = ws.getRow(r);
+                filaConsolidado.getCell(1).value = 'CONSOLIDADO';
+                filaConsolidado.getCell(2).value = consolidado.total;
+                filaConsolidado.getCell(3).value = consolidado.completados;
+                filaConsolidado.getCell(4).value = consolidado.total - consolidado.completados;
+                filaConsolidado.getCell(5).value = consolidado.total > 0 ? Math.round((consolidado.completados / consolidado.total) * 100) + '%' : '-';
+                for (let c = 1; c <= NUM_COLS; c++) {
+                    filaConsolidado.getCell(c).font = { bold: true };
+                    filaConsolidado.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRIS_ENCABEZADO } };
+                    filaConsolidado.getCell(c).border = bordeCompleto;
+                }
+
+                await _descargarWorkbook(wb, 'Avance_LevantamientoA2_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+            } catch (e) {
+                console.error('Error al exportar avance del Formato A-2 (Levantamiento):', e);
                 alert('No se pudo generar el Excel: ' + (e.message || e));
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }

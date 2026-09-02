@@ -2625,6 +2625,48 @@
         return { ok: true, avance };
     }
 
+    // Avance para el panel de escritorio "📊 Avance Levantamiento A-2" — a
+    // diferencia de obtenerAvanceFormatoA2LevantamientoPorToma (que solo
+    // cuenta verificado_en_campo, para el selector móvil), acá "completado"
+    // = confirmado O verificado_en_campo (criterio confirmado con el
+    // usuario) — no reemplaza a la otra función, conviven.
+    async function obtenerAvanceFormatoA2LevantamientoDetallado(comisionKey) {
+        if (!comisionKey) return { ok: true, avance: {} };
+        const comisionId = await resolverComisionId(comisionKey);
+        if (!comisionId) return { ok: false, avance: {}, error: 'La comisión "' + comisionKey + '" no existe en Supabase.' };
+
+        const TAMANO_PAGINA = 1000;
+        const filas = [];
+        let desde = 0;
+        while (true) {
+            const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
+                (client) => client.from('formato_a2_levantamiento')
+                    .select('toma_nombre, confirmado, verificado_en_campo')
+                    .eq('comision_id', comisionId)
+                    .range(desde, desde + TAMANO_PAGINA - 1),
+                'contar avance detallado de Formato A-2 (levantamiento) por toma'
+            );
+            if (error || !data) return { ok: false, avance: {}, error: error ? error.mensaje : 'No se pudo calcular el avance.' };
+            filas.push(...data);
+            if (data.length < TAMANO_PAGINA) break;
+            desde += TAMANO_PAGINA;
+        }
+
+        const avance = {};
+        const consolidado = { total: 0, completados: 0 };
+        filas.forEach((f) => {
+            const toma = f.toma_nombre || 'SIN TOMA';
+            if (!avance[toma]) avance[toma] = { total: 0, completados: 0 };
+            const completado = !!(f.confirmado || f.verificado_en_campo);
+            avance[toma].total++;
+            if (completado) avance[toma].completados++;
+            consolidado.total++;
+            if (completado) consolidado.completados++;
+        });
+        avance.CONSOLIDADO = consolidado;
+        return { ok: true, avance };
+    }
+
     // Lista de usuarios observados de una toma (o de todas, si tomaNombre es
     // null/'CONSOLIDADO') — Pantalla de lista del selector A-2.
     async function listarRegistrosFormatoA2Levantamiento(comisionKey, tomaNombre) {
@@ -2681,13 +2723,14 @@
         const cambios = { actualizado_por: usuarioId, actualizado_en: new Date().toISOString() };
         const CAMPOS_EDITABLES = ['conductorActual', 'conductorTipoDocumento', 'conductorNumeroDocumento',
             'estado', 'ultimaFechaRiego', 'este', 'norte', 'zona', 'ucRef', 'seUbicaBloque',
-            'nombreBloqueRiego', 'sector', 'observaciones', 'camposVerificacion'];
+            'nombreBloqueRiego', 'sector', 'observaciones', 'camposVerificacion', 'verticesUtm'];
         const MAPA_COLUMNA = {
             conductorActual: 'conductor_actual', conductorTipoDocumento: 'conductor_tipo_documento',
             conductorNumeroDocumento: 'conductor_numero_documento', estado: 'estado',
             ultimaFechaRiego: 'ultima_fecha_riego', este: 'este', norte: 'norte', zona: 'zona',
             ucRef: 'uc_ref', seUbicaBloque: 'se_ubica_bloque', nombreBloqueRiego: 'nombre_bloque_riego',
             sector: 'sector', observaciones: 'observaciones', camposVerificacion: 'campos_verificacion',
+            verticesUtm: 'vertices_utm',
         };
         CAMPOS_EDITABLES.forEach((clave) => {
             if (Object.prototype.hasOwnProperty.call(datos, clave)) cambios[MAPA_COLUMNA[clave]] = datos[clave];
@@ -2910,6 +2953,7 @@
         actualizarPadronOficialA1DesdeRegistro,
         guardarFormatoA2LevantamientoRegistros,
         obtenerAvanceFormatoA2LevantamientoPorToma,
+        obtenerAvanceFormatoA2LevantamientoDetallado,
         listarRegistrosFormatoA2Levantamiento,
         cargarRegistroFormatoA2Levantamiento,
         guardarRegistroFormatoA2Levantamiento,

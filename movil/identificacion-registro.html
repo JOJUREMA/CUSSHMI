@@ -443,15 +443,17 @@
                 </div>
                 <!-- Modo Medir área -->
                 <div id="controlesModoAreaA2" style="display:none; flex-direction:column; gap:6px;">
+                    <button class="boton" id="btnFijarVerticeGpsA2" style="max-width:none;">📍 Fijar vértice con mi ubicación</button>
                     <button class="boton-secundario" id="btnDeshacerVerticeAreaA2" style="max-width:none;">↩️ Deshacer último punto</button>
-                    <button class="boton" id="btnTerminarMedicionA2" style="max-width:none;">✔ Terminar medición</button>
+                    <button class="boton" id="btnTerminarMedicionA2" style="max-width:none;">✔ Cerrar polígono</button>
                     <button class="boton-secundario" id="btnVolverModoPuntoA2" style="max-width:none;">← Volver al punto (sin guardar área)</button>
                 </div>
-                <!-- Resultado tras "Terminar medición" -->
+                <!-- Resultado tras "Cerrar polígono" -->
                 <div id="resultadoAreaA2" style="display:none; flex-direction:column; gap:6px;">
                     <div id="textoResultadoAreaA2" style="text-align:center; color:#ffffff; font-weight:600; font-size:13px;"></div>
                     <button class="boton" id="btnUsarAreaTotalA2" style="max-width:none;">Usar como Área Total verificada</button>
                     <button class="boton" id="btnUsarAreaBajoRiegoA2" style="max-width:none;">Usar como Área Bajo Riego verificada</button>
+                    <button class="boton-secundario" id="btnFijarCentroideA2" style="max-width:none;">🎯 Fijar como centroide (Este/Norte)</button>
                     <button class="boton-secundario" id="btnDescartarAreaA2" style="max-width:none;">Descartar medición</button>
                 </div>
             </div>
@@ -1501,6 +1503,7 @@
                 este: r.este, norte: r.norte, zona: r.zona, ucRef: r.uc_ref, seUbicaBloque: r.se_ubica_bloque,
                 nombreBloqueRiego: r.nombre_bloque_riego, sector: r.sector, observaciones: r.observaciones,
                 camposVerificacion: r.campos_verificacion || {},
+                verticesUtm: Array.isArray(r.vertices_utm) ? r.vertices_utm : [],
 
                 estadoVerificacion: r.estado_verificacion,
                 verificadoEnCampo: !!r.verificado_en_campo,
@@ -1747,6 +1750,15 @@
                     if (capaAreaEditorA2) capaAreaEditorA2.setLatLngs(verticesAreaTempA2.map(function (vv) { return [vv.lat, vv.lon]; }));
                     actualizarEstadoEditorUbicacionA2();
                 });
+                // Tocar el PRIMER vértice (el "1") con ya al menos 3 puestos cierra el
+                // polígono, igual que el botón "✔ Cerrar polígono" — guard de ≥3 para
+                // que un toque accidental en el punto de partida (con solo 1-2
+                // vértices) no intente "cerrar" nada todavía.
+                if (idx === 0) {
+                    marcador.on('click', function () {
+                        if (verticesAreaTempA2.length >= 3) cerrarPoligonoAreaA2();
+                    });
+                }
                 marcadoresAreaEditorA2.push(marcador);
             });
             if (latlngs.length > 0) {
@@ -1859,14 +1871,37 @@
             verticesAreaTempA2.pop();
             redibujarAreaEditorA2();
         });
-        document.getElementById('btnTerminarMedicionA2').addEventListener('click', function () {
+        document.getElementById('btnFijarVerticeGpsA2').addEventListener('click', function () {
+            if (!posicionGpsEditorUbicacionA2Actual) return;
+            verticesAreaTempA2.push({
+                easting: posicionGpsEditorUbicacionA2Actual.easting, northing: posicionGpsEditorUbicacionA2Actual.northing,
+                lat: posicionGpsEditorUbicacionA2Actual.lat, lon: posicionGpsEditorUbicacionA2Actual.lon, origen: 'gps'
+            });
+            redibujarAreaEditorA2();
+        });
+
+        // Cierra el polígono en construcción: calcula el área, la deja lista
+        // para "Usar como..."/"Fijar como centroide", y — a diferencia de antes
+        // — GUARDA el polígono de inmediato en vertices_utm (columna dedicada,
+        // ver guardarCampoA2 más abajo), antes de que el sectorista decida si
+        // lo usa para algún campo de área. Llamada tanto por el botón
+        // "✔ Cerrar polígono" como por tocar el marcador del primer vértice
+        // (ver redibujarAreaEditorA2).
+        function cerrarPoligonoAreaA2() {
             if (verticesAreaTempA2.length < 3) { alert('Agrega al menos 3 vértices para medir un área.'); return; }
             var area = calcularAreaPoligonoHa(verticesAreaTempA2.map(function (v) { return { easting: v.easting, northing: v.northing }; }));
             ultimaAreaMedidaA2 = area;
             document.getElementById('textoResultadoAreaA2').textContent = 'Área medida: ' + area.toFixed(2) + ' ha (' + verticesAreaTempA2.length + ' vértices)';
             document.getElementById('controlesModoAreaA2').style.display = 'none';
             document.getElementById('resultadoAreaA2').style.display = 'flex';
-        });
+
+            var verticesParaGuardar = verticesAreaTempA2.map(function (v, idx) {
+                return { orden: idx + 1, easting: v.easting, northing: v.northing, lat: v.lat, lon: v.lon, origen: v.origen || 'manual' };
+            });
+            registroA2Actual.verticesUtm = verticesParaGuardar;
+            guardarCampoA2({ id: registroA2Actual.id, verticesUtm: verticesParaGuardar });
+        }
+        document.getElementById('btnTerminarMedicionA2').addEventListener('click', cerrarPoligonoAreaA2);
 
         function _usarAreaMedidaComoA2(claveJson) {
             if (ultimaAreaMedidaA2 == null) return;
@@ -1880,6 +1915,29 @@
         }
         document.getElementById('btnUsarAreaTotalA2').addEventListener('click', function () { _usarAreaMedidaComoA2('areaTotalVerificadaHa'); });
         document.getElementById('btnUsarAreaBajoRiegoA2').addEventListener('click', function () { _usarAreaMedidaComoA2('areaBajoRiegoVerificadaHa'); });
+
+        // "Fijar como centroide": calcula el centroide real del polígono ya
+        // cerrado (no el promedio simple de vértices) y lo asigna DIRECTO a
+        // Este/Norte de los datos de verificación — commit inmediato vía
+        // guardarCampoA2, sin esperar a "✔ Finalizar" del editor (coincide con
+        // "actualizará de manera automática el Este/Norte" pedido).
+        document.getElementById('btnFijarCentroideA2').addEventListener('click', function () {
+            var centroide = calcularCentroidePoligono(verticesAreaTempA2.map(function (v) { return { easting: v.easting, northing: v.northing }; }));
+            if (!centroide) { alert('No se pudo calcular el centroide de este polígono.'); return; }
+            var latlon = utm17SALatLon(centroide.easting, centroide.northing);
+            puntoTempA2 = { easting: centroide.easting, northing: centroide.northing, lat: latlon.lat, lon: latlon.lon };
+            var este = Number(centroide.easting.toFixed(2));
+            var norte = Number(centroide.northing.toFixed(2));
+            registroA2Actual.este = este;
+            registroA2Actual.norte = norte;
+            registroA2Actual.zona = registroA2Actual.zona || '17-S';
+            guardarCampoA2({ id: registroA2Actual.id, este: este, norte: norte, zona: registroA2Actual.zona });
+            verticesAreaTempA2 = [];
+            ultimaAreaMedidaA2 = null;
+            redibujarAreaEditorA2();
+            cambiarModoEditorUbicacionA2('punto');
+            redibujarPuntoEditorA2();
+        });
         document.getElementById('btnDescartarAreaA2').addEventListener('click', function () {
             verticesAreaTempA2 = [];
             ultimaAreaMedidaA2 = null;
