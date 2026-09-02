@@ -4175,7 +4175,10 @@ const COMISIONES = {
             { clave: 'norte', etiqueta: 'Norte (UTM)', tipo: 'numero' },
             { clave: 'zona', etiqueta: 'Zona', tipo: 'texto' },
             { clave: 'ucRef', etiqueta: 'UC N° / Ref UC N°', tipo: 'texto' },
-            { clave: 'seUbicaBloque', etiqueta: 'Se ubica dentro del bloque', tipo: 'seleccion', opciones: ['DENTRO', 'FUERA'] },
+            // Ojo: la base de datos exige EXACTAMENTE 'Dentro'/'Fuera' (columna
+            // se_ubica_bloque, check constraint en 026_formato_a2_levantamiento.sql) —
+            // 'DENTRO'/'FUERA' en mayúsculas completas viola el check y falla al guardar.
+            { clave: 'seUbicaBloque', etiqueta: 'Se ubica dentro del bloque', tipo: 'seleccion', opciones: ['Dentro', 'Fuera'] },
             { clave: 'nombreBloqueRiego', etiqueta: 'Nombre de Bloque de Riego', tipo: 'texto' },
             { clave: 'sector', etiqueta: 'Sector', tipo: 'texto' },
             // valorPorDefecto: se autocompleta SOLO si el campo llega vacío (nunca pisa un
