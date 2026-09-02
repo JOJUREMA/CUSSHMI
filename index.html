@@ -3709,8 +3709,11 @@ const COMISIONES = {
                     '🟢 Verde (DNI exacto en SIGA): ' + porColor.verde + '\n' +
                     '🟠 Naranja (nombre/otra toma, a confirmar): ' + porColor.naranja + '\n' +
                     '🟡 Amarillo (sin info digital): ' + porColor.amarillo +
-                    (porColor.sin_color ? '\n⚪ Sin color reconocido: ' + porColor.sin_color : '') +
-                    avisoPlantilla;
+                    (porColor.sin_color ? '\n⚪ Sin color reconocido: ' + porColor.sin_color : '');
+                if (resultado.omitidosPorConfirmados) {
+                    mensaje += '\n\n🔒 ' + resultado.omitidosPorConfirmados + ' registro(s) ya CONFIRMADO(s) desde el celular no se tocaron (para no perder lo verificado en campo) — si necesitas actualizarlos, primero desbloquéalos desde el celular.';
+                }
+                mensaje += avisoPlantilla;
                 alert(mensaje);
             } catch (e) {
                 console.error('Error al importar Formato A-2 (Levantamiento):', e);

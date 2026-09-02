@@ -2559,15 +2559,29 @@
         });
         const filasSinDuplicados = Array.from(filasPorClave.values());
 
+        // Excluir del upsert cualquier registro ya CONFIRMADO — re-sincronizar el Excel
+        // oficial nunca debe pisar lo que un sectorista ya confirmó en campo (mismo
+        // candado de identreg_update/formatoA2Lev_update, 026_formato_a2_levantamiento.sql).
+        // Sin este filtro, un solo registro confirmado bloqueaba el lote COMPLETO: Postgres
+        // rechaza todo el upsert si la política RLS de update no deja tocar una sola fila
+        // en conflicto ("violates row-level security policy (USING expression)").
+        const { data: confirmados } = await client.from('formato_a2_levantamiento')
+            .select('toma_nombre, numero_orden')
+            .eq('comision_id', comisionId)
+            .eq('confirmado', true);
+        const clavesConfirmadas = new Set((confirmados || []).map((c) => (c.toma_nombre || '') + '|' + c.numero_orden));
+        const filasAEnviar = filasSinDuplicados.filter((f) => !clavesConfirmadas.has((f.toma_nombre || '') + '|' + f.numero_orden));
+        const omitidosPorConfirmados = filasSinDuplicados.length - filasAEnviar.length;
+
         const TAMANO_LOTE = 500;
         let guardados = 0;
-        for (let i = 0; i < filasSinDuplicados.length; i += TAMANO_LOTE) {
-            const lote = filasSinDuplicados.slice(i, i + TAMANO_LOTE);
+        for (let i = 0; i < filasAEnviar.length; i += TAMANO_LOTE) {
+            const lote = filasAEnviar.slice(i, i + TAMANO_LOTE);
             const { error } = await client.from('formato_a2_levantamiento').upsert(lote, { onConflict: 'comision_id,toma_nombre,numero_orden' });
             if (error) return { ok: false, error: error.message, guardados };
             guardados += lote.length;
         }
-        return { ok: true, guardados };
+        return { ok: true, guardados, omitidosPorConfirmados };
     }
 
     // Para el selector móvil "por toma / Consolidado": cuántos registros y
