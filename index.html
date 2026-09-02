@@ -3711,13 +3711,15 @@ const COMISIONES = {
 
                 const porColor = { verde: 0, naranja: 0, amarillo: 0, sin_color: 0 };
                 filas.forEach((f) => { porColor[f.estadoVerificacion || 'sin_color']++; });
-                let mensaje = '✅ Formato A-2 (Levantamiento) sincronizado: ' + resultado.guardados + ' registros de ' + filas.length + ' leídos, desde ' + hojasEncontradas + ' hoja(s) por toma.\n\n' +
-                    '🟢 Verde (DNI exacto en SIGA): ' + porColor.verde + '\n' +
+                let mensaje = '✅ Formato A-2 (Levantamiento) sincronizado: ' + resultado.guardados + ' registros de ' + filas.length + ' leídos, desde ' + hojasEncontradas + ' hoja(s) por toma.\n' +
+                    (resultado.nuevos ? '🆕 ' + resultado.nuevos + ' registro(s) nuevo(s).\n' : '') +
+                    (resultado.actualizadosSoloIdentidad ? '🔄 ' + resultado.actualizadosSoloIdentidad + ' registro(s) ya existentes: solo se actualizaron los datos observados (cols 1-17) — lo que el sectorista ya avanzó en el celular (Estado, Este/Norte, cultivos, observaciones, etc.) NO se tocó.\n' : '') +
+                    '\n🟢 Verde (DNI exacto en SIGA): ' + porColor.verde + '\n' +
                     '🟠 Naranja (nombre/otra toma, a confirmar): ' + porColor.naranja + '\n' +
                     '🟡 Amarillo (sin info digital): ' + porColor.amarillo +
                     (porColor.sin_color ? '\n⚪ Sin color reconocido: ' + porColor.sin_color : '');
                 if (resultado.omitidosPorConfirmados) {
-                    mensaje += '\n\n🔒 ' + resultado.omitidosPorConfirmados + ' registro(s) ya CONFIRMADO(s) desde el celular no se tocaron (para no perder lo verificado en campo) — si necesitas actualizarlos, primero desbloquéalos desde el celular.';
+                    mensaje += '\n\n🔒 ' + resultado.omitidosPorConfirmados + ' registro(s) ya CONFIRMADO(s) desde el celular no se tocaron en absoluto — si necesitas actualizarlos, primero desbloquéalos desde el celular.';
                 }
                 mensaje += avisoPlantilla;
                 alert(mensaje);

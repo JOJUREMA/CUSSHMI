@@ -2559,29 +2559,75 @@
         });
         const filasSinDuplicados = Array.from(filasPorClave.values());
 
-        // Excluir del upsert cualquier registro ya CONFIRMADO — re-sincronizar el Excel
-        // oficial nunca debe pisar lo que un sectorista ya confirmó en campo (mismo
-        // candado de identreg_update/formatoA2Lev_update, 026_formato_a2_levantamiento.sql).
-        // Sin este filtro, un solo registro confirmado bloqueaba el lote COMPLETO: Postgres
-        // rechaza todo el upsert si la política RLS de update no deja tocar una sola fila
-        // en conflicto ("violates row-level security policy (USING expression)").
-        const { data: confirmados } = await client.from('formato_a2_levantamiento')
-            .select('toma_nombre, numero_orden')
-            .eq('comision_id', comisionId)
-            .eq('confirmado', true);
-        const clavesConfirmadas = new Set((confirmados || []).map((c) => (c.toma_nombre || '') + '|' + c.numero_orden));
-        const filasAEnviar = filasSinDuplicados.filter((f) => !clavesConfirmadas.has((f.toma_nombre || '') + '|' + f.numero_orden));
-        const omitidosPorConfirmados = filasSinDuplicados.length - filasAEnviar.length;
+        // Cols 18-47 ("datos de verificación/levantamiento") son las que el
+        // sectorista completa en el celular — si el Excel se vuelve a
+        // sincronizar mientras un registro TODAVÍA no está confirmado (ej.
+        // trabajo de campo a medias, autoguardado pero sin tocar "Confirmar"),
+        // reenviar estas columnas pisaría ese avance con lo que traiga el
+        // Excel (típicamente en blanco). Se excluyen del payload para
+        // cualquier fila que YA EXISTE en la base — solo se completan la
+        // PRIMERA vez que se importa esa fila (INSERT), nunca en un resync
+        // posterior de una fila ya existente.
+        const CAMPOS_VERIFICACION_SECTORISTA = [
+            'conductor_actual', 'conductor_tipo_documento', 'conductor_numero_documento',
+            'estado', 'ultima_fecha_riego', 'este', 'norte', 'zona', 'uc_ref',
+            'se_ubica_bloque', 'nombre_bloque_riego', 'sector', 'observaciones', 'campos_verificacion',
+        ];
+
+        // Consulta única: qué filas ya existen (para no pisar sus cols 18-47) y
+        // cuáles de esas ya están CONFIRMADAS (para excluirlas del todo — mismo
+        // candado que identreg_update/formatoA2Lev_update,
+        // 026_formato_a2_levantamiento.sql). Sin la exclusión de confirmadas,
+        // un solo registro confirmado bloquea el LOTE completo: Postgres
+        // rechaza todo el upsert si la política RLS de update no deja tocar esa
+        // fila en conflicto ("violates row-level security policy").
+        const { data: existentes } = await client.from('formato_a2_levantamiento')
+            .select('toma_nombre, numero_orden, confirmado')
+            .eq('comision_id', comisionId);
+        const clavesConfirmadas = new Set();
+        const clavesExistentesNoConfirmadas = new Set();
+        (existentes || []).forEach((r) => {
+            const clave = (r.toma_nombre || '') + '|' + r.numero_orden;
+            if (r.confirmado) clavesConfirmadas.add(clave);
+            else clavesExistentesNoConfirmadas.add(clave);
+        });
+
+        const filasNuevas = []; // no existen todavía -> payload completo (47 cols)
+        const filasActualizarSoloIdentidad = []; // ya existen, sin confirmar -> solo cols 1-17 + color
+        let omitidosPorConfirmados = 0;
+        filasSinDuplicados.forEach((fila) => {
+            const clave = (fila.toma_nombre || '') + '|' + fila.numero_orden;
+            if (clavesConfirmadas.has(clave)) { omitidosPorConfirmados++; return; }
+            if (clavesExistentesNoConfirmadas.has(clave)) {
+                const filaLigera = Object.assign({}, fila);
+                CAMPOS_VERIFICACION_SECTORISTA.forEach((campo) => { delete filaLigera[campo]; });
+                filasActualizarSoloIdentidad.push(filaLigera);
+            } else {
+                filasNuevas.push(fila);
+            }
+        });
 
         const TAMANO_LOTE = 500;
         let guardados = 0;
-        for (let i = 0; i < filasAEnviar.length; i += TAMANO_LOTE) {
-            const lote = filasAEnviar.slice(i, i + TAMANO_LOTE);
-            const { error } = await client.from('formato_a2_levantamiento').upsert(lote, { onConflict: 'comision_id,toma_nombre,numero_orden' });
-            if (error) return { ok: false, error: error.message, guardados };
-            guardados += lote.length;
+        async function subirEnLotes(lista) {
+            for (let i = 0; i < lista.length; i += TAMANO_LOTE) {
+                const lote = lista.slice(i, i + TAMANO_LOTE);
+                const { error } = await client.from('formato_a2_levantamiento').upsert(lote, { onConflict: 'comision_id,toma_nombre,numero_orden' });
+                if (error) return error;
+                guardados += lote.length;
+            }
+            return null;
         }
-        return { ok: true, guardados, omitidosPorConfirmados };
+        let error = await subirEnLotes(filasNuevas);
+        if (error) return { ok: false, error: error.message, guardados };
+        error = await subirEnLotes(filasActualizarSoloIdentidad);
+        if (error) return { ok: false, error: error.message, guardados };
+
+        return {
+            ok: true, guardados, omitidosPorConfirmados,
+            actualizadosSoloIdentidad: filasActualizarSoloIdentidad.length,
+            nuevos: filasNuevas.length,
+        };
     }
 
     // Para el selector móvil "por toma / Consolidado": cuántos registros y
