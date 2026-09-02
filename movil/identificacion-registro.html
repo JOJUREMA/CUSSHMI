@@ -1254,20 +1254,24 @@
         // jsonb) en vez de una columna dedicada.
         var CAMPOS_FORMATO_A2_LEVANTAMIENTO = [
             { clave: 'conductorActual', etiqueta: 'Conductor actual', tipo: 'texto' },
-            { clave: 'conductorTipoDocumento', etiqueta: 'Conductor — Tipo documento', tipo: 'texto' },
+            { clave: 'conductorTipoDocumento', etiqueta: 'Conductor — Tipo documento', tipo: 'seleccion', opciones: ['DNI', 'RUC'] },
             { clave: 'conductorNumeroDocumento', etiqueta: 'Conductor — N° documento', tipo: 'texto' },
-            { clave: 'estado', etiqueta: 'Estado', tipo: 'texto' },
+            { clave: 'estado', etiqueta: 'Estado', tipo: 'seleccion', opciones: ['ACTIVO', 'INACTIVO'] },
             { clave: 'ultimaFechaRiego', etiqueta: 'Última fecha de riego', tipo: 'fecha' },
             { clave: 'este', etiqueta: 'Este (UTM)', tipo: 'numero' },
             { clave: 'norte', etiqueta: 'Norte (UTM)', tipo: 'numero' },
             { clave: 'zona', etiqueta: 'Zona', tipo: 'texto' },
             { clave: 'ucRef', etiqueta: 'UC N° / Ref UC N°', tipo: 'texto' },
-            { clave: 'seUbicaBloque', etiqueta: 'Se ubica dentro del bloque', tipo: 'texto' },
+            { clave: 'seUbicaBloque', etiqueta: 'Se ubica dentro del bloque', tipo: 'seleccion', opciones: ['DENTRO', 'FUERA'] },
             { clave: 'nombreBloqueRiego', etiqueta: 'Nombre de Bloque de Riego', tipo: 'texto' },
             { clave: 'sector', etiqueta: 'Sector', tipo: 'texto' },
-            { clave: 'cdCp', etiqueta: 'CD/CP', tipo: 'texto', enJson: true },
-            { clave: 'l01', etiqueta: 'L01', tipo: 'texto', enJson: true },
-            { clave: 'l02', etiqueta: 'L02', tipo: 'texto', enJson: true },
+            // valorPorDefecto: se autocompleta SOLO si el campo llega vacío (nunca pisa un
+            // valor ya cargado desde el Excel o ya editado) y queda igual de editable que
+            // el resto — '__TOMA__' es un marcador especial resuelto en tiempo de apertura
+            // de la ficha como 'Toma ' + el nombre real de la toma de ese registro.
+            { clave: 'cdCp', etiqueta: 'CD/CP', tipo: 'texto', enJson: true, valorPorDefecto: 'CANAL NORTE' },
+            { clave: 'l01', etiqueta: 'L01', tipo: 'texto', enJson: true, valorPorDefecto: 'CANAL SUR' },
+            { clave: 'l02', etiqueta: 'L02', tipo: 'texto', enJson: true, valorPorDefecto: '__TOMA__' },
             { clave: 'l03', etiqueta: 'L03', tipo: 'texto', enJson: true },
             { clave: 'l04', etiqueta: 'L04', tipo: 'texto', enJson: true },
             { clave: 'l05', etiqueta: 'L05', tipo: 'texto', enJson: true },
@@ -1512,9 +1516,39 @@
                 solicitudEdicionPorNombre: r.solicitud_edicion_por_nombre || '',
                 solicitudEdicionEn: r.solicitud_edicion_en || null,
             };
+            _autocompletarCamposPorDefectoA2();
             pintarEdicionA2Levantamiento();
             document.getElementById('vistaListaA2Levantamiento').style.display = 'none';
             document.getElementById('vistaEdicionA2Levantamiento').style.display = 'flex';
+        }
+
+        // Rellena, SOLO la primera vez que un campo llega vacío, los valores por
+        // defecto de CAMPOS_FORMATO_A2_LEVANTAMIENTO (CD/CP, L01, L02) — nunca
+        // pisa un valor ya cargado o ya editado, y queda igual de editable
+        // después (el sectorista puede corregirlo tocándolo, como cualquier
+        // otro campo). No se ejecuta en registros ya confirmados (bloqueados).
+        function _autocompletarCamposPorDefectoA2() {
+            if (registroA2Actual.confirmado) return;
+            var cambios = {};
+            var huboCambios = false;
+            CAMPOS_FORMATO_A2_LEVANTAMIENTO.forEach(function (campo) {
+                if (!campo.valorPorDefecto) return;
+                var valorActual = campo.enJson ? (registroA2Actual.camposVerificacion || {})[campo.clave] : registroA2Actual[campo.clave];
+                if (valorActual !== undefined && valorActual !== null && valorActual !== '') return;
+                var valorDefecto = campo.valorPorDefecto === '__TOMA__'
+                    ? ('Toma ' + (registroA2Actual.tomaNombre || ''))
+                    : campo.valorPorDefecto;
+                if (campo.enJson) {
+                    registroA2Actual.camposVerificacion = registroA2Actual.camposVerificacion || {};
+                    registroA2Actual.camposVerificacion[campo.clave] = valorDefecto;
+                    cambios.camposVerificacion = registroA2Actual.camposVerificacion;
+                } else {
+                    registroA2Actual[campo.clave] = valorDefecto;
+                    cambios[campo.clave] = valorDefecto;
+                }
+                huboCambios = true;
+            });
+            if (huboCambios) guardarCampoA2(Object.assign({ id: registroA2Actual.id }, cambios));
         }
         document.getElementById('btnVolverListaDesdeEdicionA2').addEventListener('click', function () {
             document.getElementById('vistaEdicionA2Levantamiento').style.display = 'none';
@@ -1554,13 +1588,27 @@
             elValor.textContent = textoMostrado(valorActual);
             elValor.addEventListener('click', function () {
                 if (registroA2Actual.confirmado) return;
-                var input = document.createElement('input');
-                input.type = campo.tipo === 'numero' ? 'number' : (campo.tipo === 'fecha' ? 'date' : 'text');
-                if (campo.tipo === 'numero') input.step = '0.01';
-                // Un valor previo que no calce con YYYY-MM-DD (formato de fecha
-                // inconsistente en el Excel fuente) simplemente abre el selector
-                // vacío en vez de fallar — el sectorista elige una fecha nueva.
-                input.value = valorActual != null ? valorActual : '';
+                var input;
+                if (campo.tipo === 'seleccion') {
+                    input = document.createElement('select');
+                    var optBlank = document.createElement('option');
+                    optBlank.value = ''; optBlank.textContent = '— Elegir —';
+                    input.appendChild(optBlank);
+                    campo.opciones.forEach(function (op) {
+                        var opt = document.createElement('option');
+                        opt.value = op; opt.textContent = op;
+                        input.appendChild(opt);
+                    });
+                    input.value = valorActual != null ? valorActual : '';
+                } else {
+                    input = document.createElement('input');
+                    input.type = campo.tipo === 'numero' ? 'number' : (campo.tipo === 'fecha' ? 'date' : 'text');
+                    if (campo.tipo === 'numero') input.step = '0.01';
+                    // Un valor previo que no calce con YYYY-MM-DD (formato de fecha
+                    // inconsistente en el Excel fuente) simplemente abre el selector
+                    // vacío en vez de fallar — el sectorista elige una fecha nueva.
+                    input.value = valorActual != null ? valorActual : '';
+                }
                 input.style.cssText = 'max-width:170px; padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.95); color:#002555; font-size:13px;';
                 fila.replaceChild(input, elValor);
                 input.focus();
@@ -1586,8 +1634,10 @@
                 input.addEventListener('blur', confirmar);
                 input.addEventListener('keydown', function (e) { if (e.key === 'Enter') input.blur(); });
                 // El selector nativo de fecha no siempre dispara "blur" justo al
-                // cerrarse en Android — "change" es el evento confiable ahí.
-                if (campo.tipo === 'fecha') input.addEventListener('change', confirmar);
+                // cerrarse en Android — "change" es el evento confiable ahí. Un
+                // <select> también confirma mejor con "change" (el "blur" ya
+                // queda cubierto igual, por si el usuario toca fuera sin elegir).
+                if (campo.tipo === 'fecha' || campo.tipo === 'seleccion') input.addEventListener('change', confirmar);
             });
             fila.appendChild(elValor);
             return fila;
