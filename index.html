@@ -3907,7 +3907,10 @@ const COMISIONES = {
                         .map((v) => [v.lat, v.lon]);
                     if (puntos.length < 3) return '';
                     const camposObj = {};
-                    COLUMNAS_FORMATO_A2_LEVANTAMIENTO.forEach((col) => {
+                    // Solo cols 18-47 ("datos de verificación/levantamiento", lo que se
+                    // completa en campo) — las cols 1-17 ("datos observados" de ANA) se
+                    // quedan fuera del KML a pedido explícito del usuario.
+                    COLUMNAS_FORMATO_A2_LEVANTAMIENTO.filter((col) => col.col >= 18).forEach((col) => {
                         camposObj[_campoASnakeCase(col.campo).toUpperCase()] = valorCampo(registro, col);
                     });
                     return construirPlacemarkPoligono(registro.apellidos_nombres || 'Sin nombre', puntos, estiloId, camposObj);
