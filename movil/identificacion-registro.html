@@ -1607,10 +1607,25 @@
                     input = document.createElement('input');
                     input.type = campo.tipo === 'numero' ? 'number' : (campo.tipo === 'fecha' ? 'date' : 'text');
                     if (campo.tipo === 'numero') input.step = '0.01';
-                    // Un valor previo que no calce con YYYY-MM-DD (formato de fecha
-                    // inconsistente en el Excel fuente) simplemente abre el selector
-                    // vacío en vez de fallar — el sectorista elige una fecha nueva.
-                    input.value = valorActual != null ? valorActual : '';
+                    if (campo.tipo === 'fecha') {
+                        // Acota el calendario nativo a un rango razonable — sin esto, un
+                        // valor corrupto ya guardado (ej. '0002-02-28', típicamente un año
+                        // mal tecleado en el propio selector nativo, sin querer) hace que
+                        // el calendario abra anclado en el año 2 y haya que navegar miles
+                        // de años para llegar al actual.
+                        input.min = '1990-01-01';
+                        input.max = '2100-12-31';
+                    }
+                    // Un valor previo que no calce con YYYY-MM-DD, o una fecha con año
+                    // fuera de [1990, 2100] (dato corrupto ya guardado), simplemente abre
+                    // el selector vacío en vez de heredar el año absurdo — el sectorista
+                    // elige una fecha nueva desde cero.
+                    var valorPreLlenado = valorActual;
+                    if (campo.tipo === 'fecha' && valorPreLlenado) {
+                        var anioPrellenado = parseInt(String(valorPreLlenado).slice(0, 4), 10);
+                        if (!Number.isFinite(anioPrellenado) || anioPrellenado < 1990 || anioPrellenado > 2100) valorPreLlenado = null;
+                    }
+                    input.value = valorPreLlenado != null ? valorPreLlenado : '';
                 }
                 input.style.cssText = 'max-width:170px; padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.95); color:#002555; font-size:13px;';
                 fila.replaceChild(input, elValor);
@@ -1618,6 +1633,15 @@
                 var yaConfirmado = false;
                 function confirmar() {
                     if (yaConfirmado) return;
+                    if (campo.tipo === 'fecha' && input.value) {
+                        var anioTecleado = parseInt(input.value.slice(0, 4), 10);
+                        if (!Number.isFinite(anioTecleado) || anioTecleado < 1990 || anioTecleado > 2100) {
+                            alert('Fecha inválida — el año debe estar entre 1990 y 2100. Vuelve a elegir la fecha.');
+                            input.value = '';
+                            input.focus();
+                            return; // no guarda todavía, sigue editable para corregir
+                        }
+                    }
                     yaConfirmado = true;
                     var nuevo = input.value === '' ? null : (campo.tipo === 'numero' ? parseFloat(input.value) : input.value);
                     valorActual = nuevo;

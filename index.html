@@ -4509,7 +4509,23 @@ const COMISIONES = {
                     input = document.createElement('input');
                     input.type = campo.tipo === 'numero' ? 'number' : (campo.tipo === 'fecha' ? 'date' : 'text');
                     if (campo.tipo === 'numero') input.step = '0.01';
-                    input.value = valorActual != null ? valorActual : '';
+                    if (campo.tipo === 'fecha') {
+                        // Acota el calendario nativo a un rango razonable — sin esto, un
+                        // valor corrupto ya guardado (ej. '0002-02-28', típicamente un año
+                        // mal tecleado sin querer) hace que el calendario abra anclado en
+                        // el año 2 y haya que navegar miles de años para llegar al actual.
+                        input.min = '1990-01-01';
+                        input.max = '2100-12-31';
+                    }
+                    // Un valor previo que no calce con YYYY-MM-DD, o una fecha con año
+                    // fuera de [1990, 2100] (dato corrupto ya guardado), abre el selector
+                    // vacío en vez de heredar el año absurdo.
+                    let valorPreLlenado = valorActual;
+                    if (campo.tipo === 'fecha' && valorPreLlenado) {
+                        const anioPrellenado = parseInt(String(valorPreLlenado).slice(0, 4), 10);
+                        if (!Number.isFinite(anioPrellenado) || anioPrellenado < 1990 || anioPrellenado > 2100) valorPreLlenado = null;
+                    }
+                    input.value = valorPreLlenado != null ? valorPreLlenado : '';
                 }
                 input.style.cssText = 'max-width:160px;padding:5px 7px;border-radius:4px;border:1px solid #ccc;font-size:13px;';
                 fila.replaceChild(input, elValor);
@@ -4517,6 +4533,15 @@ const COMISIONES = {
                 let yaConfirmado = false;
                 function confirmar() {
                     if (yaConfirmado) return;
+                    if (campo.tipo === 'fecha' && input.value) {
+                        const anioTecleado = parseInt(input.value.slice(0, 4), 10);
+                        if (!Number.isFinite(anioTecleado) || anioTecleado < 1990 || anioTecleado > 2100) {
+                            alert('Fecha inválida — el año debe estar entre 1990 y 2100. Vuelve a elegir la fecha.');
+                            input.value = '';
+                            input.focus();
+                            return; // no guarda todavía, sigue editable para corregir
+                        }
+                    }
                     yaConfirmado = true;
                     const nuevo = input.value === '' ? null : (campo.tipo === 'numero' ? parseFloat(input.value) : input.value);
                     valorActual = nuevo;
