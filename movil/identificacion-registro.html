@@ -1257,7 +1257,10 @@
             { clave: 'conductorTipoDocumento', etiqueta: 'Conductor — Tipo documento', tipo: 'seleccion', opciones: ['DNI', 'RUC'] },
             { clave: 'conductorNumeroDocumento', etiqueta: 'Conductor — N° documento', tipo: 'texto' },
             { clave: 'estado', etiqueta: 'Estado', tipo: 'seleccion', opciones: ['ACTIVO', 'INACTIVO'] },
-            { clave: 'ultimaFechaRiego', etiqueta: 'Última fecha de riego', tipo: 'fecha' },
+            // El selector nativo de fecha daba problemas reales para elegir la fecha
+            // (a pedido explícito del usuario, se vuelve a texto libre — sin calendario
+            // ni restricción de formato; la columna en la base ya es texto plano).
+            { clave: 'ultimaFechaRiego', etiqueta: 'Última fecha de riego', tipo: 'texto' },
             { clave: 'este', etiqueta: 'Este (UTM)', tipo: 'numero' },
             { clave: 'norte', etiqueta: 'Norte (UTM)', tipo: 'numero' },
             { clave: 'zona', etiqueta: 'Zona', tipo: 'texto' },
