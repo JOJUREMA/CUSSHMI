@@ -4245,7 +4245,7 @@ const COMISIONES = {
                                 </select>
                             </div>
                             <button id="btnSolicitudesLevantamientoA2Esc" onclick="_mostrarSolicitudesLevantamientoA2Esc()"
-                                style="padding:9px 14px;background:#e2e8f0;color:#4a5568;border:none;border-radius:4px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap;">
+                                style="padding:9px 14px;background:#e2e8f0;color:#4a5568;border:none;border-radius:4px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap;display:${esAdmin ? 'inline-block' : 'none'};">
                                 🔔 Solicitudes pendientes
                             </button>
                         </div>
@@ -4277,6 +4277,13 @@ const COMISIONES = {
         async function _actualizarBotonSolicitudesLevantamientoA2Esc(comisionKey) {
             const btn = document.getElementById('btnSolicitudesLevantamientoA2Esc');
             if (!btn) return;
+            // Habilitar/Rechazar una solicitud desbloquea un registro ya CONFIRMADO —
+            // la base de datos (RLS) solo lo permite a un admin real (mismo candado que
+            // desbloquearRegistroFormatoA2Levantamiento) — el botón se oculta para
+            // programador, igual que ya hace el móvil (btnVerSolicitudesA2), en vez de
+            // dejarlo ver una lista que después le va a fallar al intentar actuar.
+            btn.style.display = esAdmin ? 'inline-block' : 'none';
+            if (!esAdmin) return;
             const resultado = await CusshmiDatos.listarSolicitudesEdicionFormatoA2Levantamiento(comisionKey);
             const n = resultado.ok ? (resultado.solicitudes || []).length : 0;
             btn.textContent = n > 0 ? ('🔔 Solicitudes pendientes (' + n + ')') : '🔔 Solicitudes pendientes';
@@ -4639,6 +4646,7 @@ const COMISIONES = {
 
         // ── Vista Solicitudes pendientes (admin) ──
         async function _mostrarSolicitudesLevantamientoA2Esc() {
+            if (!esAdmin) { alert('Solo un administrador puede ver y gestionar solicitudes de edición.'); return; }
             const comisionKey = _levantamientoA2Estado.comisionKey;
             if (!comisionKey) return;
             const contenedor = document.getElementById('contenidoLevantamientoA2Esc');
