@@ -1387,16 +1387,28 @@
             </button>
             <input type="file" id="inputPadronOficialA1" accept=".xlsx" style="display:none;" onchange="importarPadronOficialA1(event)">
 
-            <button class="btn btn-success" id="btnExportarA1A2" onclick="exportarFormatosA1A2()" style="width: 100%; margin-top: 12px;" title="Genera un Excel con los Formatos A-1 (usuarios con derecho vigente) y A-2 (registrados en campo, sin derecho formalizado) oficiales de ANA">
-                📊 Exportar Formatos A-1/A-2
+            <button class="btn btn-primary" id="btnAbrirFormatoA1" onclick="mostrarPanelFormatoA1Esc()" style="width: 100%; margin-top: 12px;" title="Lista de usuarios del Formato A-1 (con derecho vigente), filtrable por Bloque de Riego, Toma y usuario, con exportación por Bloque, por Toma o General">
+                📋 Formato A-1
             </button>
 
-            <hr style="margin:16px 0;border:none;border-top:1px solid #ddd;">
+            <button class="btn btn-primary" id="btnAbrirFormatoA2Menu" onclick="abrirModalFormatoA2Menu()" style="width: 100%; margin-top: 12px;" title="Levantamiento de Observaciones (Formato A-2): sincronizar, ver/editar registros, exportar, polígonos KML y avance">
+                🗂️ Formato A-2
+            </button>
+
+            <button class="btn btn-secondary" onclick="cerrarModalPadronA1()" style="width: 100%; margin-top: 12px;">
+                ❌ Cerrar
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL FORMATO A-2 (LEVANTAMIENTO) — MENÚ -->
+    <div id="modalFormatoA2Menu" class="modal-overlay">
+        <div class="modal-container" style="text-align: center; padding: 30px; max-width: 480px;">
+            <h3>🗂️ Formato A-2 — Levantamiento de Observaciones</h3>
             <p class="info-text" style="text-align:left;">
-                <strong>Levantamiento de Observaciones — Formato A-2:</strong> distinto de lo de
-                arriba — es el Excel de cumplimiento puntual ("... LEVANTADO") con los usuarios que
-                ANA observó y que hay que verificar/completar en campo desde "Identificación y
-                registro" (móvil) → Formato A-2.
+                Distinto del Formato A-1 — es el Excel de cumplimiento puntual ("... LEVANTADO") con los
+                usuarios que ANA observó y que hay que verificar/completar en campo desde "Identificación
+                y registro" (móvil) → Formato A-2.
             </p>
             <button class="btn btn-primary" id="btnSincronizarFormatoA2Levantamiento" onclick="document.getElementById('inputFormatoA2Levantamiento').click()" style="width: 100%;" title="Sube el Excel 'Formato A2 ... LEVANTADO' (usuarios observados por ANA, ya cruzados contra el padrón digital SIGA) para verificarlos/completarlos en campo desde el móvil">
                 🗂️ Sincronizar Formato A-2 (Levantamiento)
@@ -1438,7 +1450,7 @@
                 📊 Avance Levantamiento A-2
             </button>
 
-            <button class="btn btn-secondary" onclick="cerrarModalPadronA1()" style="width: 100%; margin-top: 12px;">
+            <button class="btn btn-secondary" onclick="cerrarModalFormatoA2Menu()" style="width: 100%; margin-top: 12px;">
                 ❌ Cerrar
             </button>
         </div>
@@ -6040,6 +6052,239 @@ const COMISIONES = {
             }
         }
 
+        // ── Panel "Formato A-1" — lista de usuarios con derecho vigente
+        // (padron_oficial_a1, origen='ana_a1'), filtrable por Bloque de Riego
+        // (derivado de la toma vía obtenerBloqueDeToma, assets/core/mapa.js —
+        // el Excel oficial no trae bloque), Toma, y una búsqueda libre por
+        // usuario/unidad catastral (solo para filtrar/buscar, sin botón de
+        // exportar propio). Reutiliza construirHojaFormatoA1/_descargarWorkbook
+        // (ya existentes) para las 3 exportaciones — mismo layout de hoja que
+        // ya usaba "Exportar Formatos A-1/A-2", solo que ahora también se
+        // puede acotar por Bloque o por Toma antes de generar el archivo.
+        let _formatoA1EstadoEsc = { filasTodas: [], comisionKey: null, comisionNombre: '' };
+
+        async function mostrarPanelFormatoA1Esc() {
+            const comisionKey = localStorage.getItem('cusshmi_comision');
+            if (!comisionKey) { alert('Selecciona una comisión primero.'); return; }
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); return; }
+
+            const existente = document.getElementById('modalFormatoA1Esc');
+            if (existente) existente.remove();
+
+            const modalHtml = `
+                <div id="modalFormatoA1Esc" class="modal-overlay active" style="z-index:99998;background:rgba(0,20,50,0.85);">
+                    <div class="modal-container" style="max-width:1100px;max-height:90vh;overflow-y:auto;">
+                        <h3>📋 Formato A-1 — ${COMISIONES[comisionKey]?.nombre || comisionKey}</h3>
+                        <p style="font-size:12px;color:#666;margin-top:-6px;">Usuarios con derecho vigente (Padrón oficial A-1, ANA).</p>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end;">
+                            <div style="min-width:180px;">
+                                <label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">Bloque de Riego</label>
+                                <select id="selectBloqueFormatoA1Esc" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:4px;">
+                                    <option value="TODOS">Todos los bloques</option>
+                                </select>
+                            </div>
+                            <div style="min-width:180px;">
+                                <label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">Toma</label>
+                                <select id="selectTomaFormatoA1Esc" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:4px;">
+                                    <option value="TODAS">Todas las tomas</option>
+                                </select>
+                            </div>
+                            <div style="flex:1;min-width:200px;">
+                                <label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">Buscar usuario / U. Catastral</label>
+                                <input type="text" id="inputBuscarFormatoA1Esc" placeholder="Nombre o unidad catastral…" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;">
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                            <button id="btnExportarFormatoA1PorBloqueEsc" onclick="_exportarFormatoA1PorBloqueEsc()" style="padding:9px 14px;background:#1a6e3c;color:#fff;border:none;border-radius:4px;font-weight:600;font-size:12px;cursor:pointer;" title="Elige un Bloque de Riego arriba para habilitar">⬇️ Exportar por Bloque</button>
+                            <button id="btnExportarFormatoA1PorTomaEsc" onclick="_exportarFormatoA1PorTomaEsc()" style="padding:9px 14px;background:#1a6e3c;color:#fff;border:none;border-radius:4px;font-weight:600;font-size:12px;cursor:pointer;" title="Elige una Toma arriba para habilitar">⬇️ Exportar por Toma</button>
+                            <button id="btnExportarFormatoA1GeneralEsc" onclick="_exportarFormatoA1GeneralEsc()" style="padding:9px 14px;background:#1a6e3c;color:#fff;border:none;border-radius:4px;font-weight:600;font-size:12px;cursor:pointer;" title="Exporta todos los usuarios del Formato A-1, sin filtrar">⬇️ Exportar General</button>
+                        </div>
+                        <div id="contenidoFormatoA1Esc">
+                            <div style="text-align:center;color:#888;padding:20px;">Cargando…</div>
+                        </div>
+                        <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center;">
+                            <button onclick="exportarFormatosA1A2()" style="padding:9px 14px;background:#e2e8f0;color:#4a5568;border:none;border-radius:4px;font-weight:600;font-size:12px;cursor:pointer;" title="Exportación anterior: Formato A-1 + Formato A-2 (usuarios registrados en campo, sin derecho formalizado) + Datos Adicionales, en 3 archivos separados">
+                                📊 Exportar también A-2 (campo) + Datos Adicionales
+                            </button>
+                            <button onclick="document.getElementById('modalFormatoA1Esc').remove()" style="padding:9px 18px;background:#003876;color:white;border:none;border-radius:4px;font-weight:600;font-size:13px;cursor:pointer;margin-left:auto;">
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+
+            const div = document.createElement('div');
+            div.innerHTML = modalHtml;
+            document.body.appendChild(div.firstElementChild);
+
+            const contenedor = document.getElementById('contenidoFormatoA1Esc');
+            const resultado = await CusshmiDatos.cargarPadronOficialA1CompletoParaExportar(comisionKey);
+            if (!resultado.ok) {
+                contenedor.innerHTML = `<div style="text-align:center;color:#c0392b;padding:20px;">No se pudo cargar el padrón: ${resultado.error || 'error desconocido'}</div>`;
+                return;
+            }
+            const filasA1 = (resultado.resultados || []).filter((f) => f.origen === 'ana_a1');
+            _formatoA1EstadoEsc = {
+                filasTodas: filasA1,
+                comisionKey,
+                comisionNombre: (COMISIONES[comisionKey] && COMISIONES[comisionKey].nombre) || comisionKey,
+            };
+
+            // Bloques únicos derivados de las tomas presentes — una toma puede
+            // caer en 2 bloques a la vez (ej. SD10 -> "VIVIATE/PUCUSULA",
+            // obtenerBloqueDeToma ya lo devuelve así); se separan en tokens
+            // individuales para que el filtro ofrezca nombres de bloque simples.
+            const bloquesSet = new Set();
+            const tomasSet = new Set();
+            filasA1.forEach((f) => {
+                if (!f.toma_nombre) return;
+                tomasSet.add(f.toma_nombre);
+                const bloque = (typeof obtenerBloqueDeToma === 'function') ? obtenerBloqueDeToma(f.toma_nombre) : '—';
+                (bloque || '').split('/').forEach((b) => { if (b && b !== '—') bloquesSet.add(b); });
+            });
+            const tomasOrdenadas = Array.from(tomasSet).sort((a, b) => compararOrdenTomas(a, b));
+            const bloquesOrdenados = Array.from(bloquesSet).sort();
+
+            const selectBloque = document.getElementById('selectBloqueFormatoA1Esc');
+            bloquesOrdenados.forEach((b) => {
+                const opt = document.createElement('option');
+                opt.value = b; opt.textContent = b;
+                selectBloque.appendChild(opt);
+            });
+            const selectToma = document.getElementById('selectTomaFormatoA1Esc');
+            tomasOrdenadas.forEach((t) => {
+                const opt = document.createElement('option');
+                opt.value = t; opt.textContent = t;
+                selectToma.appendChild(opt);
+            });
+
+            selectBloque.addEventListener('change', _renderizarFilasFormatoA1Esc);
+            selectToma.addEventListener('change', _renderizarFilasFormatoA1Esc);
+            document.getElementById('inputBuscarFormatoA1Esc').addEventListener('input', _renderizarFilasFormatoA1Esc);
+
+            _renderizarFilasFormatoA1Esc();
+        }
+
+        // Filtra en memoria (sin volver a consultar Supabase) sobre
+        // _formatoA1EstadoEsc.filasTodas, según Bloque/Toma/búsqueda elegidos,
+        // y habilita/deshabilita los botones "por Bloque"/"por Toma" según si
+        // hay un filtro concreto elegido (exportar "por Bloque" sin haber
+        // elegido un bloque sería ambiguo).
+        function _renderizarFilasFormatoA1Esc() {
+            const contenedor = document.getElementById('contenidoFormatoA1Esc');
+            if (!contenedor) return;
+            const filasTodas = _formatoA1EstadoEsc.filasTodas || [];
+            if (filasTodas.length === 0) {
+                contenedor.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">No hay usuarios en el Formato A-1 sincronizados todavía para esta comisión.</div>';
+                return;
+            }
+            const bloqueSel = (document.getElementById('selectBloqueFormatoA1Esc') || {}).value || 'TODOS';
+            const tomaSel = (document.getElementById('selectTomaFormatoA1Esc') || {}).value || 'TODAS';
+            const busqueda = ((document.getElementById('inputBuscarFormatoA1Esc') || {}).value || '').trim().toUpperCase();
+
+            const filas = filasTodas.filter((f) => {
+                if (tomaSel !== 'TODAS' && f.toma_nombre !== tomaSel) return false;
+                if (bloqueSel !== 'TODOS') {
+                    const bloqueFila = (typeof obtenerBloqueDeToma === 'function' && f.toma_nombre) ? obtenerBloqueDeToma(f.toma_nombre) : '';
+                    if (!(bloqueFila || '').split('/').includes(bloqueSel)) return false;
+                }
+                if (busqueda) {
+                    const nombre = (f.apellidos_nombres || '').toUpperCase();
+                    const uc = (f.unidad_catastral || '').toUpperCase();
+                    if (!nombre.includes(busqueda) && !uc.includes(busqueda)) return false;
+                }
+                return true;
+            });
+
+            const btnBloque = document.getElementById('btnExportarFormatoA1PorBloqueEsc');
+            const btnToma = document.getElementById('btnExportarFormatoA1PorTomaEsc');
+            if (btnBloque) btnBloque.disabled = (bloqueSel === 'TODOS');
+            if (btnToma) btnToma.disabled = (tomaSel === 'TODAS');
+            [btnBloque, btnToma].forEach((b) => {
+                if (!b) return;
+                b.style.opacity = b.disabled ? '0.5' : '1';
+                b.style.cursor = b.disabled ? 'not-allowed' : 'pointer';
+            });
+
+            if (filas.length === 0) {
+                contenedor.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Ningún usuario coincide con estos filtros.</div>';
+                return;
+            }
+
+            const filasHtml = filas.map((f, idx) => {
+                const bloque = (typeof obtenerBloqueDeToma === 'function' && f.toma_nombre) ? obtenerBloqueDeToma(f.toma_nombre) : '—';
+                return `
+                    <tr>
+                        <td style="padding:7px;text-align:center;">${idx + 1}</td>
+                        <td style="padding:7px;">${escapeHtml(f.apellidos_nombres || '-')}</td>
+                        <td style="padding:7px;text-align:center;">${escapeHtml(f.toma_nombre || '—')}</td>
+                        <td style="padding:7px;text-align:center;">${escapeHtml(bloque)}</td>
+                        <td style="padding:7px;text-align:center;">${escapeHtml(f.unidad_catastral || '-')}</td>
+                        <td style="padding:7px;text-align:center;">${f.area_total_ha != null ? f.area_total_ha : '-'}</td>
+                        <td style="padding:7px;text-align:center;">${f.area_bajo_riego_ha != null ? f.area_bajo_riego_ha : '-'}</td>
+                        <td style="padding:7px;text-align:center;">${escapeHtml(f.clase_derecho || '-')}</td>
+                        <td style="padding:7px;text-align:center;">${f.volumen_m3 != null ? f.volumen_m3 : '-'}</td>
+                    </tr>`;
+            }).join('');
+
+            contenedor.innerHTML = `
+                <p style="font-size:12px;color:#666;margin:0 0 6px;">Mostrando ${filas.length} de ${filasTodas.length} usuarios.</p>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead>
+                            <tr style="background:#003876;color:white;">
+                                <th style="padding:7px;">N°</th>
+                                <th style="padding:7px;text-align:left;">Usuario</th>
+                                <th style="padding:7px;">Toma</th>
+                                <th style="padding:7px;">Bloque</th>
+                                <th style="padding:7px;">U. Catastral</th>
+                                <th style="padding:7px;">Área Total (ha)</th>
+                                <th style="padding:7px;">Área Bajo Riego (ha)</th>
+                                <th style="padding:7px;">Clase de Derecho</th>
+                                <th style="padding:7px;">Volumen (m³)</th>
+                            </tr>
+                        </thead>
+                        <tbody>${filasHtml}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        function _exportarFormatoA1PorBloqueEsc() {
+            const bloqueSel = (document.getElementById('selectBloqueFormatoA1Esc') || {}).value || 'TODOS';
+            if (bloqueSel === 'TODOS') { alert('Elige un Bloque de Riego primero.'); return; }
+            const filas = (_formatoA1EstadoEsc.filasTodas || []).filter((f) => {
+                const bloqueFila = (typeof obtenerBloqueDeToma === 'function' && f.toma_nombre) ? obtenerBloqueDeToma(f.toma_nombre) : '';
+                return (bloqueFila || '').split('/').includes(bloqueSel);
+            });
+            _generarYDescargarFormatoA1Esc(filas, 'Bloque_' + bloqueSel);
+        }
+
+        function _exportarFormatoA1PorTomaEsc() {
+            const tomaSel = (document.getElementById('selectTomaFormatoA1Esc') || {}).value || 'TODAS';
+            if (tomaSel === 'TODAS') { alert('Elige una Toma primero.'); return; }
+            const filas = (_formatoA1EstadoEsc.filasTodas || []).filter((f) => f.toma_nombre === tomaSel);
+            _generarYDescargarFormatoA1Esc(filas, 'Toma_' + tomaSel);
+        }
+
+        function _exportarFormatoA1GeneralEsc() {
+            _generarYDescargarFormatoA1Esc(_formatoA1EstadoEsc.filasTodas || [], 'General');
+        }
+
+        async function _generarYDescargarFormatoA1Esc(filas, sufijo) {
+            if (!window.ExcelJS) { alert('Librería Excel no disponible'); return; }
+            if (!filas || filas.length === 0) { alert('No hay usuarios para exportar con este filtro.'); return; }
+            try {
+                const fecha = new Date().toISOString().split('T')[0];
+                const wb = new ExcelJS.Workbook();
+                construirHojaFormatoA1(wb, filas, _formatoA1EstadoEsc.comisionNombre);
+                const nombreArchivo = `Formato_A1_${sufijo}_${_formatoA1EstadoEsc.comisionKey}_${fecha}.xlsx`.replace(/\s+/g, '_');
+                await _descargarWorkbook(wb, nombreArchivo);
+            } catch (e) {
+                console.error('Error al exportar Formato A-1:', e);
+                alert('No se pudo generar el archivo: ' + (e.message || e));
+            }
+        }
+
         // ── Exportador de Inventario (14 tipos, una hoja por tipo) ──
         // A diferencia de A-1/A-2/E-4.1 (que replican el layout multi-nivel
         // exacto del Excel oficial), acá se usa un encabezado de una sola
@@ -8199,7 +8444,6 @@ function cerrarModalSimularSemana() {
 function abrirModalPadronA1() {
     const modal = document.getElementById('modalPadronA1');
     if (modal) modal.classList.add('active');
-    _poblarSelectorTomaExportarPoligonosA2SiHaceFalta();
 }
 
 // Puebla el selector de Toma (estático, TOMAS_FORMATO_A2_LEVANTAMIENTO ya es
@@ -8219,6 +8463,22 @@ function _poblarSelectorTomaExportarPoligonosA2SiHaceFalta() {
 
 function cerrarModalPadronA1() {
     const modal = document.getElementById('modalPadronA1');
+    if (modal) modal.classList.remove('active');
+}
+
+// "Formato A-2" ahora vive en su propio menú (antes era la mitad de abajo de
+// modalPadronA1) — se abre apilado encima (mismo z-index por defecto de
+// .modal-overlay, gana por orden de aparición en el DOM), sin cerrar
+// modalPadronA1 detrás, igual que ya hacen mostrarPanelLevantamientoA2/
+// mostrarPanelAvanceFormatoA2Levantamiento con modalFormatoA2Menu mismo.
+function abrirModalFormatoA2Menu() {
+    const modal = document.getElementById('modalFormatoA2Menu');
+    if (modal) modal.classList.add('active');
+    _poblarSelectorTomaExportarPoligonosA2SiHaceFalta();
+}
+
+function cerrarModalFormatoA2Menu() {
+    const modal = document.getElementById('modalFormatoA2Menu');
     if (modal) modal.classList.remove('active');
 }
 
