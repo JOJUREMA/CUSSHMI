@@ -1081,17 +1081,22 @@
    nivel: solo se togglea una clase en el contenedor del mapa. */
 .leaflet-tooltip.etiqueta-predio-bloque-a2-esc,
 .leaflet-tooltip.etiqueta-canal-bloque-a2-esc {
-    background: rgba(255,255,255,0.88);
+    background: transparent; /* el fondo real vive en .et-caja (ver abajo) */
     border: none;
     box-shadow: none;
-    padding: 1px 4px;
+    padding: 0;
     line-height: 1.15;
     font-weight: 600;
     white-space: nowrap;
     display: none; /* nivel 0 por defecto (sin clase de nivel en el contenedor) */
 }
-.leaflet-tooltip.etiqueta-predio-bloque-a2-esc { color: #002b52; }
-.leaflet-tooltip.etiqueta-canal-bloque-a2-esc { color: #6a3d00; }
+/* La "caja" (fondo blanco + relleno) va en un <span> interno que SÍ gira
+   junto con el texto — si el fondo quedara en el .leaflet-tooltip exterior
+   (que Leaflet posiciona con su propio transform, sin rotar), el rectángulo
+   blanco se vería siempre horizontal aunque el texto adentro girara. */
+.et-caja { display: inline-block; padding: 1px 4px; border-radius: 2px; }
+.etiqueta-predio-bloque-a2-esc .et-caja { background: rgba(255,255,255,0.88); color: #002b52; }
+.etiqueta-canal-bloque-a2-esc .et-caja { background: rgba(255,255,255,0.82); color: #6a3d00; }
 .etiqueta-predio-bloque-a2-esc .et-completa { display: none; }
 .etiqueta-predio-bloque-a2-esc .et-compacta { display: inline; }
 
@@ -5271,7 +5276,7 @@ const COMISIONES = {
                 // Dos variantes de contenido (compacta/completa) siempre presentes
                 // en el DOM — el <style> decide cuál se ve según el nivel de zoom
                 // actual (mapa-nivel-etiquetas-a2-esc-N), sin reconstruir el tooltip.
-                const etiqueta = `<span style="display:inline-block;transform:rotate(${angulo.toFixed(1)}deg);">` +
+                const etiqueta = `<span class="et-caja" style="transform:rotate(${angulo.toFixed(1)}deg);">` +
                     `<span class="et-compacta">${ucEsc ? ('UC ' + ucEsc) : nombreEsc}</span>` +
                     `<span class="et-completa">${nombreEsc}${ucEsc ? ('<br>UC ' + ucEsc) : ''}</span>` +
                     `</span>`;
@@ -5286,7 +5291,7 @@ const COMISIONES = {
                 const nombreCanal = (c.campos && c.campos.NOMBRE) || c.nombre || 'Canal';
                 // Polilínea abierta (cerrado=false) — geom.coords ya es [lat,lon].
                 const anguloCanal = (typeof anguloLadoMasLargo === 'function') ? anguloLadoMasLargo(c.geom.coords, false) : 0;
-                const etiquetaCanal = `<span style="display:inline-block;transform:rotate(${anguloCanal.toFixed(1)}deg);">${escapeHtml(nombreCanal)}</span>`;
+                const etiquetaCanal = `<span class="et-caja" style="transform:rotate(${anguloCanal.toFixed(1)}deg);">${escapeHtml(nombreCanal)}</span>`;
                 linea.bindTooltip(etiquetaCanal, { permanent: true, direction: 'center', className: 'etiqueta-canal-bloque-a2-esc', interactive: false });
                 capas.push(linea);
             });
