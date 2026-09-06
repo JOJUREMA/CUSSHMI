@@ -1071,24 +1071,41 @@
     vertical-align: middle !important;
 }
 /* Etiquetas del bloque de riego (predios/canales) en el editor de ubicación
-   del Formato A-2 — permanentes pero compactas, ocultas por completo
-   mientras el zoom está alejado (ver UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2_ESC)
-   para no saturar el mapa con cientos de predios superpuestos. */
+   del Formato A-2 — permanentes, giradas paralelas al lado/tramo más largo
+   (ver anguloLadoMasLargo, assets/core/mapa.js) y con densidad/tamaño
+   PROPORCIONAL AL ZOOM en 4 niveles (ver _nivelEtiquetasA2Esc/
+   _actualizarVisibilidadEtiquetasBloqueA2Esc): oculto (nivel 0, muy alejado)
+   → solo U. Catastral en predios, sin canal (nivel 1) → nombre completo +
+   UC, canal con su nombre (nivel 2) → mismo contenido con fuente mayor al
+   máximo acercamiento (nivel 3). Nunca se re-crean las capas al cambiar de
+   nivel: solo se togglea una clase en el contenedor del mapa. */
 .leaflet-tooltip.etiqueta-predio-bloque-a2-esc,
 .leaflet-tooltip.etiqueta-canal-bloque-a2-esc {
     background: rgba(255,255,255,0.88);
     border: none;
     box-shadow: none;
     padding: 1px 4px;
-    font-size: 10px;
     line-height: 1.15;
     font-weight: 600;
     white-space: nowrap;
+    display: none; /* nivel 0 por defecto (sin clase de nivel en el contenedor) */
 }
 .leaflet-tooltip.etiqueta-predio-bloque-a2-esc { color: #002b52; }
 .leaflet-tooltip.etiqueta-canal-bloque-a2-esc { color: #6a3d00; }
-.mapa-oculta-etiquetas-bloque-a2-esc .etiqueta-predio-bloque-a2-esc,
-.mapa-oculta-etiquetas-bloque-a2-esc .etiqueta-canal-bloque-a2-esc { display: none; }
+.etiqueta-predio-bloque-a2-esc .et-completa { display: none; }
+.etiqueta-predio-bloque-a2-esc .et-compacta { display: inline; }
+
+.mapa-nivel-etiquetas-a2-esc-1 .etiqueta-predio-bloque-a2-esc { display: block; font-size: 9px; }
+
+.mapa-nivel-etiquetas-a2-esc-2 .etiqueta-predio-bloque-a2-esc { display: block; font-size: 11px; }
+.mapa-nivel-etiquetas-a2-esc-2 .etiqueta-predio-bloque-a2-esc .et-completa { display: inline; }
+.mapa-nivel-etiquetas-a2-esc-2 .etiqueta-predio-bloque-a2-esc .et-compacta { display: none; }
+.mapa-nivel-etiquetas-a2-esc-2 .etiqueta-canal-bloque-a2-esc { display: block; font-size: 10px; }
+
+.mapa-nivel-etiquetas-a2-esc-3 .etiqueta-predio-bloque-a2-esc { display: block; font-size: 13px; }
+.mapa-nivel-etiquetas-a2-esc-3 .etiqueta-predio-bloque-a2-esc .et-completa { display: inline; }
+.mapa-nivel-etiquetas-a2-esc-3 .etiqueta-predio-bloque-a2-esc .et-compacta { display: none; }
+.mapa-nivel-etiquetas-a2-esc-3 .etiqueta-canal-bloque-a2-esc { display: block; font-size: 12px; }
 </style>
 
 <!-- ══ Supabase — Fase 1: solo conexión, no interviene en ningún flujo todavía ══ -->
@@ -5039,11 +5056,14 @@ const COMISIONES = {
         const _canalesBloqueRiegoCacheLevantamientoA2Esc = {}; // cache por toma de los canales (mapas/inventario_gis/canal_lateral.json)
         let _canalesInventarioGisTodosA2Esc = null; // el .json completo, descargado una sola vez
         let _zoomListenerBloqueRiegoA2EscPuesto = false;
-        // Con cientos de predios/canales por bloque, mostrar sus etiquetas
-        // (nombre/UC) SIEMPRE saturaría el mapa — solo se muestran a partir de
-        // este zoom, controlado con una sola clase CSS en el contenedor del
-        // mapa (ver .mapa-oculta-etiquetas-bloque-a2-esc).
-        const UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2_ESC = 16;
+        // Con cientos de predios/canales por bloque, la cantidad de detalle
+        // mostrado escala con el zoom (4 niveles) — nivel 0 (nada, muy
+        // alejado) → 1 (solo U. Catastral en predios) → 2 (nombre completo +
+        // UC, aparece el canal) → 3 (mismo contenido, fuente mayor al máximo
+        // acercamiento). Ver _nivelEtiquetasA2Esc/
+        // _actualizarVisibilidadEtiquetasBloqueA2Esc y las clases
+        // .mapa-nivel-etiquetas-a2-esc-N del <style>.
+        const UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2_ESC = [15, 17, 19]; // z<15→0, [15,17)→1, [17,19)→2, >=19→3
         // Colores reales por orden de canal (L1-L5), extraídos del KMZ oficial
         // de Canales a mapas/inventario_gis/canal_lateral.json — mismos
         // colores que ya usa el mapa de Inventario, no inventados acá.
@@ -5202,14 +5222,25 @@ const COMISIONES = {
             return canales;
         }
 
-        // Oculta/muestra las etiquetas de predios/canales según el zoom actual
-        // (ver UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2_ESC) — una sola clase CSS en el
-        // contenedor del mapa, sin re-crear ninguna capa.
+        // Nivel de detalle (0-3) según el zoom actual — ver
+        // UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2_ESC.
+        function _nivelEtiquetasA2Esc(zoom) {
+            for (let i = 0; i < UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2_ESC.length; i++) {
+                if (zoom < UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2_ESC[i]) return i;
+            }
+            return UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2_ESC.length;
+        }
+
+        // Aplica el nivel de detalle correspondiente al zoom actual — una sola
+        // clase CSS en el contenedor del mapa (mapa-nivel-etiquetas-a2-esc-N),
+        // sin re-crear ninguna capa ni tooltip.
         function _actualizarVisibilidadEtiquetasBloqueA2Esc() {
             if (!_mapaEditorLevantamientoA2Esc) return;
             const contenedor = _mapaEditorLevantamientoA2Esc.getContainer();
-            const ocultar = _mapaEditorLevantamientoA2Esc.getZoom() < UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2_ESC;
-            contenedor.classList.toggle('mapa-oculta-etiquetas-bloque-a2-esc', ocultar);
+            const nivel = _nivelEtiquetasA2Esc(_mapaEditorLevantamientoA2Esc.getZoom());
+            for (let n = 1; n <= UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2_ESC.length; n++) {
+                contenedor.classList.toggle('mapa-nivel-etiquetas-a2-esc-' + n, n === nivel);
+            }
         }
 
         async function _toggleBloqueRiegoEditorLevantamientoA2Esc() {
@@ -5231,7 +5262,19 @@ const COMISIONES = {
             const capas = predios.filter((p) => p.coordenadas && p.coordenadas.length >= 3).map((p) => {
                 const latlngs = p.coordenadas.map((par) => [par[1], par[0]]);
                 const poligono = L.polygon(latlngs, { color: '#00bcd4', weight: 1.5, fillOpacity: 0.06, interactive: false });
-                const etiqueta = escapeHtml(p.usuario || '(sin nombre)') + (p.catastralKey ? ('<br>UC ' + escapeHtml(p.catastralKey)) : '');
+                // Ángulo del lado más largo del predio (assets/core/mapa.js) — la
+                // etiqueta se dibuja paralela a ese lado, como en un plano
+                // catastral real, en vez de siempre horizontal.
+                const angulo = (typeof anguloLadoMasLargo === 'function') ? anguloLadoMasLargo(latlngs, true) : 0;
+                const nombreEsc = escapeHtml(p.usuario || '(sin nombre)');
+                const ucEsc = p.catastralKey ? escapeHtml(p.catastralKey) : '';
+                // Dos variantes de contenido (compacta/completa) siempre presentes
+                // en el DOM — el <style> decide cuál se ve según el nivel de zoom
+                // actual (mapa-nivel-etiquetas-a2-esc-N), sin reconstruir el tooltip.
+                const etiqueta = `<span style="display:inline-block;transform:rotate(${angulo.toFixed(1)}deg);">` +
+                    `<span class="et-compacta">${ucEsc ? ('UC ' + ucEsc) : nombreEsc}</span>` +
+                    `<span class="et-completa">${nombreEsc}${ucEsc ? ('<br>UC ' + ucEsc) : ''}</span>` +
+                    `</span>`;
                 poligono.bindTooltip(etiqueta, { permanent: true, direction: 'center', className: 'etiqueta-predio-bloque-a2-esc', interactive: false });
                 return poligono;
             });
@@ -5241,7 +5284,10 @@ const COMISIONES = {
                 const color = c.color || COLOR_POR_ORDEN_CANAL_A2_ESC[orden] || '#ffffff';
                 const linea = L.polyline(c.geom.coords, { color: color, weight: 2.5, opacity: 0.9, interactive: false });
                 const nombreCanal = (c.campos && c.campos.NOMBRE) || c.nombre || 'Canal';
-                linea.bindTooltip(escapeHtml(nombreCanal), { permanent: true, direction: 'center', className: 'etiqueta-canal-bloque-a2-esc', interactive: false });
+                // Polilínea abierta (cerrado=false) — geom.coords ya es [lat,lon].
+                const anguloCanal = (typeof anguloLadoMasLargo === 'function') ? anguloLadoMasLargo(c.geom.coords, false) : 0;
+                const etiquetaCanal = `<span style="display:inline-block;transform:rotate(${anguloCanal.toFixed(1)}deg);">${escapeHtml(nombreCanal)}</span>`;
+                linea.bindTooltip(etiquetaCanal, { permanent: true, direction: 'center', className: 'etiqueta-canal-bloque-a2-esc', interactive: false });
                 capas.push(linea);
             });
 

@@ -165,3 +165,38 @@ function _colorPorCultivo(cultivo) {
 // Gris neutro para predios sin cultivo cruzado (KML sin coincidencia en
 // padron_usuarios, o coincidencia sin cultivos registrados).
 const COLOR_SIN_CRUZAR = { bg: 'rgba(148, 163, 184, 0.20)', border: '#94a3b8' };
+
+// Ángulo (grados CSS, listo para `transform:rotate()`) del lado/tramo MÁS
+// LARGO de un polígono o polilínea — para que una etiqueta (nombre de
+// titular, unidad catastral, nombre de canal) se dibuje paralela al predio o
+// al canal en vez de siempre horizontal, igual que un plano catastral real.
+// `puntosLatLon`: [[lat,lon], ...] (orden nativo de Leaflet — el llamador
+// reordena si su fuente trae [lon,lat], como el KML de bloques de riego).
+// `cerrado`: true para un polígono (el predio, incluye el tramo del último
+// vértice de vuelta al primero); false para una polilínea abierta (un
+// canal). Convierte a UTM (mismo `latLonAUtm17S` ya usado en toda la app)
+// para medir longitudes y ángulos en metros reales, sin la distorsión de
+// comparar directamente grados de latitud/longitud. El ángulo se normaliza
+// a (-90°, 90°] para que el texto nunca quede "de cabeza" — una línea no
+// tiene un único sentido de lectura, así que ambos extremos del mismo lado
+// dan el mismo resultado. Devuelve 0 si no hay suficientes puntos.
+function anguloLadoMasLargo(puntosLatLon, cerrado) {
+    if (!Array.isArray(puntosLatLon) || puntosLatLon.length < 2) return 0;
+    if (typeof latLonAUtm17S !== 'function') return 0; // assets/core/coordenadasUtm.js no cargado
+    const puntosUtm = puntosLatLon.map((par) => latLonAUtm17S(par[0], par[1]));
+    const n = puntosUtm.length;
+    const tramos = cerrado ? n : n - 1;
+    let mejorLongitud = -1, mejorEasting = 0, mejorNorthing = 0;
+    for (let i = 0; i < tramos; i++) {
+        const a = puntosUtm[i], b = puntosUtm[(i + 1) % n];
+        const de = b.easting - a.easting, dn = b.northing - a.northing;
+        const longitud = Math.sqrt(de * de + dn * dn);
+        if (longitud > mejorLongitud) { mejorLongitud = longitud; mejorEasting = de; mejorNorthing = dn; }
+    }
+    if (mejorLongitud <= 0) return 0;
+    const anguloMatematico = Math.atan2(mejorNorthing, mejorEasting) * 180 / Math.PI; // sistema "y=norte arriba"
+    let anguloCss = -anguloMatematico; // la pantalla es "y hacia abajo" — se invierte para CSS rotate()
+    anguloCss = ((anguloCss % 180) + 180) % 180; // normaliza a [0,180)
+    if (anguloCss > 90) anguloCss -= 180; // normaliza a (-90,90] — nunca de cabeza
+    return anguloCss;
+}
