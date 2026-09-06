@@ -166,23 +166,16 @@ function _colorPorCultivo(cultivo) {
 // padron_usuarios, o coincidencia sin cultivos registrados).
 const COLOR_SIN_CRUZAR = { bg: 'rgba(148, 163, 184, 0.20)', border: '#94a3b8' };
 
-// Ángulo (grados CSS, listo para `transform:rotate()`) del lado/tramo MÁS
-// LARGO de un polígono o polilínea — para que una etiqueta (nombre de
-// titular, unidad catastral, nombre de canal) se dibuje paralela al predio o
-// al canal en vez de siempre horizontal, igual que un plano catastral real.
-// `puntosLatLon`: [[lat,lon], ...] (orden nativo de Leaflet — el llamador
-// reordena si su fuente trae [lon,lat], como el KML de bloques de riego).
-// `cerrado`: true para un polígono (el predio, incluye el tramo del último
-// vértice de vuelta al primero); false para una polilínea abierta (un
-// canal). Convierte a UTM (mismo `latLonAUtm17S` ya usado en toda la app)
-// para medir longitudes y ángulos en metros reales, sin la distorsión de
-// comparar directamente grados de latitud/longitud. El ángulo se normaliza
-// a (-90°, 90°] para que el texto nunca quede "de cabeza" — una línea no
-// tiene un único sentido de lectura, así que ambos extremos del mismo lado
-// dan el mismo resultado. Devuelve 0 si no hay suficientes puntos.
-function anguloLadoMasLargo(puntosLatLon, cerrado) {
-    if (!Array.isArray(puntosLatLon) || puntosLatLon.length < 2) return 0;
-    if (typeof latLonAUtm17S !== 'function') return 0; // assets/core/coordenadasUtm.js no cargado
+// Encuentra el lado/tramo MÁS LARGO de un polígono o polilínea, medido en
+// UTM (metros reales, sin la distorsión de comparar directamente grados de
+// latitud/longitud) — helper interno compartido por anguloLadoMasLargo y
+// medirLadoMasLargo (abajo). `puntosLatLon`: [[lat,lon], ...]; `cerrado`:
+// true incluye el tramo de vuelta del último vértice al primero (polígono),
+// false no lo incluye (polilínea abierta, un canal). Devuelve
+// `{ longitudM, dEasting, dNorthing }` o `null` si no hay suficientes puntos.
+function _tramoMasLargoUtm(puntosLatLon, cerrado) {
+    if (!Array.isArray(puntosLatLon) || puntosLatLon.length < 2) return null;
+    if (typeof latLonAUtm17S !== 'function') return null; // assets/core/coordenadasUtm.js no cargado
     const puntosUtm = puntosLatLon.map((par) => latLonAUtm17S(par[0], par[1]));
     const n = puntosUtm.length;
     const tramos = cerrado ? n : n - 1;
@@ -193,10 +186,68 @@ function anguloLadoMasLargo(puntosLatLon, cerrado) {
         const longitud = Math.sqrt(de * de + dn * dn);
         if (longitud > mejorLongitud) { mejorLongitud = longitud; mejorEasting = de; mejorNorthing = dn; }
     }
-    if (mejorLongitud <= 0) return 0;
-    const anguloMatematico = Math.atan2(mejorNorthing, mejorEasting) * 180 / Math.PI; // sistema "y=norte arriba"
+    if (mejorLongitud <= 0) return null;
+    return { longitudM: mejorLongitud, dEasting: mejorEasting, dNorthing: mejorNorthing };
+}
+
+// Ángulo CSS (listo para `transform:rotate()`) de un vector este/norte —
+// normalizado a (-90°,90°] para que el texto nunca quede "de cabeza" (una
+// línea no tiene un único sentido de lectura, así que ambos extremos del
+// mismo lado dan el mismo resultado).
+function _anguloCssDesdeVector(dEasting, dNorthing) {
+    const anguloMatematico = Math.atan2(dNorthing, dEasting) * 180 / Math.PI; // sistema "y=norte arriba"
     let anguloCss = -anguloMatematico; // la pantalla es "y hacia abajo" — se invierte para CSS rotate()
     anguloCss = ((anguloCss % 180) + 180) % 180; // normaliza a [0,180)
     if (anguloCss > 90) anguloCss -= 180; // normaliza a (-90,90] — nunca de cabeza
     return anguloCss;
+}
+
+// Ángulo (grados CSS) del lado/tramo MÁS LARGO de un polígono o polilínea —
+// para que una etiqueta (nombre de titular, unidad catastral, nombre de
+// canal) se dibuje paralela al predio o al canal en vez de siempre
+// horizontal, igual que un plano catastral real. Ver `_tramoMasLargoUtm`
+// para el significado de `puntosLatLon`/`cerrado`. Devuelve 0 si no hay
+// suficientes puntos.
+function anguloLadoMasLargo(puntosLatLon, cerrado) {
+    const tramo = _tramoMasLargoUtm(puntosLatLon, cerrado);
+    return tramo ? _anguloCssDesdeVector(tramo.dEasting, tramo.dNorthing) : 0;
+}
+
+// Igual que anguloLadoMasLargo, pero además devuelve la longitud real (en
+// metros) de ese lado/tramo — necesaria para calcular cuántos píxeles de
+// ancho tiene en pantalla a un zoom dado, y de ahí el tamaño de fuente que
+// cabe adentro sin salirse de la figura (ver calcularFuenteParaAncho).
+// Devuelve `{ anguloCss: 0, longitudM: 0 }` si no hay suficientes puntos.
+function medirLadoMasLargo(puntosLatLon, cerrado) {
+    const tramo = _tramoMasLargoUtm(puntosLatLon, cerrado);
+    if (!tramo) return { anguloCss: 0, longitudM: 0 };
+    return { anguloCss: _anguloCssDesdeVector(tramo.dEasting, tramo.dNorthing), longitudM: tramo.longitudM };
+}
+
+// Metros representados por un pixel de pantalla en la proyección Web
+// Mercator (la misma que usa Leaflet/Google/OSM) a una latitud y zoom
+// dados — fórmula estándar de resolución de terreno (156543.03392 =
+// circunferencia ecuatorial ÷ 256px, el tamaño de un tile). Se usa para
+// convertir la longitud real (metros) del lado más largo de un predio o
+// canal a píxeles de pantalla en el zoom actual.
+function metrosPorPixel(latGrados, zoom) {
+    return 156543.03392 * Math.cos(latGrados * Math.PI / 180) / Math.pow(2, zoom);
+}
+
+// Tamaño de fuente (px) tal que `numCaracteres` a lo largo de una etiqueta
+// quepan dentro de `longitudM` metros reales, vistos a `metrosPorPx`
+// metros/píxel (ver metrosPorPixel) — la base de que las etiquetas del
+// bloque de riego escalen de forma continua y proporcional al zoom, en vez
+// de un tamaño fijo por nivel, y de que el texto siempre quede dentro del
+// predio/canal que describe. `factorAnchoCaracter` (por defecto 0.58) es el
+// ancho promedio de un carácter relativo al tamaño de fuente en una
+// tipografía de palo seco común; `margenSeguridad` (por defecto 0.85) deja
+// un poco de aire para no tocar los bordes de la figura. Devuelve 0 si
+// falta algún dato (el llamador decide entonces ocultar la etiqueta).
+function calcularFuenteParaAncho(longitudM, metrosPorPx, numCaracteres, factorAnchoCaracter, margenSeguridad) {
+    if (!longitudM || !metrosPorPx || !numCaracteres) return 0;
+    const factor = factorAnchoCaracter || 0.58;
+    const margen = margenSeguridad || 0.85;
+    const disponiblePx = (longitudM / metrosPorPx) * margen;
+    return disponiblePx / (numCaracteres * factor);
 }

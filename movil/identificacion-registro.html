@@ -159,14 +159,18 @@
         .resumen-fila .valor-resumen { font-weight: 600; text-align: right; }
         /* Etiquetas del bloque de riego (predios/canales) en el editor de
            ubicación — permanentes, giradas paralelas al lado/tramo más largo
-           (ver anguloLadoMasLargo, assets/core/mapa.js) y con densidad/tamaño
-           PROPORCIONAL AL ZOOM en 4 niveles (ver _nivelEtiquetasA2/
-           _actualizarVisibilidadEtiquetasBloqueA2): oculto (nivel 0, muy
-           alejado) → solo U. Catastral en predios, sin canal (nivel 1) →
-           nombre completo + UC, canal con su nombre (nivel 2) → mismo
-           contenido con fuente mayor al máximo acercamiento (nivel 3). Nunca
-           se re-crean las capas al cambiar de nivel: solo se togglea una
-           clase en el contenedor del mapa, barato en cada 'zoomend'. */
+           (ver medirLadoMasLargo, assets/core/mapa.js) y con tamaño de fuente
+           PROPORCIONAL Y CONTINUO al zoom (ver calcularFuenteParaAncho +
+           _actualizarEtiquetasBloqueA2): el tamaño se recalcula para que el
+           texto quepa dentro del predio/canal al zoom actual, en vez de un
+           tamaño fijo por umbral — con texto completo (nombre+UC) por debajo
+           de lo legible se prueba la variante compacta (solo UC), y por
+           debajo del mínimo la etiqueta se oculta (mejor ocultar que
+           atropellar el predio vecino). El contenedor `.leaflet-tooltip`
+           exterior (que Leaflet posiciona con su propio transform) queda
+           siempre visible como mero ancla — el show/hide y el tamaño de
+           fuente reales viven en `.et-caja`, controlados por JS en cada
+           'zoomend', nunca reconstruyendo el tooltip. */
         .leaflet-tooltip.etiqueta-predio-bloque-a2,
         .leaflet-tooltip.etiqueta-canal-bloque-a2 {
             background: transparent; /* el fondo real vive en .et-caja (ver abajo) */
@@ -176,30 +180,18 @@
             line-height: 1.15;
             font-weight: 600;
             white-space: nowrap;
-            display: none; /* nivel 0 por defecto (sin clase de nivel en el contenedor) */
         }
         /* La "caja" (fondo blanco + relleno) va en un <span> interno que SÍ
            gira junto con el texto — si el fondo quedara en el .leaflet-tooltip
-           exterior (que Leaflet posiciona con su propio transform, sin rotar),
-           el rectángulo blanco se vería siempre horizontal aunque el texto
-           adentro girara, un fondo desalineado del texto. */
-        .et-caja { display: inline-block; padding: 1px 4px; border-radius: 2px; }
+           exterior, el rectángulo blanco se vería siempre horizontal aunque
+           el texto adentro girara, un fondo desalineado del texto. Arranca
+           oculta (display:none) — _actualizarEtiquetasBloqueA2 la muestra con
+           el tamaño de fuente que corresponda apenas se dibuja el bloque. */
+        .et-caja { display: none; padding: 1px 4px; border-radius: 2px; }
         .etiqueta-predio-bloque-a2 .et-caja { background: rgba(255,255,255,0.88); color: #002b52; }
         .etiqueta-canal-bloque-a2 .et-caja { background: rgba(255,255,255,0.82); color: #6a3d00; }
         .etiqueta-predio-bloque-a2 .et-completa { display: none; }
         .etiqueta-predio-bloque-a2 .et-compacta { display: inline; }
-
-        .mapa-nivel-etiquetas-a2-1 .etiqueta-predio-bloque-a2 { display: block; font-size: 8px; }
-
-        .mapa-nivel-etiquetas-a2-2 .etiqueta-predio-bloque-a2 { display: block; font-size: 10px; }
-        .mapa-nivel-etiquetas-a2-2 .etiqueta-predio-bloque-a2 .et-completa { display: inline; }
-        .mapa-nivel-etiquetas-a2-2 .etiqueta-predio-bloque-a2 .et-compacta { display: none; }
-        .mapa-nivel-etiquetas-a2-2 .etiqueta-canal-bloque-a2 { display: block; font-size: 9px; }
-
-        .mapa-nivel-etiquetas-a2-3 .etiqueta-predio-bloque-a2 { display: block; font-size: 12px; }
-        .mapa-nivel-etiquetas-a2-3 .etiqueta-predio-bloque-a2 .et-completa { display: inline; }
-        .mapa-nivel-etiquetas-a2-3 .etiqueta-predio-bloque-a2 .et-compacta { display: none; }
-        .mapa-nivel-etiquetas-a2-3 .etiqueta-canal-bloque-a2 { display: block; font-size: 11px; }
     </style>
 </head>
 <body>
@@ -1862,14 +1854,22 @@
         var canalesBloqueRiegoCacheA2 = {}; // cache por toma de los canales (mapas/inventario_gis/canal_lateral.json)
         var canalesInventarioGisTodosA2 = null; // el .json completo, descargado una sola vez
         var zoomListenerBloqueRiegoA2Puesto = false;
-        // Con cientos de predios/canales por bloque, la cantidad de detalle
-        // mostrado escala con el zoom (4 niveles), igual que cualquier visor
-        // GIS — nivel 0 (nada, muy alejado) → 1 (solo U. Catastral en
-        // predios) → 2 (nombre completo + UC, aparece el canal) → 3 (mismo
-        // contenido, fuente mayor al máximo acercamiento). Ver
-        // _nivelEtiquetasA2/_actualizarVisibilidadEtiquetasBloqueA2 y las
-        // clases .mapa-nivel-etiquetas-a2-N del <style>.
-        var UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2 = [15, 17, 19]; // z<15→0, [15,17)→1, [17,19)→2, >=19→3
+        // Entradas activas de etiquetas (predios+canales) del bloque de riego
+        // actualmente mostrado — cada una con la longitud real (metros) de su
+        // lado/tramo más largo y referencias ya resueltas a sus elementos DOM,
+        // para que _actualizarEtiquetasBloqueA2 solo tenga que hacer aritmética
+        // + asignar estilos en cada 'zoomend', sin reconstruir nada.
+        var entradasEtiquetasBloqueA2 = [];
+        // El tamaño de fuente de cada etiqueta se calcula para que quepa
+        // dentro del predio/canal al zoom actual (ver calcularFuenteParaAncho,
+        // assets/core/mapa.js) — proporcional y continuo, no un tamaño fijo
+        // por "nivel" de zoom. Con texto completo (nombre+UC) por debajo de
+        // este tamaño se prueba la variante compacta (solo UC); por debajo
+        // del mínimo, se oculta del todo (mismo criterio ya usado: si no cabe
+        // ni así, mejor ocultar que atropellar el predio vecino).
+        var UMBRAL_FUENTE_COMPLETA_A2 = 8;
+        var UMBRAL_FUENTE_MINIMA_A2 = 6.5;
+        var FUENTE_MAX_A2 = 13;
         // Colores reales por orden de canal (L1-L5), extraídos una sola vez del
         // KMZ oficial de Canales a mapas/inventario_gis/canal_lateral.json —
         // mismos colores que ya usa el mapa de Inventario, no inventados acá.
@@ -1926,25 +1926,45 @@
             return canales;
         }
 
-        // Nivel de detalle (0-3) según el zoom actual — ver
-        // UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2.
-        function _nivelEtiquetasA2(zoom) {
-            for (var i = 0; i < UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2.length; i++) {
-                if (zoom < UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2[i]) return i;
-            }
-            return UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2.length;
-        }
-
-        // Aplica el nivel de detalle correspondiente al zoom actual — una
-        // sola clase CSS en el contenedor del mapa (mapa-nivel-etiquetas-a2-N),
-        // sin re-crear ninguna capa ni tooltip.
-        function _actualizarVisibilidadEtiquetasBloqueA2() {
-            if (!mapaEditorUbicacionA2) return;
-            var contenedor = mapaEditorUbicacionA2.getContainer();
-            var nivel = _nivelEtiquetasA2(mapaEditorUbicacionA2.getZoom());
-            for (var n = 1; n <= UMBRALES_ZOOM_ETIQUETAS_BLOQUE_A2.length; n++) {
-                contenedor.classList.toggle('mapa-nivel-etiquetas-a2-' + n, n === nivel);
-            }
+        // Recalcula, para cada etiqueta activa, el tamaño de fuente que cabe
+        // dentro de su predio/canal al zoom actual — y qué variante de texto
+        // mostrar (completa/compacta/ninguna) — y lo aplica directamente por
+        // estilo inline (sin reconstruir el HTML del tooltip, barato incluso
+        // con cientos de figuras). Se llama en cada 'zoomend' y una vez justo
+        // después de dibujar el bloque.
+        function _actualizarEtiquetasBloqueA2() {
+            if (!mapaEditorUbicacionA2 || entradasEtiquetasBloqueA2.length === 0) return;
+            var metrosPorPx = metrosPorPixel(mapaEditorUbicacionA2.getCenter().lat, mapaEditorUbicacionA2.getZoom());
+            entradasEtiquetasBloqueA2.forEach(function (e) {
+                if (!e.elCaja) return;
+                if (e.tipo === 'predio') {
+                    var fuenteCompleta = calcularFuenteParaAncho(e.longitudM, metrosPorPx, e.charsCompleta);
+                    if (fuenteCompleta >= UMBRAL_FUENTE_COMPLETA_A2) {
+                        e.elCaja.style.display = 'inline-block';
+                        e.elCaja.style.fontSize = Math.min(fuenteCompleta, FUENTE_MAX_A2).toFixed(1) + 'px';
+                        if (e.elCompleta) e.elCompleta.style.display = 'inline';
+                        if (e.elCompacta) e.elCompacta.style.display = 'none';
+                        return;
+                    }
+                    var fuenteCompacta = calcularFuenteParaAncho(e.longitudM, metrosPorPx, e.charsCompacta);
+                    if (fuenteCompacta >= UMBRAL_FUENTE_MINIMA_A2) {
+                        e.elCaja.style.display = 'inline-block';
+                        e.elCaja.style.fontSize = Math.min(fuenteCompacta, FUENTE_MAX_A2).toFixed(1) + 'px';
+                        if (e.elCompleta) e.elCompleta.style.display = 'none';
+                        if (e.elCompacta) e.elCompacta.style.display = 'inline';
+                        return;
+                    }
+                    e.elCaja.style.display = 'none';
+                } else { // canal
+                    var fuenteCanal = calcularFuenteParaAncho(e.longitudM, metrosPorPx, e.chars);
+                    if (fuenteCanal >= UMBRAL_FUENTE_MINIMA_A2) {
+                        e.elCaja.style.display = 'inline-block';
+                        e.elCaja.style.fontSize = Math.min(fuenteCanal, FUENTE_MAX_A2).toFixed(1) + 'px';
+                    } else {
+                        e.elCaja.style.display = 'none';
+                    }
+                }
+            });
         }
 
         async function toggleBloqueRiegoEditorA2() {
@@ -1953,6 +1973,7 @@
             var leyenda = document.getElementById('leyendaBloqueRiegoA2');
             if (!bloqueRiegoActivoA2) {
                 if (capaBloqueRiegoEditorA2) { mapaEditorUbicacionA2.removeLayer(capaBloqueRiegoEditorA2); capaBloqueRiegoEditorA2 = null; }
+                entradasEtiquetasBloqueA2 = [];
                 if (btn) btn.textContent = '🗺️ Ver bloque de riego';
                 if (leyenda) leyenda.style.display = 'none';
                 return;
@@ -1963,24 +1984,34 @@
             var canales = await obtenerCanalesBloqueRiegoA2(tomaNombre);
             if (!bloqueRiegoActivoA2) return; // se apagó mientras cargaba
 
+            var nuevasEntradas = [];
             var capas = predios.filter(function (p) { return p.coordenadas && p.coordenadas.length >= 3; }).map(function (p) {
                 var latlngs = p.coordenadas.map(function (par) { return [par[1], par[0]]; });
                 var poligono = L.polygon(latlngs, { color: '#00bcd4', weight: 1.5, fillOpacity: 0.06, interactive: false });
-                // Ángulo del lado más largo del predio (assets/core/mapa.js) — la
-                // etiqueta se dibuja paralela a ese lado, como en un plano
-                // catastral real, en vez de siempre horizontal. anguloLadoMasLargo
-                // espera [lat,lon] (orden nativo de Leaflet); el KML trae [lon,lat].
-                var angulo = (typeof anguloLadoMasLargo === 'function') ? anguloLadoMasLargo(latlngs, true) : 0;
+                // Ángulo Y longitud reales (metros) del lado más largo del predio
+                // (assets/core/mapa.js) — el ángulo orienta la etiqueta paralela a
+                // ese lado; la longitud decide, en cada zoom, qué tamaño de fuente
+                // cabe adentro sin salirse del predio (ver
+                // _actualizarEtiquetasBloqueA2). medirLadoMasLargo espera [lat,lon]
+                // (orden nativo de Leaflet); el KML trae [lon,lat].
+                var medida = (typeof medirLadoMasLargo === 'function') ? medirLadoMasLargo(latlngs, true) : { anguloCss: 0, longitudM: 0 };
                 var nombreEsc = escapeHtml(p.usuario || '(sin nombre)');
                 var ucEsc = p.catastralKey ? escapeHtml(p.catastralKey) : '';
-                // Dos variantes de contenido (compacta/completa) siempre presentes
-                // en el DOM — el <style> decide cuál se ve según el nivel de zoom
-                // actual (mapa-nivel-etiquetas-a2-N), sin reconstruir el tooltip.
-                var etiqueta = '<span class="et-caja" style="transform:rotate(' + angulo.toFixed(1) + 'deg);">' +
-                    '<span class="et-compacta">' + (ucEsc ? ('UC ' + ucEsc) : nombreEsc) + '</span>' +
-                    '<span class="et-completa">' + nombreEsc + (ucEsc ? ('<br>UC ' + ucEsc) : '') + '</span>' +
+                var textoCompacta = ucEsc ? ('UC ' + ucEsc) : nombreEsc;
+                var textoCompleta = nombreEsc + (ucEsc ? ('<br>UC ' + ucEsc) : '');
+                // Ambas variantes (compacta/completa) quedan siempre en el DOM —
+                // _actualizarEtiquetasBloqueA2 decide cuál mostrar (y a qué tamaño
+                // de fuente) según el zoom actual, sin reconstruir el tooltip.
+                var etiqueta = '<span class="et-caja" style="transform:rotate(' + medida.anguloCss.toFixed(1) + 'deg);">' +
+                    '<span class="et-compacta">' + textoCompacta + '</span>' +
+                    '<span class="et-completa">' + textoCompleta + '</span>' +
                     '</span>';
                 poligono.bindTooltip(etiqueta, { permanent: true, direction: 'center', className: 'etiqueta-predio-bloque-a2', interactive: false });
+                nuevasEntradas.push({
+                    tipo: 'predio', layer: poligono, longitudM: medida.longitudM,
+                    charsCompleta: Math.max(nombreEsc.length, ucEsc ? ('UC ' + ucEsc).length : 0, 1),
+                    charsCompacta: Math.max(textoCompacta.length, 1),
+                });
                 return poligono;
             });
 
@@ -1990,18 +2021,34 @@
                 var linea = L.polyline(c.geom.coords, { color: color, weight: 2.5, opacity: 0.9, interactive: false });
                 var nombreCanal = (c.campos && c.campos.NOMBRE) || c.nombre || 'Canal';
                 // Polilínea abierta (cerrado=false) — geom.coords ya es [lat,lon].
-                var anguloCanal = (typeof anguloLadoMasLargo === 'function') ? anguloLadoMasLargo(c.geom.coords, false) : 0;
-                var etiquetaCanal = '<span class="et-caja" style="transform:rotate(' + anguloCanal.toFixed(1) + 'deg);">' + escapeHtml(nombreCanal) + '</span>';
+                var medidaCanal = (typeof medirLadoMasLargo === 'function') ? medirLadoMasLargo(c.geom.coords, false) : { anguloCss: 0, longitudM: 0 };
+                var nombreCanalEsc = escapeHtml(nombreCanal);
+                var etiquetaCanal = '<span class="et-caja" style="transform:rotate(' + medidaCanal.anguloCss.toFixed(1) + 'deg);">' + nombreCanalEsc + '</span>';
                 linea.bindTooltip(etiquetaCanal, { permanent: true, direction: 'center', className: 'etiqueta-canal-bloque-a2', interactive: false });
+                nuevasEntradas.push({ tipo: 'canal', layer: linea, longitudM: medidaCanal.longitudM, chars: Math.max(nombreCanalEsc.length, 1) });
                 capas.push(linea);
             });
 
             capaBloqueRiegoEditorA2 = L.layerGroup(capas).addTo(mapaEditorUbicacionA2);
+            // Recién ahora existen los elementos DOM de cada tooltip (se crean al
+            // agregar la capa al mapa) — se cachean para no volver a buscarlos en
+            // cada 'zoomend'.
+            nuevasEntradas.forEach(function (e) {
+                var tooltip = e.layer.getTooltip();
+                var el = tooltip ? tooltip.getElement() : null;
+                e.elCaja = el ? el.querySelector('.et-caja') : null;
+                if (e.tipo === 'predio' && e.elCaja) {
+                    e.elCompacta = e.elCaja.querySelector('.et-compacta');
+                    e.elCompleta = e.elCaja.querySelector('.et-completa');
+                }
+            });
+            entradasEtiquetasBloqueA2 = nuevasEntradas;
+
             if (!zoomListenerBloqueRiegoA2Puesto) {
-                mapaEditorUbicacionA2.on('zoomend', _actualizarVisibilidadEtiquetasBloqueA2);
+                mapaEditorUbicacionA2.on('zoomend', _actualizarEtiquetasBloqueA2);
                 zoomListenerBloqueRiegoA2Puesto = true;
             }
-            _actualizarVisibilidadEtiquetasBloqueA2();
+            _actualizarEtiquetasBloqueA2();
             if (leyenda) leyenda.style.display = 'flex';
             if (btn) {
                 var totalFiguras = predios.length + canales.length;
@@ -2139,6 +2186,7 @@
             verticesUtmExistentesA2 = (Array.isArray(r.verticesUtm) && r.verticesUtm.length >= 3) ? r.verticesUtm.slice() : [];
             bloqueRiegoActivoA2 = false;
             if (capaBloqueRiegoEditorA2 && mapaEditorUbicacionA2) { mapaEditorUbicacionA2.removeLayer(capaBloqueRiegoEditorA2); capaBloqueRiegoEditorA2 = null; }
+            entradasEtiquetasBloqueA2 = [];
             var btnBloqueRiego = document.getElementById('btnBloqueRiegoA2');
             if (btnBloqueRiego) btnBloqueRiego.textContent = '🗺️ Ver bloque de riego';
             var leyendaBloqueRiego = document.getElementById('leyendaBloqueRiegoA2');
