@@ -1070,6 +1070,25 @@
     text-align: center !important;
     vertical-align: middle !important;
 }
+/* Etiquetas del bloque de riego (predios/canales) en el editor de ubicación
+   del Formato A-2 — permanentes pero compactas, ocultas por completo
+   mientras el zoom está alejado (ver UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2_ESC)
+   para no saturar el mapa con cientos de predios superpuestos. */
+.leaflet-tooltip.etiqueta-predio-bloque-a2-esc,
+.leaflet-tooltip.etiqueta-canal-bloque-a2-esc {
+    background: rgba(255,255,255,0.88);
+    border: none;
+    box-shadow: none;
+    padding: 1px 4px;
+    font-size: 10px;
+    line-height: 1.15;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.leaflet-tooltip.etiqueta-predio-bloque-a2-esc { color: #002b52; }
+.leaflet-tooltip.etiqueta-canal-bloque-a2-esc { color: #6a3d00; }
+.mapa-oculta-etiquetas-bloque-a2-esc .etiqueta-predio-bloque-a2-esc,
+.mapa-oculta-etiquetas-bloque-a2-esc .etiqueta-canal-bloque-a2-esc { display: none; }
 </style>
 
 <!-- ══ Supabase — Fase 1: solo conexión, no interviene en ningún flujo todavía ══ -->
@@ -5014,9 +5033,21 @@ const COMISIONES = {
         let _ultimaAreaMedidaLevantamientoA2Esc = null; // ha, tras "Cerrar polígono"
         let _verticesUtmExistentesLevantamientoA2Esc = []; // copia de r.verticesUtm al abrir — referencia visual en modo punto
         let _capaPoligonoExistenteLevantamientoA2Esc = null; // capa Leaflet de solo referencia (azul), no interactiva
-        let _capaBloqueRiegoEditorLevantamientoA2Esc = null; // L.layerGroup con los predios del bloque de riego de la toma
+        let _capaBloqueRiegoEditorLevantamientoA2Esc = null; // L.layerGroup con los predios + canales del bloque de riego de la toma
         let _bloqueRiegoActivoLevantamientoA2Esc = false;
         const _prediosBloqueRiegoCacheLevantamientoA2Esc = {}; // cache por toma
+        const _canalesBloqueRiegoCacheLevantamientoA2Esc = {}; // cache por toma de los canales (mapas/inventario_gis/canal_lateral.json)
+        let _canalesInventarioGisTodosA2Esc = null; // el .json completo, descargado una sola vez
+        let _zoomListenerBloqueRiegoA2EscPuesto = false;
+        // Con cientos de predios/canales por bloque, mostrar sus etiquetas
+        // (nombre/UC) SIEMPRE saturaría el mapa — solo se muestran a partir de
+        // este zoom, controlado con una sola clase CSS en el contenedor del
+        // mapa (ver .mapa-oculta-etiquetas-bloque-a2-esc).
+        const UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2_ESC = 16;
+        // Colores reales por orden de canal (L1-L5), extraídos del KMZ oficial
+        // de Canales a mapas/inventario_gis/canal_lateral.json — mismos
+        // colores que ya usa el mapa de Inventario, no inventados acá.
+        const COLOR_POR_ORDEN_CANAL_A2_ESC = { L1: '#a83800', L2: '#005ce6', L3: '#4ce600', L4: '#ffff00', L5: '#000000' };
 
         function _iconoEditorLevantamientoA2Esc(letra) {
             return L.divIcon({
@@ -5042,6 +5073,14 @@ const COMISIONES = {
                     <div style="background:#00234d;color:#fff;padding:10px 16px;display:flex;flex-direction:column;gap:8px;">
                         <div id="estadoEditorLevantamientoA2Esc" style="font-size:12px;color:#cfe0f5;"></div>
                         <button id="btnBloqueRiegoLevantamientoA2Esc" style="padding:8px 14px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;align-self:flex-start;">🗺️ Ver bloque de riego</button>
+                        <div id="leyendaBloqueRiegoLevantamientoA2Esc" style="display:none;font-size:11px;color:#cfe0f5;flex-wrap:wrap;gap:10px;">
+                            <span><i style="display:inline-block;width:14px;height:3px;background:#a83800;vertical-align:middle;"></i> L1</span>
+                            <span><i style="display:inline-block;width:14px;height:3px;background:#005ce6;vertical-align:middle;"></i> L2</span>
+                            <span><i style="display:inline-block;width:14px;height:3px;background:#4ce600;vertical-align:middle;"></i> L3</span>
+                            <span><i style="display:inline-block;width:14px;height:3px;background:#ffff00;vertical-align:middle;"></i> L4</span>
+                            <span><i style="display:inline-block;width:14px;height:3px;background:#000;vertical-align:middle;"></i> L5</span>
+                            <span style="color:#9ad8ff;">▭ predios</span>
+                        </div>
                         <div id="controlesModoPuntoLevantamientoA2Esc" style="display:flex;gap:8px;">
                             <button id="btnMedirAreaLevantamientoA2Esc" style="padding:8px 14px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">📐 Medir área (opcional)</button>
                         </div>
@@ -5144,23 +5183,79 @@ const COMISIONES = {
             return predios;
         }
 
+        // Red de canales de la toma (Canal Lateral, mismo archivo ya usado por
+        // el mapa de Inventario: mapas/inventario_gis/canal_lateral.json —
+        // trae geometría [lat,lon] lista para Leaflet, color real por orden
+        // (L1-L5) ya resuelto, y el nombre propio de cada canal en
+        // campos.NOMBRE). Nunca falla: si no se puede descargar, se sigue
+        // mostrando el bloque solo con los predios.
+        async function _obtenerCanalesBloqueRiegoLevantamientoA2Esc(tomaNombre) {
+            if (_canalesBloqueRiegoCacheLevantamientoA2Esc[tomaNombre]) return _canalesBloqueRiegoCacheLevantamientoA2Esc[tomaNombre];
+            if (_canalesInventarioGisTodosA2Esc === null) {
+                try {
+                    const resp = await fetch('mapas/inventario_gis/canal_lateral.json');
+                    _canalesInventarioGisTodosA2Esc = resp.ok ? await resp.json() : [];
+                } catch (e) { _canalesInventarioGisTodosA2Esc = []; }
+            }
+            const canales = _canalesInventarioGisTodosA2Esc.filter((f) => f.toma === tomaNombre);
+            _canalesBloqueRiegoCacheLevantamientoA2Esc[tomaNombre] = canales;
+            return canales;
+        }
+
+        // Oculta/muestra las etiquetas de predios/canales según el zoom actual
+        // (ver UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2_ESC) — una sola clase CSS en el
+        // contenedor del mapa, sin re-crear ninguna capa.
+        function _actualizarVisibilidadEtiquetasBloqueA2Esc() {
+            if (!_mapaEditorLevantamientoA2Esc) return;
+            const contenedor = _mapaEditorLevantamientoA2Esc.getContainer();
+            const ocultar = _mapaEditorLevantamientoA2Esc.getZoom() < UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2_ESC;
+            contenedor.classList.toggle('mapa-oculta-etiquetas-bloque-a2-esc', ocultar);
+        }
+
         async function _toggleBloqueRiegoEditorLevantamientoA2Esc() {
             _bloqueRiegoActivoLevantamientoA2Esc = !_bloqueRiegoActivoLevantamientoA2Esc;
             const btn = document.getElementById('btnBloqueRiegoLevantamientoA2Esc');
+            const leyenda = document.getElementById('leyendaBloqueRiegoLevantamientoA2Esc');
             if (!_bloqueRiegoActivoLevantamientoA2Esc) {
                 if (_capaBloqueRiegoEditorLevantamientoA2Esc) { _mapaEditorLevantamientoA2Esc.removeLayer(_capaBloqueRiegoEditorLevantamientoA2Esc); _capaBloqueRiegoEditorLevantamientoA2Esc = null; }
                 if (btn) btn.textContent = '🗺️ Ver bloque de riego';
+                if (leyenda) leyenda.style.display = 'none';
                 return;
             }
             if (btn) btn.textContent = '🗺️ Cargando bloque de riego…';
-            const predios = await _obtenerPrediosBloqueRiegoLevantamientoA2Esc(_levantamientoA2Estado.registroActual.tomaNombre);
+            const tomaNombre = _levantamientoA2Estado.registroActual.tomaNombre;
+            const predios = await _obtenerPrediosBloqueRiegoLevantamientoA2Esc(tomaNombre);
+            const canales = await _obtenerCanalesBloqueRiegoLevantamientoA2Esc(tomaNombre);
             if (!_bloqueRiegoActivoLevantamientoA2Esc) return; // se apagó mientras cargaba
+
             const capas = predios.filter((p) => p.coordenadas && p.coordenadas.length >= 3).map((p) => {
                 const latlngs = p.coordenadas.map((par) => [par[1], par[0]]);
-                return L.polygon(latlngs, { color: '#00bcd4', weight: 1.5, fillOpacity: 0.06, interactive: false });
+                const poligono = L.polygon(latlngs, { color: '#00bcd4', weight: 1.5, fillOpacity: 0.06, interactive: false });
+                const etiqueta = escapeHtml(p.usuario || '(sin nombre)') + (p.catastralKey ? ('<br>UC ' + escapeHtml(p.catastralKey)) : '');
+                poligono.bindTooltip(etiqueta, { permanent: true, direction: 'center', className: 'etiqueta-predio-bloque-a2-esc', interactive: false });
+                return poligono;
             });
+
+            canales.filter((c) => c.geom && c.geom.type === 'LineString' && c.geom.coords && c.geom.coords.length >= 2).forEach((c) => {
+                const orden = (c.campos && c.campos.ORDEN) || '';
+                const color = c.color || COLOR_POR_ORDEN_CANAL_A2_ESC[orden] || '#ffffff';
+                const linea = L.polyline(c.geom.coords, { color: color, weight: 2.5, opacity: 0.9, interactive: false });
+                const nombreCanal = (c.campos && c.campos.NOMBRE) || c.nombre || 'Canal';
+                linea.bindTooltip(escapeHtml(nombreCanal), { permanent: true, direction: 'center', className: 'etiqueta-canal-bloque-a2-esc', interactive: false });
+                capas.push(linea);
+            });
+
             _capaBloqueRiegoEditorLevantamientoA2Esc = L.layerGroup(capas).addTo(_mapaEditorLevantamientoA2Esc);
-            if (btn) btn.textContent = '🗺️ Ocultar bloque de riego' + (predios.length ? ' (' + predios.length + ')' : ' (sin datos para esta toma)');
+            if (!_zoomListenerBloqueRiegoA2EscPuesto) {
+                _mapaEditorLevantamientoA2Esc.on('zoomend', _actualizarVisibilidadEtiquetasBloqueA2Esc);
+                _zoomListenerBloqueRiegoA2EscPuesto = true;
+            }
+            _actualizarVisibilidadEtiquetasBloqueA2Esc();
+            if (leyenda) leyenda.style.display = 'flex';
+            if (btn) {
+                const totalFiguras = predios.length + canales.length;
+                btn.textContent = '🗺️ Ocultar bloque de riego' + (totalFiguras ? ' (' + predios.length + ' predios, ' + canales.length + ' canales)' : ' (sin datos para esta toma)');
+            }
         }
 
         function _inicializarMapaEditorLevantamientoA2EscSiHaceFalta() {
@@ -5288,6 +5383,8 @@ const COMISIONES = {
             if (_capaBloqueRiegoEditorLevantamientoA2Esc && _mapaEditorLevantamientoA2Esc) { _mapaEditorLevantamientoA2Esc.removeLayer(_capaBloqueRiegoEditorLevantamientoA2Esc); _capaBloqueRiegoEditorLevantamientoA2Esc = null; }
             const btnBloqueRiego = document.getElementById('btnBloqueRiegoLevantamientoA2Esc');
             if (btnBloqueRiego) btnBloqueRiego.textContent = '🗺️ Ver bloque de riego';
+            const leyendaBloqueRiego = document.getElementById('leyendaBloqueRiegoLevantamientoA2Esc');
+            if (leyendaBloqueRiego) leyendaBloqueRiego.style.display = 'none';
             document.getElementById('modalEditorUbicacionLevantamientoA2Esc').style.display = 'flex';
             _inicializarMapaEditorLevantamientoA2EscSiHaceFalta();
             _cambiarModoEditorLevantamientoA2Esc('punto');

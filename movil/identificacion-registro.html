@@ -157,6 +157,25 @@
         .resumen-fila:last-child { border-bottom: none; }
         .resumen-fila .etiqueta-resumen { opacity: 0.7; }
         .resumen-fila .valor-resumen { font-weight: 600; text-align: right; }
+        /* Etiquetas del bloque de riego (predios/canales) en el editor de
+           ubicación — permanentes pero compactas, y ocultas por completo
+           mientras el zoom está alejado (ver UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2)
+           para no saturar el mapa con cientos de predios superpuestos. */
+        .leaflet-tooltip.etiqueta-predio-bloque-a2,
+        .leaflet-tooltip.etiqueta-canal-bloque-a2 {
+            background: rgba(255,255,255,0.88);
+            border: none;
+            box-shadow: none;
+            padding: 1px 4px;
+            font-size: 9px;
+            line-height: 1.15;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .leaflet-tooltip.etiqueta-predio-bloque-a2 { color: #002b52; }
+        .leaflet-tooltip.etiqueta-canal-bloque-a2 { color: #6a3d00; }
+        .mapa-oculta-etiquetas-bloque-a2 .etiqueta-predio-bloque-a2,
+        .mapa-oculta-etiquetas-bloque-a2 .etiqueta-canal-bloque-a2 { display: none; }
     </style>
 </head>
 <body>
@@ -442,6 +461,14 @@
             <div class="editor-poligono-footer">
                 <div class="estado-busqueda" id="estadoEditorUbicacionA2" style="max-width:none;"></div>
                 <button class="boton-secundario" id="btnBloqueRiegoA2" style="max-width:none;">🗺️ Ver bloque de riego</button>
+                <div id="leyendaBloqueRiegoA2" style="display:none; font-size:10px; color:#eee; margin:2px 0 4px; flex-wrap:wrap; gap:8px;">
+                    <span><i style="display:inline-block;width:12px;height:3px;background:#a83800;vertical-align:middle;"></i> L1</span>
+                    <span><i style="display:inline-block;width:12px;height:3px;background:#005ce6;vertical-align:middle;"></i> L2</span>
+                    <span><i style="display:inline-block;width:12px;height:3px;background:#4ce600;vertical-align:middle;"></i> L3</span>
+                    <span><i style="display:inline-block;width:12px;height:3px;background:#ffff00;vertical-align:middle;"></i> L4</span>
+                    <span><i style="display:inline-block;width:12px;height:3px;background:#000;vertical-align:middle;"></i> L5</span>
+                    <span style="color:#9ad8ff;">▭ predios</span>
+                </div>
                 <!-- Modo Punto (por defecto) -->
                 <div id="controlesModoPuntoA2" style="display:flex; flex-direction:column; gap:6px;">
                     <button class="boton" id="btnFijarGpsUbicacionA2" style="max-width:none;">📍 Fijar mi ubicación aquí</button>
@@ -1804,9 +1831,22 @@
         var ultimaAreaMedidaA2 = null; // ha, tras "Terminar medición"
         var verticesUtmExistentesA2 = []; // copia de registroA2Actual.verticesUtm al abrir — referencia visual en modo punto
         var capaPoligonoExistenteA2 = null; // capa Leaflet de solo referencia (azul), no interactiva
-        var capaBloqueRiegoEditorA2 = null; // L.layerGroup con los predios del bloque de riego de la toma
+        var capaBloqueRiegoEditorA2 = null; // L.layerGroup con los predios + canales del bloque de riego de la toma
         var bloqueRiegoActivoA2 = false;
         var prediosBloqueRiegoCacheA2 = {}; // cache por toma, mismo criterio que prediosTomaKmlCache de Sinceramiento
+        var canalesBloqueRiegoCacheA2 = {}; // cache por toma de los canales (mapas/inventario_gis/canal_lateral.json)
+        var canalesInventarioGisTodosA2 = null; // el .json completo, descargado una sola vez
+        var zoomListenerBloqueRiegoA2Puesto = false;
+        // Con cientos de predios/canales por bloque, mostrar sus etiquetas
+        // (nombre/UC) SIEMPRE saturaría el mapa — solo se muestran a partir de
+        // este zoom (mismo criterio que cualquier visor GIS: densidad de
+        // etiqueta según acercamiento), controlado con una sola clase CSS en
+        // el contenedor del mapa (ver .mapa-oculta-etiquetas-bloque-a2).
+        var UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2 = 16;
+        // Colores reales por orden de canal (L1-L5), extraídos una sola vez del
+        // KMZ oficial de Canales a mapas/inventario_gis/canal_lateral.json —
+        // mismos colores que ya usa el mapa de Inventario, no inventados acá.
+        var COLOR_POR_ORDEN_CANAL_A2 = { L1: '#a83800', L2: '#005ce6', L3: '#4ce600', L4: '#ffff00', L5: '#000000' };
 
         function _iconoEditorUbicacionA2(letra) {
             return L.divIcon({ className: 'marcador-vertice-editor', html: letra, iconSize: [26, 26], iconAnchor: [13, 13] });
@@ -1840,23 +1880,79 @@
             return predios;
         }
 
+        // Red de canales de la toma (Canal Lateral, mismo archivo ya usado por
+        // el mapa de Inventario: mapas/inventario_gis/canal_lateral.json —
+        // trae geometría [lat,lon] lista para Leaflet, color real por orden
+        // (L1-L5) ya resuelto, y el nombre propio de cada canal en
+        // campos.NOMBRE). Nunca fallar: si no se puede descargar, se sigue
+        // mostrando el bloque solo con los predios.
+        async function obtenerCanalesBloqueRiegoA2(tomaNombre) {
+            if (canalesBloqueRiegoCacheA2[tomaNombre]) return canalesBloqueRiegoCacheA2[tomaNombre];
+            if (canalesInventarioGisTodosA2 === null) {
+                try {
+                    var resp = await fetch('../mapas/inventario_gis/canal_lateral.json');
+                    canalesInventarioGisTodosA2 = resp.ok ? await resp.json() : [];
+                } catch (e) { canalesInventarioGisTodosA2 = []; }
+            }
+            var canales = canalesInventarioGisTodosA2.filter(function (f) { return f.toma === tomaNombre; });
+            canalesBloqueRiegoCacheA2[tomaNombre] = canales;
+            return canales;
+        }
+
+        // Oculta/muestra las etiquetas de predios/canales según el zoom
+        // actual (ver UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2) — una sola clase CSS en
+        // el contenedor del mapa, sin re-crear ninguna capa.
+        function _actualizarVisibilidadEtiquetasBloqueA2() {
+            if (!mapaEditorUbicacionA2) return;
+            var contenedor = mapaEditorUbicacionA2.getContainer();
+            var ocultar = mapaEditorUbicacionA2.getZoom() < UMBRAL_ZOOM_ETIQUETAS_BLOQUE_A2;
+            contenedor.classList.toggle('mapa-oculta-etiquetas-bloque-a2', ocultar);
+        }
+
         async function toggleBloqueRiegoEditorA2() {
             bloqueRiegoActivoA2 = !bloqueRiegoActivoA2;
             var btn = document.getElementById('btnBloqueRiegoA2');
+            var leyenda = document.getElementById('leyendaBloqueRiegoA2');
             if (!bloqueRiegoActivoA2) {
                 if (capaBloqueRiegoEditorA2) { mapaEditorUbicacionA2.removeLayer(capaBloqueRiegoEditorA2); capaBloqueRiegoEditorA2 = null; }
                 if (btn) btn.textContent = '🗺️ Ver bloque de riego';
+                if (leyenda) leyenda.style.display = 'none';
                 return;
             }
             if (btn) btn.textContent = '🗺️ Cargando bloque de riego…';
-            var predios = await obtenerPrediosBloqueRiegoA2(registroA2Actual.tomaNombre);
+            var tomaNombre = registroA2Actual.tomaNombre;
+            var predios = await obtenerPrediosBloqueRiegoA2(tomaNombre);
+            var canales = await obtenerCanalesBloqueRiegoA2(tomaNombre);
             if (!bloqueRiegoActivoA2) return; // se apagó mientras cargaba
+
             var capas = predios.filter(function (p) { return p.coordenadas && p.coordenadas.length >= 3; }).map(function (p) {
                 var latlngs = p.coordenadas.map(function (par) { return [par[1], par[0]]; });
-                return L.polygon(latlngs, { color: '#00bcd4', weight: 1.5, fillOpacity: 0.06, interactive: false });
+                var poligono = L.polygon(latlngs, { color: '#00bcd4', weight: 1.5, fillOpacity: 0.06, interactive: false });
+                var etiqueta = escapeHtml(p.usuario || '(sin nombre)') + (p.catastralKey ? ('<br>UC ' + escapeHtml(p.catastralKey)) : '');
+                poligono.bindTooltip(etiqueta, { permanent: true, direction: 'center', className: 'etiqueta-predio-bloque-a2', interactive: false });
+                return poligono;
             });
+
+            canales.filter(function (c) { return c.geom && c.geom.type === 'LineString' && c.geom.coords && c.geom.coords.length >= 2; }).forEach(function (c) {
+                var orden = (c.campos && c.campos.ORDEN) || '';
+                var color = c.color || COLOR_POR_ORDEN_CANAL_A2[orden] || '#ffffff';
+                var linea = L.polyline(c.geom.coords, { color: color, weight: 2.5, opacity: 0.9, interactive: false });
+                var nombreCanal = (c.campos && c.campos.NOMBRE) || c.nombre || 'Canal';
+                linea.bindTooltip(escapeHtml(nombreCanal), { permanent: true, direction: 'center', className: 'etiqueta-canal-bloque-a2', interactive: false });
+                capas.push(linea);
+            });
+
             capaBloqueRiegoEditorA2 = L.layerGroup(capas).addTo(mapaEditorUbicacionA2);
-            if (btn) btn.textContent = '🗺️ Ocultar bloque de riego' + (predios.length ? ' (' + predios.length + ')' : ' (sin datos para esta toma)');
+            if (!zoomListenerBloqueRiegoA2Puesto) {
+                mapaEditorUbicacionA2.on('zoomend', _actualizarVisibilidadEtiquetasBloqueA2);
+                zoomListenerBloqueRiegoA2Puesto = true;
+            }
+            _actualizarVisibilidadEtiquetasBloqueA2();
+            if (leyenda) leyenda.style.display = 'flex';
+            if (btn) {
+                var totalFiguras = predios.length + canales.length;
+                btn.textContent = '🗺️ Ocultar bloque de riego' + (totalFiguras ? ' (' + predios.length + ' predios, ' + canales.length + ' canales)' : ' (sin datos para esta toma)');
+            }
         }
 
         function inicializarMapaEditorUbicacionA2SiHaceFalta() {
@@ -1991,6 +2087,8 @@
             if (capaBloqueRiegoEditorA2 && mapaEditorUbicacionA2) { mapaEditorUbicacionA2.removeLayer(capaBloqueRiegoEditorA2); capaBloqueRiegoEditorA2 = null; }
             var btnBloqueRiego = document.getElementById('btnBloqueRiegoA2');
             if (btnBloqueRiego) btnBloqueRiego.textContent = '🗺️ Ver bloque de riego';
+            var leyendaBloqueRiego = document.getElementById('leyendaBloqueRiegoA2');
+            if (leyendaBloqueRiego) leyendaBloqueRiego.style.display = 'none';
             document.getElementById('vistaEdicionA2Levantamiento').style.display = 'none';
             document.getElementById('vistaEditorUbicacionA2').style.display = 'flex';
             inicializarMapaEditorUbicacionA2SiHaceFalta();
