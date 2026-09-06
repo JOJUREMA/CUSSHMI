@@ -1106,6 +1106,10 @@
      offline como el móvil, no hace falta vendorizarlo. -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- JSZip — solo para leer archivos .kmz subidos al importar polígonos del
+     Formato A-2 (un KMZ es un .kml comprimido en zip); mismo criterio de
+     CDN ya usado para html2pdf/Leaflet en este archivo. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
     
@@ -1404,9 +1408,32 @@
             <button class="btn btn-success" id="btnExportarFormatoA2Levantamiento" onclick="exportarFormatoA2LevantamientoActualizado()" style="width: 100%; margin-top: 12px;" title="Descarga el Excel del Formato A-2 (16 hojas) con lo verificado/completado en campo hasta ahora, en el mismo formato exacto del oficial — para imprimir/entregar">
                 📥 Exportar Formato A-2 actualizado (para imprimir)
             </button>
-            <button class="btn btn-success" id="btnExportarPoligonosFormatoA2Levantamiento" onclick="exportarPoligonosFormatoA2Levantamiento()" style="width: 100%; margin-top: 12px;" title="Descarga en KML los polígonos de área medidos en campo (móvil) para el Formato A-2, con los datos de verificación (cols 18-47) del usuario">
-                🗺️ Exportar Polígonos (KML)
-            </button>
+            <div style="margin-top:12px; border:1px solid #ddd; border-radius:6px; padding:10px; text-align:left;">
+                <p class="info-text" style="margin:0 0 8px;">
+                    <strong>Polígonos (KML):</strong> exporta lo ya medido en campo o importado, o sube un KML/KMZ con predios de usuarios del Formato A-2 (se cruzan por nombre/unidad catastral).
+                </p>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                    <div style="flex:1; min-width:140px;">
+                        <label style="font-size:11px; color:#666; display:block; margin-bottom:3px;">Toma</label>
+                        <select id="selectTomaExportarPoligonosA2" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;" onchange="_actualizarSelectorUsuarioExportarPoligonosA2()">
+                            <option value="TODAS">Todas las tomas</option>
+                        </select>
+                    </div>
+                    <div style="flex:1; min-width:140px;">
+                        <label style="font-size:11px; color:#666; display:block; margin-bottom:3px;">Usuario</label>
+                        <select id="selectUsuarioExportarPoligonosA2" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;">
+                            <option value="TODOS">Todos</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="btn btn-success" id="btnExportarPoligonosFormatoA2Levantamiento" onclick="exportarPoligonosFormatoA2Levantamiento()" style="width: 100%;" title="Descarga en KML los polígonos de área medidos en campo (móvil) o importados, acotado a la toma/usuario elegidos arriba (por defecto, todos), con los datos de verificación (cols 18-47) del usuario">
+                    🗺️ Exportar Polígonos (KML)
+                </button>
+                <button class="btn btn-primary" id="btnImportarPoligonosFormatoA2Levantamiento" onclick="document.getElementById('inputImportarPoligonosA2').click()" style="width: 100%; margin-top: 8px;" title="Sube un KML o KMZ con polígonos de usuarios del Formato A-2 — se cruzan por nombre/unidad catastral y se guardan como el polígono de cada registro emparejado">
+                    📤 Importar Polígonos (KML/KMZ)
+                </button>
+                <input type="file" id="inputImportarPoligonosA2" accept=".kml,.kmz" style="display:none;" onchange="importarPoligonosFormatoA2Levantamiento(event)">
+            </div>
             <button class="btn btn-primary" id="btnAvanceFormatoA2Levantamiento" onclick="mostrarPanelAvanceFormatoA2Levantamiento()" style="width: 100%; margin-top: 12px;" title="Avance del levantamiento de observaciones por toma y consolidado, con exportación a Excel">
                 📊 Avance Levantamiento A-2
             </button>
@@ -3865,6 +3892,181 @@ const COMISIONES = {
             }
         }
 
+        // Cache en memoria de cargarFormatoA2LevantamientoParaExportar — la
+        // usan tanto los selectores Toma/Usuario del exportador KML como el
+        // exportador mismo, para no repetir la consulta. Se invalida
+        // (puesta a null) cada vez que importarPoligonosFormatoA2Levantamiento
+        // guarda algo nuevo, para que el próximo export/selector vea los
+        // polígonos recién importados.
+        let _cacheRegistrosExportarPoligonosA2 = null;
+        async function _obtenerRegistrosParaExportarPoligonosA2() {
+            if (_cacheRegistrosExportarPoligonosA2) return _cacheRegistrosExportarPoligonosA2;
+            const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+            const resultado = await CusshmiDatos.cargarFormatoA2LevantamientoParaExportar(comisionKey);
+            _cacheRegistrosExportarPoligonosA2 = resultado.ok ? (resultado.registros || []) : [];
+            return _cacheRegistrosExportarPoligonosA2;
+        }
+
+        async function _actualizarSelectorUsuarioExportarPoligonosA2() {
+            const selectToma = document.getElementById('selectTomaExportarPoligonosA2');
+            const selectUsuario = document.getElementById('selectUsuarioExportarPoligonosA2');
+            if (!selectToma || !selectUsuario) return;
+            const toma = selectToma.value;
+            selectUsuario.innerHTML = '<option value="TODOS">Cargando…</option>';
+            const registros = await _obtenerRegistrosParaExportarPoligonosA2();
+            const filtrados = toma === 'TODAS' ? registros : registros.filter((r) => r.toma_nombre === toma);
+            const nombres = Array.from(new Set(filtrados.map((r) => r.apellidos_nombres).filter(Boolean))).sort();
+            selectUsuario.innerHTML = '<option value="TODOS">Todos</option>' +
+                nombres.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+        }
+
+        // ── Importar polígonos desde un KML/KMZ subido por el usuario ──
+        // A diferencia de parsearKmlATomas (assets/core/mapa.js, que asume el
+        // esquema específico del KML de bloques de riego —
+        // CODCAT/USUARIO/AREA_HA/TOMA_1—), este parser es genérico: solo
+        // asume que cada Placemark tiene un <name> (clave de cruce universal
+        // en cualquier KML) y un <Polygon> (directo o dentro de
+        // <MultiGeometry>). Placemarks sin polígono válido se cuentan y
+        // reportan, no rompen el resto.
+        function _parsearKmlGenericoAPlacemarks(xmlTexto) {
+            const doc = new DOMParser().parseFromString(xmlTexto, 'text/xml');
+            const placemarksXml = Array.from(doc.getElementsByTagName('Placemark'));
+            const resultado = [];
+            let sinPoligono = 0;
+            placemarksXml.forEach((pm) => {
+                const nombreEl = pm.getElementsByTagName('name')[0];
+                const nombre = nombreEl ? nombreEl.textContent.trim() : '';
+                const poligonoEl = pm.getElementsByTagName('Polygon')[0];
+                if (!poligonoEl) { sinPoligono++; return; }
+                const coordsEl = poligonoEl.getElementsByTagName('coordinates')[0];
+                if (!coordsEl) { sinPoligono++; return; }
+                const coordenadas = coordsEl.textContent.trim().split(/\s+/).map((tupla) => {
+                    const partes = tupla.split(',');
+                    return [parseFloat(partes[0]), parseFloat(partes[1])]; // [lon, lat]
+                }).filter((par) => Number.isFinite(par[0]) && Number.isFinite(par[1]));
+                if (coordenadas.length < 3) { sinPoligono++; return; }
+                // Mejor esfuerzo: busca un campo ExtendedData que parezca traer la
+                // unidad catastral, para el cruce (opcional — el cruce por nombre
+                // siempre funciona igual, esto solo ayuda si el KML lo trae).
+                let catastralKey = '';
+                Array.from(pm.getElementsByTagName('SimpleData')).concat(Array.from(pm.getElementsByTagName('Data'))).forEach((campo) => {
+                    const nombreCampo = (campo.getAttribute('name') || '').toUpperCase();
+                    if (!catastralKey && /CATASTRAL|CODCAT|CLAVECAT/.test(nombreCampo)) {
+                        const valueEl = campo.getElementsByTagName('value')[0];
+                        catastralKey = (valueEl ? valueEl.textContent : campo.textContent || '').trim();
+                    }
+                });
+                resultado.push({ nombre, catastralKey, coordenadas });
+            });
+            return { placemarks: resultado, sinPoligono };
+        }
+
+        async function importarPoligonosFormatoA2Levantamiento(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (!window.CusshmiDatos) { alert('No hay conexión con Supabase. Intenta de nuevo en un momento.'); event.target.value = ''; return; }
+
+            const btn = document.getElementById('btnImportarPoligonosFormatoA2Levantamiento');
+            const textoOriginal = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '📤 Leyendo archivo…'; }
+
+            try {
+                let xmlTexto;
+                if (/\.kmz$/i.test(file.name)) {
+                    if (!window.JSZip) { alert('No se pudo cargar la librería para leer .kmz — intenta de nuevo en un momento.'); return; }
+                    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+                    const entradaKml = Object.keys(zip.files).find((n) => /\.kml$/i.test(n));
+                    if (!entradaKml) { alert('El archivo .kmz no contiene ningún .kml adentro.'); return; }
+                    xmlTexto = await zip.files[entradaKml].async('text');
+                } else {
+                    xmlTexto = await file.text();
+                }
+
+                const { placemarks, sinPoligono } = _parsearKmlGenericoAPlacemarks(xmlTexto);
+                if (placemarks.length === 0) {
+                    alert('El archivo no tiene ningún Placemark con un polígono válido (≥3 vértices).' +
+                        (sinPoligono ? '\n\n' + sinPoligono + ' placemark(s) sin polígono fueron ignorados.' : ''));
+                    return;
+                }
+
+                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
+                const resultadoRegistros = await CusshmiDatos.cargarFormatoA2LevantamientoParaExportar(comisionKey);
+                if (!resultadoRegistros.ok) { alert('⚠️ No se pudo cargar los registros de Formato A-2: ' + resultadoRegistros.error); return; }
+                const registros = resultadoRegistros.registros || [];
+                if (registros.length === 0) {
+                    alert('No hay registros de Formato A-2 (Levantamiento) sincronizados todavía — sincroniza el Excel primero.');
+                    return;
+                }
+
+                // Mismo algoritmo de cruce ya probado en Sinceramiento
+                // (_encontrarPredioKmlEnListaEsc): 1) unidad catastral sin ceros a
+                // la izquierda; 2) si no, nombre sin comas normalizado.
+                function normUC(v) { return (v || '').toString().trim().toUpperCase().replace(/\s+/g, '').replace(/^0+/, ''); }
+                function normNombre(v) { return (v || '').toString().replace(/,/g, ' ').trim().toUpperCase().replace(/\s+/g, ' '); }
+
+                let emparejados = 0, yaTeniaPoligono = 0;
+                const sinMatch = [];
+                const conflictos = []; // {placemark, registro} — ya tenían polígono real
+
+                placemarks.forEach((pm) => {
+                    let registro = null;
+                    const ucBuscada = normUC(pm.catastralKey);
+                    if (ucBuscada) registro = registros.find((r) => normUC(r.unidad_catastral) === ucBuscada) || null;
+                    if (!registro) {
+                        const nombreBuscado = normNombre(pm.nombre);
+                        registro = registros.find((r) => normNombre(r.apellidos_nombres) === nombreBuscado) || null;
+                    }
+                    if (!registro) { sinMatch.push(pm.nombre || '(sin nombre)'); return; }
+                    if (Array.isArray(registro.vertices_utm) && registro.vertices_utm.length >= 3) {
+                        conflictos.push({ pm, registro });
+                        return;
+                    }
+                    registro._pmParaGuardar = pm; // marca temporal, se guarda más abajo
+                });
+
+                let sobrescribirConflictos = false;
+                if (conflictos.length > 0) {
+                    sobrescribirConflictos = confirm(
+                        conflictos.length + ' usuario(s) del KML ya tenían un polígono guardado (medido en campo o importado antes).\n\n' +
+                        '¿Sobrescribirlos con el polígono nuevo del KML?\n\n' +
+                        '(Aceptar = sobrescribir esos ' + conflictos.length + '; Cancelar = dejarlos como estaban.)'
+                    );
+                    if (sobrescribirConflictos) {
+                        conflictos.forEach(({ pm, registro }) => { registro._pmParaGuardar = pm; });
+                    }
+                }
+
+                const aGuardar = registros.filter((r) => r._pmParaGuardar);
+                for (const registro of aGuardar) {
+                    const pm = registro._pmParaGuardar;
+                    const verticesParaGuardar = pm.coordenadas.map((par, idx) => {
+                        const utm = latLonAUtm17S(par[1], par[0]);
+                        return { orden: idx + 1, easting: utm.easting, northing: utm.northing, lat: par[1], lon: par[0], origen: 'kml_importado' };
+                    });
+                    const resultadoGuardar = await CusshmiDatos.guardarRegistroFormatoA2Levantamiento({ id: registro.id, verticesUtm: verticesParaGuardar });
+                    if (resultadoGuardar.ok) emparejados++;
+                }
+                yaTeniaPoligono = conflictos.length - (sobrescribirConflictos ? conflictos.length : 0);
+
+                _cacheRegistrosExportarPoligonosA2 = null; // fuerza recarga en el próximo export/selector
+
+                let mensaje = '✅ Polígonos importados: ' + emparejados + ' de ' + placemarks.length + ' placemarks del KML.\n\n';
+                if (yaTeniaPoligono > 0) mensaje += '🔒 ' + yaTeniaPoligono + ' ya tenían polígono y no se tocaron (elegiste no sobrescribir).\n';
+                if (sinPoligono > 0) mensaje += '⚠️ ' + sinPoligono + ' placemark(s) del KML no tenían un polígono válido, se ignoraron.\n';
+                if (sinMatch.length > 0) {
+                    mensaje += '\n❌ ' + sinMatch.length + ' sin coincidencia en el Formato A-2 de esta comisión:\n' + sinMatch.slice(0, 20).join(', ') +
+                        (sinMatch.length > 20 ? '… (+' + (sinMatch.length - 20) + ' más)' : '');
+                }
+                alert(mensaje);
+            } catch (e) {
+                console.error('Error al importar polígonos del Formato A-2 (Levantamiento):', e);
+                alert('No se pudo leer el archivo: ' + (e.message || e));
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+                event.target.value = '';
+            }
+        }
+
         // Exporta a KML los polígonos medidos en el móvil (vertices_utm) para
         // el Formato A-2 (Levantamiento) — cada polígono lleva los 47 datos
         // del usuario como ExtendedData, reutilizando la misma
@@ -3880,12 +4082,23 @@ const COMISIONES = {
             if (btn) { btn.disabled = true; btn.textContent = '🗺️ Generando…'; }
 
             try {
-                const comisionKey = localStorage.getItem('cusshmi_comision') || 'MARGEN_IZQUIERDA';
-                const resultadoRegistros = await CusshmiDatos.cargarFormatoA2LevantamientoParaExportar(comisionKey);
-                if (!resultadoRegistros.ok) { alert('⚠️ No se pudo cargar los registros: ' + resultadoRegistros.error); return; }
-                const registros = (resultadoRegistros.registros || []).filter((r) => Array.isArray(r.vertices_utm) && r.vertices_utm.length >= 3);
+                const todosLosRegistros = await _obtenerRegistrosParaExportarPoligonosA2();
+                if (todosLosRegistros.length === 0) { alert('⚠️ No se pudo cargar los registros.'); return; }
+
+                // Filtro opcional por Toma/Usuario (selectores junto al botón) — dejar
+                // ambos en su valor por defecto ("Todas las tomas"/"Todos") exporta
+                // exactamente lo mismo que antes de este cambio, sin ninguna regresión.
+                const selectToma = document.getElementById('selectTomaExportarPoligonosA2');
+                const selectUsuario = document.getElementById('selectUsuarioExportarPoligonosA2');
+                const tomaElegida = selectToma ? selectToma.value : 'TODAS';
+                const usuarioElegido = selectUsuario ? selectUsuario.value : 'TODOS';
+                let registrosAlcance = todosLosRegistros;
+                if (tomaElegida !== 'TODAS') registrosAlcance = registrosAlcance.filter((r) => r.toma_nombre === tomaElegida);
+                if (usuarioElegido !== 'TODOS') registrosAlcance = registrosAlcance.filter((r) => r.apellidos_nombres === usuarioElegido);
+
+                const registros = registrosAlcance.filter((r) => Array.isArray(r.vertices_utm) && r.vertices_utm.length >= 3);
                 if (registros.length === 0) {
-                    alert('Ningún usuario tiene un área medida todavía — usa "Medir área" desde el celular primero.');
+                    alert('Ningún usuario en este alcance (Toma/Usuario elegidos) tiene un área medida o importada todavía.');
                     return;
                 }
 
@@ -3929,7 +4142,9 @@ const COMISIONES = {
                     [{ nombre: 'Polígonos Formato A-2', placemarksXml: placemarks.join('') }]
                 );
                 const fecha = new Date().toISOString().split('T')[0];
-                _descargarTextoComoArchivo(kml, 'Poligonos_FormatoA2_' + fecha + '.kml', 'application/vnd.google-earth.kml+xml');
+                const sufijoAlcance = usuarioElegido !== 'TODOS' ? '_' + usuarioElegido.replace(/[^A-Za-z0-9]+/g, '_')
+                    : (tomaElegida !== 'TODAS' ? '_' + tomaElegida : '');
+                _descargarTextoComoArchivo(kml, 'Poligonos_FormatoA2' + sufijoAlcance + '_' + fecha + '.kml', 'application/vnd.google-earth.kml+xml');
             } catch (e) {
                 console.error('Error al exportar polígonos del Formato A-2 (Levantamiento):', e);
                 alert('No se pudo generar el KML: ' + (e.message || e));
@@ -4021,11 +4236,20 @@ const COMISIONES = {
                 return;
             }
 
+            const conPoligono = registros.filter((r) => Array.isArray(r.vertices_utm) && r.vertices_utm.length >= 3).length;
+
             const tarjetaConsolidada = `
-                <div style="border-radius:8px;padding:14px;background:#f5f7fa;border:1px solid #dde3ea;margin-bottom:16px;">
-                    <div style="font-size:11px;color:#666;text-transform:uppercase;margin-bottom:4px;">Consolidado — todas las tomas</div>
-                    <div style="font-size:20px;font-weight:800;color:#003876;margin-bottom:6px;">${consolidado.completados} / ${consolidado.total} completados</div>
-                    ${_barraProgresoAvanceA2Html(consolidado.completados, consolidado.total)}
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+                    <div style="flex:1;min-width:220px;border-radius:8px;padding:14px;background:#f5f7fa;border:1px solid #dde3ea;">
+                        <div style="font-size:11px;color:#666;text-transform:uppercase;margin-bottom:4px;">Consolidado — todas las tomas</div>
+                        <div style="font-size:20px;font-weight:800;color:#003876;margin-bottom:6px;">${consolidado.completados} / ${consolidado.total} completados</div>
+                        ${_barraProgresoAvanceA2Html(consolidado.completados, consolidado.total)}
+                    </div>
+                    <div style="flex:1;min-width:220px;border-radius:8px;padding:14px;background:#f5f7fa;border:1px solid #dde3ea;">
+                        <div style="font-size:11px;color:#666;text-transform:uppercase;margin-bottom:4px;">📐 Con polígono medido/importado</div>
+                        <div style="font-size:20px;font-weight:800;color:#1d4ed8;margin-bottom:6px;">${conPoligono} / ${consolidado.total}</div>
+                        ${_barraProgresoAvanceA2Html(conPoligono, consolidado.total)}
+                    </div>
                 </div>`;
 
             const tarjetasPorToma = tomas.map((toma) => {
@@ -4044,12 +4268,14 @@ const COMISIONES = {
                     const completado = !!(r.confirmado || r.verificado_en_campo);
                     const fondo = completado ? 'rgba(30,126,52,0.12)' : 'rgba(192,57,43,0.10)';
                     const estadoTexto = r.confirmado ? '✅ Confirmado' : (r.verificado_en_campo ? '📝 Verificado en campo' : '— Pendiente');
+                    const tienePoligono = Array.isArray(r.vertices_utm) && r.vertices_utm.length >= 3;
                     return `
                         <tr style="background:${fondo};">
                             <td style="padding:7px;">${r.apellidos_nombres || '-'}</td>
                             <td style="padding:7px;text-align:center;">${r.toma_nombre || '-'}</td>
                             <td style="padding:7px;text-align:center;">${r.unidad_catastral || '-'}</td>
                             <td style="padding:7px;text-align:center;">${estadoTexto}</td>
+                            <td style="padding:7px;text-align:center;">${tienePoligono ? '📐' : '—'}</td>
                         </tr>`;
                 }).join('');
 
@@ -4066,6 +4292,7 @@ const COMISIONES = {
                                 <th style="padding:7px;">Toma</th>
                                 <th style="padding:7px;">U. Catastral</th>
                                 <th style="padding:7px;">Estado</th>
+                                <th style="padding:7px;">📐</th>
                             </tr>
                         </thead>
                         <tbody>${filasTabla}</tbody>
@@ -4254,6 +4481,14 @@ const COMISIONES = {
                                     ${opcionesTomas}
                                 </select>
                             </div>
+                            <div style="min-width:180px;">
+                                <label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">¿Tiene polígono?</label>
+                                <select id="filtroPoligonoListaA2Esc" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:4px;">
+                                    <option value="todos">Todos</option>
+                                    <option value="con">📐 Con polígono</option>
+                                    <option value="pendiente">Pendientes por levantar</option>
+                                </select>
+                            </div>
                             <button id="btnSolicitudesLevantamientoA2Esc" onclick="_mostrarSolicitudesLevantamientoA2Esc()"
                                 style="padding:9px 14px;background:#e2e8f0;color:#4a5568;border:none;border-radius:4px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap;display:${esAdmin ? 'inline-block' : 'none'};">
                                 🔔 Solicitudes pendientes
@@ -4279,6 +4514,9 @@ const COMISIONES = {
                 _levantamientoA2Estado.tomaActual = e.target.value;
                 _renderizarListaLevantamientoA2Esc(comisionKey, e.target.value);
             });
+            document.getElementById('filtroPoligonoListaA2Esc').addEventListener('change', () => {
+                _renderizarFilasListaLevantamientoA2Esc(_levantamientoA2Estado.tomaActual);
+            });
 
             _actualizarBotonSolicitudesLevantamientoA2Esc(comisionKey);
             await _renderizarListaLevantamientoA2Esc(comisionKey, 'CONSOLIDADO');
@@ -4302,6 +4540,10 @@ const COMISIONES = {
         }
 
         // ── Vista Lista ──
+        function _tienePoligonoLevantamientoA2Esc(r) {
+            return Array.isArray(r.vertices_utm) && r.vertices_utm.length >= 3;
+        }
+
         async function _renderizarListaLevantamientoA2Esc(comisionKey, tomaNombre) {
             const contenedor = document.getElementById('contenidoLevantamientoA2Esc');
             if (!contenedor) return;
@@ -4312,9 +4554,30 @@ const COMISIONES = {
                 contenedor.innerHTML = `<div style="text-align:center;color:#c0392b;padding:20px;">No se pudo cargar la lista: ${resultado.error || 'error desconocido'}</div>`;
                 return;
             }
-            const registros = resultado.registros || [];
-            if (registros.length === 0) {
+            _levantamientoA2Estado.registrosListaActual = resultado.registros || [];
+            _renderizarFilasListaLevantamientoA2Esc(tomaNombre);
+        }
+
+        // Aplica el filtro "¿Tiene polígono?" sobre los registros ya cargados en
+        // memoria (_levantamientoA2Estado.registrosListaActual), sin volver a
+        // consultar Supabase — mismo criterio que el filtro equivalente del móvil.
+        function _renderizarFilasListaLevantamientoA2Esc(tomaNombre) {
+            const contenedor = document.getElementById('contenidoLevantamientoA2Esc');
+            if (!contenedor) return;
+            const registrosTodos = _levantamientoA2Estado.registrosListaActual || [];
+            if (registrosTodos.length === 0) {
                 contenedor.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Sin registros para esta toma.</div>';
+                return;
+            }
+            const filtroEl = document.getElementById('filtroPoligonoListaA2Esc');
+            const filtro = filtroEl ? filtroEl.value : 'todos';
+            const registros = registrosTodos.filter((r) => {
+                if (filtro === 'con') return _tienePoligonoLevantamientoA2Esc(r);
+                if (filtro === 'pendiente') return !_tienePoligonoLevantamientoA2Esc(r);
+                return true;
+            });
+            if (registros.length === 0) {
+                contenedor.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Ningún usuario coincide con este filtro.</div>';
                 return;
             }
 
@@ -4330,6 +4593,7 @@ const COMISIONES = {
                         <td style="padding:7px;text-align:center;">${badgeTexto ? `<span style="color:${badgeColor};font-weight:600;font-size:12px;">${badgeTexto}</span>` : '-'}</td>
                         <td style="padding:7px;text-align:center;">${r.verificado_en_campo ? '✅' : '—'}</td>
                         <td style="padding:7px;text-align:center;">${r.confirmado ? '🔒' : '—'}</td>
+                        <td style="padding:7px;text-align:center;">${_tienePoligonoLevantamientoA2Esc(r) ? '📐' : '—'}</td>
                         <td style="padding:7px;text-align:center;"><button onclick="_abrirFichaLevantamientoA2Esc('${r.id}')" style="padding:5px 10px;background:#003876;color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">✏️ Ver/Editar</button></td>
                     </tr>`;
             }).join('');
@@ -4345,6 +4609,7 @@ const COMISIONES = {
                                 <th style="padding:7px;">Verificación</th>
                                 <th style="padding:7px;">✅</th>
                                 <th style="padding:7px;">🔒</th>
+                                <th style="padding:7px;">📐</th>
                                 <th style="padding:7px;"></th>
                             </tr>
                         </thead>
@@ -4735,6 +5000,11 @@ const COMISIONES = {
         let _marcadoresAreaEditorLevantamientoA2Esc = [];
         let _capaAreaEditorLevantamientoA2Esc = null;
         let _ultimaAreaMedidaLevantamientoA2Esc = null; // ha, tras "Cerrar polígono"
+        let _verticesUtmExistentesLevantamientoA2Esc = []; // copia de r.verticesUtm al abrir — referencia visual en modo punto
+        let _capaPoligonoExistenteLevantamientoA2Esc = null; // capa Leaflet de solo referencia (azul), no interactiva
+        let _capaBloqueRiegoEditorLevantamientoA2Esc = null; // L.layerGroup con los predios del bloque de riego de la toma
+        let _bloqueRiegoActivoLevantamientoA2Esc = false;
+        const _prediosBloqueRiegoCacheLevantamientoA2Esc = {}; // cache por toma
 
         function _iconoEditorLevantamientoA2Esc(letra) {
             return L.divIcon({
@@ -4759,6 +5029,7 @@ const COMISIONES = {
                     <div id="mapaEditorLevantamientoA2Esc" style="flex:1;"></div>
                     <div style="background:#00234d;color:#fff;padding:10px 16px;display:flex;flex-direction:column;gap:8px;">
                         <div id="estadoEditorLevantamientoA2Esc" style="font-size:12px;color:#cfe0f5;"></div>
+                        <button id="btnBloqueRiegoLevantamientoA2Esc" style="padding:8px 14px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;align-self:flex-start;">🗺️ Ver bloque de riego</button>
                         <div id="controlesModoPuntoLevantamientoA2Esc" style="display:flex;gap:8px;">
                             <button id="btnMedirAreaLevantamientoA2Esc" style="padding:8px 14px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer;">📐 Medir área (opcional)</button>
                         </div>
@@ -4781,6 +5052,7 @@ const COMISIONES = {
             document.body.appendChild(div.firstElementChild);
 
             document.getElementById('btnCerrarEditorLevantamientoA2Esc').addEventListener('click', _cerrarEditorUbicacionLevantamientoA2Esc);
+            document.getElementById('btnBloqueRiegoLevantamientoA2Esc').addEventListener('click', _toggleBloqueRiegoEditorLevantamientoA2Esc);
             document.getElementById('btnFinalizarEditorLevantamientoA2Esc').addEventListener('click', function () {
                 if (!_puntoTempLevantamientoA2Esc) { alert('Haz clic en el mapa para colocar el punto antes de finalizar.'); return; }
                 const r = _levantamientoA2Estado.registroActual;
@@ -4791,7 +5063,13 @@ const COMISIONES = {
                 _cerrarEditorUbicacionLevantamientoA2Esc();
             });
             document.getElementById('btnMedirAreaLevantamientoA2Esc').addEventListener('click', function () {
-                _verticesAreaTempLevantamientoA2Esc = [];
+                // Si ya existe un polígono guardado, se precarga como punto de partida
+                // editable (ajustar/re-cerrar en vez de empezar de cero).
+                _verticesAreaTempLevantamientoA2Esc = _verticesUtmExistentesLevantamientoA2Esc.length >= 3
+                    ? _verticesUtmExistentesLevantamientoA2Esc.slice().sort((a, b) => (a.orden || 0) - (b.orden || 0))
+                        .map((v) => ({ easting: v.easting, northing: v.northing, lat: v.lat, lon: v.lon, origen: v.origen }))
+                    : [];
+                if (_capaPoligonoExistenteLevantamientoA2Esc) { _mapaEditorLevantamientoA2Esc.removeLayer(_capaPoligonoExistenteLevantamientoA2Esc); _capaPoligonoExistenteLevantamientoA2Esc = null; }
                 _redibujarAreaEditorLevantamientoA2Esc();
                 _cambiarModoEditorLevantamientoA2Esc('area');
             });
@@ -4799,6 +5077,7 @@ const COMISIONES = {
                 _verticesAreaTempLevantamientoA2Esc = [];
                 _redibujarAreaEditorLevantamientoA2Esc();
                 _cambiarModoEditorLevantamientoA2Esc('punto');
+                _redibujarPuntoEditorLevantamientoA2Esc(); // restaura la capa de referencia del polígono existente
             });
             document.getElementById('btnDeshacerVerticeLevantamientoA2Esc').addEventListener('click', function () {
                 if (_verticesAreaTempLevantamientoA2Esc.length === 0) return;
@@ -4832,6 +5111,46 @@ const COMISIONES = {
             });
         }
 
+        // Bloque de riego de referencia (capa opcional, apagada por defecto) —
+        // reutiliza KML_POR_TOMA/parsearKmlATomas/filtrarPorToma de
+        // assets/core/mapa.js (ya cargado, mismo patrón que
+        // obtenerPrediosDeTomaEsc del panel de Sinceramiento) para verificar
+        // visualmente si un predio cae dentro o fuera del bloque.
+        async function _obtenerPrediosBloqueRiegoLevantamientoA2Esc(tomaNombre) {
+            if (_prediosBloqueRiegoCacheLevantamientoA2Esc[tomaNombre]) return _prediosBloqueRiegoCacheLevantamientoA2Esc[tomaNombre];
+            const archivos = (typeof KML_POR_TOMA !== 'undefined' && KML_POR_TOMA[tomaNombre]) || [];
+            if (archivos.length === 0) { _prediosBloqueRiegoCacheLevantamientoA2Esc[tomaNombre] = []; return []; }
+            const listas = await Promise.all(archivos.map((nombreArchivo) =>
+                fetch('mapas/' + nombreArchivo).then((resp) => {
+                    if (!resp.ok) throw new Error('No se pudo descargar ' + nombreArchivo);
+                    return resp.text();
+                }).then((texto) => parsearKmlATomas(texto))
+            )).catch(() => []);
+            const todos = [].concat(...listas);
+            const predios = filtrarPorToma(todos, tomaNombre);
+            _prediosBloqueRiegoCacheLevantamientoA2Esc[tomaNombre] = predios;
+            return predios;
+        }
+
+        async function _toggleBloqueRiegoEditorLevantamientoA2Esc() {
+            _bloqueRiegoActivoLevantamientoA2Esc = !_bloqueRiegoActivoLevantamientoA2Esc;
+            const btn = document.getElementById('btnBloqueRiegoLevantamientoA2Esc');
+            if (!_bloqueRiegoActivoLevantamientoA2Esc) {
+                if (_capaBloqueRiegoEditorLevantamientoA2Esc) { _mapaEditorLevantamientoA2Esc.removeLayer(_capaBloqueRiegoEditorLevantamientoA2Esc); _capaBloqueRiegoEditorLevantamientoA2Esc = null; }
+                if (btn) btn.textContent = '🗺️ Ver bloque de riego';
+                return;
+            }
+            if (btn) btn.textContent = '🗺️ Cargando bloque de riego…';
+            const predios = await _obtenerPrediosBloqueRiegoLevantamientoA2Esc(_levantamientoA2Estado.registroActual.tomaNombre);
+            if (!_bloqueRiegoActivoLevantamientoA2Esc) return; // se apagó mientras cargaba
+            const capas = predios.filter((p) => p.coordenadas && p.coordenadas.length >= 3).map((p) => {
+                const latlngs = p.coordenadas.map((par) => [par[1], par[0]]);
+                return L.polygon(latlngs, { color: '#00bcd4', weight: 1.5, fillOpacity: 0.06, interactive: false });
+            });
+            _capaBloqueRiegoEditorLevantamientoA2Esc = L.layerGroup(capas).addTo(_mapaEditorLevantamientoA2Esc);
+            if (btn) btn.textContent = '🗺️ Ocultar bloque de riego' + (predios.length ? ' (' + predios.length + ')' : ' (sin datos para esta toma)');
+        }
+
         function _inicializarMapaEditorLevantamientoA2EscSiHaceFalta() {
             if (_mapaEditorLevantamientoA2Esc) return;
             _mapaEditorLevantamientoA2Esc = L.map('mapaEditorLevantamientoA2Esc', { preferCanvas: true }).setView([-4.9, -80.6], 12);
@@ -4863,6 +5182,16 @@ const COMISIONES = {
                     _actualizarEstadoEditorLevantamientoA2Esc();
                 });
                 _mapaEditorLevantamientoA2Esc.setView([_puntoTempLevantamientoA2Esc.lat, _puntoTempLevantamientoA2Esc.lon], Math.max(_mapaEditorLevantamientoA2Esc.getZoom(), 17));
+            }
+            // Polígono ya guardado (medido en campo o importado por KML) — capa de
+            // solo referencia, no interactiva, distinta del polígono EDITABLE del
+            // modo área (_verticesAreaTempLevantamientoA2Esc/_capaAreaEditorLevantamientoA2Esc).
+            if (_capaPoligonoExistenteLevantamientoA2Esc) { _mapaEditorLevantamientoA2Esc.removeLayer(_capaPoligonoExistenteLevantamientoA2Esc); _capaPoligonoExistenteLevantamientoA2Esc = null; }
+            if (_verticesUtmExistentesLevantamientoA2Esc.length >= 3) {
+                const latlngsExistente = _verticesUtmExistentesLevantamientoA2Esc.slice()
+                    .sort((a, b) => (a.orden || 0) - (b.orden || 0))
+                    .map((v) => [v.lat, v.lon]);
+                _capaPoligonoExistenteLevantamientoA2Esc = L.polygon(latlngsExistente, { color: '#1d4ed8', fillColor: '#1d4ed8', fillOpacity: 0.15, weight: 2, interactive: false }).addTo(_mapaEditorLevantamientoA2Esc);
             }
             _actualizarEstadoEditorLevantamientoA2Esc();
         }
@@ -4940,6 +5269,13 @@ const COMISIONES = {
                 : null;
             _verticesAreaTempLevantamientoA2Esc = [];
             _ultimaAreaMedidaLevantamientoA2Esc = null;
+            // Polígono ya guardado (si lo hay) — referencia en modo punto y precarga
+            // editable al entrar a "Medir área", en vez de arrancar siempre en blanco.
+            _verticesUtmExistentesLevantamientoA2Esc = (Array.isArray(r.verticesUtm) && r.verticesUtm.length >= 3) ? r.verticesUtm.slice() : [];
+            _bloqueRiegoActivoLevantamientoA2Esc = false;
+            if (_capaBloqueRiegoEditorLevantamientoA2Esc && _mapaEditorLevantamientoA2Esc) { _mapaEditorLevantamientoA2Esc.removeLayer(_capaBloqueRiegoEditorLevantamientoA2Esc); _capaBloqueRiegoEditorLevantamientoA2Esc = null; }
+            const btnBloqueRiego = document.getElementById('btnBloqueRiegoLevantamientoA2Esc');
+            if (btnBloqueRiego) btnBloqueRiego.textContent = '🗺️ Ver bloque de riego';
             document.getElementById('modalEditorUbicacionLevantamientoA2Esc').style.display = 'flex';
             _inicializarMapaEditorLevantamientoA2EscSiHaceFalta();
             _cambiarModoEditorLevantamientoA2Esc('punto');
@@ -4971,6 +5307,7 @@ const COMISIONES = {
             });
             const r = _levantamientoA2Estado.registroActual;
             r.verticesUtm = verticesParaGuardar;
+            _verticesUtmExistentesLevantamientoA2Esc = verticesParaGuardar.slice(); // si vuelve a modo punto, la referencia ya está actualizada
             _guardarCampoLevantamientoA2Esc({ id: r.id, verticesUtm: verticesParaGuardar });
         }
 
@@ -7862,6 +8199,22 @@ function cerrarModalSimularSemana() {
 function abrirModalPadronA1() {
     const modal = document.getElementById('modalPadronA1');
     if (modal) modal.classList.add('active');
+    _poblarSelectorTomaExportarPoligonosA2SiHaceFalta();
+}
+
+// Puebla el selector de Toma (estático, TOMAS_FORMATO_A2_LEVANTAMIENTO ya es
+// un array JS, sin consulta) una sola vez, y dispara la carga perezosa del
+// selector de Usuario para el valor por defecto ("Todas las tomas").
+function _poblarSelectorTomaExportarPoligonosA2SiHaceFalta() {
+    const select = document.getElementById('selectTomaExportarPoligonosA2');
+    if (!select || select.dataset.poblado) return;
+    select.dataset.poblado = '1';
+    TOMAS_FORMATO_A2_LEVANTAMIENTO.forEach((t) => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        select.appendChild(opt);
+    });
+    _actualizarSelectorUsuarioExportarPoligonosA2();
 }
 
 function cerrarModalPadronA1() {

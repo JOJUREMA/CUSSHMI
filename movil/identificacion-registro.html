@@ -383,6 +383,11 @@
         <div id="vistaListaA2Levantamiento" style="display:none; width:100%; flex-direction:column; align-items:center;">
             <button class="boton-secundario" id="btnVolverSelectorDesdeListaA2" style="max-width:420px;">← Volver al selector</button>
             <h1 id="tituloListaA2Levantamiento" style="margin-top:14px; font-size:16px;"></h1>
+            <select id="filtroPoligonoListaA2" style="max-width:420px; width:100%; padding:8px; margin-bottom:8px; border-radius:6px;">
+                <option value="todos">Todos</option>
+                <option value="con">📐 Con polígono</option>
+                <option value="pendiente">Pendientes por levantar</option>
+            </select>
             <div class="estado-busqueda" id="estadoListaA2Levantamiento"></div>
             <div class="resultados" id="listaA2Levantamiento"></div>
         </div>
@@ -436,6 +441,7 @@
             <div id="mapaEditorUbicacionA2" class="editor-poligono-mapa"></div>
             <div class="editor-poligono-footer">
                 <div class="estado-busqueda" id="estadoEditorUbicacionA2" style="max-width:none;"></div>
+                <button class="boton-secundario" id="btnBloqueRiegoA2" style="max-width:none;">🗺️ Ver bloque de riego</button>
                 <!-- Modo Punto (por defecto) -->
                 <div id="controlesModoPuntoA2" style="display:flex; flex-direction:column; gap:6px;">
                     <button class="boton" id="btnFijarGpsUbicacionA2" style="max-width:none;">📍 Fijar mi ubicación aquí</button>
@@ -1465,8 +1471,35 @@
                 return;
             }
             elEstado.textContent = '';
+            _renderizarFilasListaA2();
+        }
 
-            registrosA2Lista.forEach(function (r) {
+        function _tienePoligonoA2(r) {
+            return Array.isArray(r.vertices_utm) && r.vertices_utm.length >= 3;
+        }
+
+        // Aplica el filtro "¿Tiene polígono?" sobre registrosA2Lista (ya cargado
+        // en memoria) sin volver a consultar Supabase — mismo criterio que el
+        // resto de filtros en memoria ya usados en este archivo.
+        function _renderizarFilasListaA2() {
+            var elLista = document.getElementById('listaA2Levantamiento');
+            var elEstado = document.getElementById('estadoListaA2Levantamiento');
+            var filtro = document.getElementById('filtroPoligonoListaA2').value;
+            var tomaNombre = formatoA2TomaSeleccionada;
+            elLista.innerHTML = '';
+
+            var filas = registrosA2Lista.filter(function (r) {
+                if (filtro === 'con') return _tienePoligonoA2(r);
+                if (filtro === 'pendiente') return !_tienePoligonoA2(r);
+                return true;
+            });
+            if (filas.length === 0) {
+                elEstado.textContent = 'Ningún usuario coincide con este filtro.';
+                return;
+            }
+            elEstado.textContent = '';
+
+            filas.forEach(function (r) {
                 var fila = document.createElement('div');
                 fila.className = 'fila-resultado';
                 var badgeTexto = ETIQUETAS_ESTADO_VERIFICACION_A2[r.estado_verificacion] || '';
@@ -1475,6 +1508,7 @@
                     '<div class="nombre-resultado">' + escapeHtml(r.apellidos_nombres || '-') +
                     (badgeTexto ? '<span class="' + badgeClase + '">' + badgeTexto + '</span>' : '') +
                     (r.verificado_en_campo ? '<span class="badge-registrado" style="background:#1e7e34;">✅ verificado</span>' : '') +
+                    (_tienePoligonoA2(r) ? '<span class="badge-registrado" style="background:#1d4ed8;">📐 polígono</span>' : '') +
                     '</div>' +
                     '<div class="detalle-resultado">' +
                     (tomaNombre === 'CONSOLIDADO' ? 'Toma ' + escapeHtml(r.toma_nombre || '-') + ' · ' : '') +
@@ -1483,6 +1517,7 @@
                 elLista.appendChild(fila);
             });
         }
+        document.getElementById('filtroPoligonoListaA2').addEventListener('change', _renderizarFilasListaA2);
         document.getElementById('btnVolverSelectorDesdeListaA2').addEventListener('click', function () {
             document.getElementById('vistaListaA2Levantamiento').style.display = 'none';
             document.getElementById('vistaSelectorA2Levantamiento').style.display = 'flex';
@@ -1767,6 +1802,11 @@
         var marcadoresAreaEditorA2 = [];
         var capaAreaEditorA2 = null;
         var ultimaAreaMedidaA2 = null; // ha, tras "Terminar medición"
+        var verticesUtmExistentesA2 = []; // copia de registroA2Actual.verticesUtm al abrir — referencia visual en modo punto
+        var capaPoligonoExistenteA2 = null; // capa Leaflet de solo referencia (azul), no interactiva
+        var capaBloqueRiegoEditorA2 = null; // L.layerGroup con los predios del bloque de riego de la toma
+        var bloqueRiegoActivoA2 = false;
+        var prediosBloqueRiegoCacheA2 = {}; // cache por toma, mismo criterio que prediosTomaKmlCache de Sinceramiento
 
         function _iconoEditorUbicacionA2(letra) {
             return L.divIcon({ className: 'marcador-vertice-editor', html: letra, iconSize: [26, 26], iconAnchor: [13, 13] });
@@ -1774,6 +1814,49 @@
         function _construirVerticeAreaA2(lat, lon) {
             var utm = latLonAUtm17S(lat, lon);
             return { easting: utm.easting, northing: utm.northing, lat: lat, lon: lon };
+        }
+
+        // Bloque de riego de referencia (capa opcional, apagada por defecto) —
+        // reutiliza KML_POR_TOMA/parsearKmlATomas/filtrarPorToma de
+        // assets/core/mapa.js (ya cargado, mismo patrón que
+        // obtenerPrediosDeToma de movil/sinceramiento-areas.html) para que el
+        // sectorista pueda verificar visualmente si un predio cae dentro o
+        // fuera del bloque. Si la toma no está mapeada en KML_POR_TOMA, no
+        // hace nada (mismo criterio de degradación silenciosa que
+        // obtenerBloqueDeToma).
+        async function obtenerPrediosBloqueRiegoA2(tomaNombre) {
+            if (prediosBloqueRiegoCacheA2[tomaNombre]) return prediosBloqueRiegoCacheA2[tomaNombre];
+            var archivos = (typeof KML_POR_TOMA !== 'undefined' && KML_POR_TOMA[tomaNombre]) || [];
+            if (archivos.length === 0) { prediosBloqueRiegoCacheA2[tomaNombre] = []; return []; }
+            var listas = await Promise.all(archivos.map(function (nombreArchivo) {
+                return fetch('../mapas/' + nombreArchivo).then(function (resp) {
+                    if (!resp.ok) throw new Error('No se pudo descargar ' + nombreArchivo);
+                    return resp.text();
+                }).then(function (texto) { return parsearKmlATomas(texto); });
+            })).catch(function () { return []; });
+            var todos = [].concat.apply([], listas);
+            var predios = filtrarPorToma(todos, tomaNombre);
+            prediosBloqueRiegoCacheA2[tomaNombre] = predios;
+            return predios;
+        }
+
+        async function toggleBloqueRiegoEditorA2() {
+            bloqueRiegoActivoA2 = !bloqueRiegoActivoA2;
+            var btn = document.getElementById('btnBloqueRiegoA2');
+            if (!bloqueRiegoActivoA2) {
+                if (capaBloqueRiegoEditorA2) { mapaEditorUbicacionA2.removeLayer(capaBloqueRiegoEditorA2); capaBloqueRiegoEditorA2 = null; }
+                if (btn) btn.textContent = '🗺️ Ver bloque de riego';
+                return;
+            }
+            if (btn) btn.textContent = '🗺️ Cargando bloque de riego…';
+            var predios = await obtenerPrediosBloqueRiegoA2(registroA2Actual.tomaNombre);
+            if (!bloqueRiegoActivoA2) return; // se apagó mientras cargaba
+            var capas = predios.filter(function (p) { return p.coordenadas && p.coordenadas.length >= 3; }).map(function (p) {
+                var latlngs = p.coordenadas.map(function (par) { return [par[1], par[0]]; });
+                return L.polygon(latlngs, { color: '#00bcd4', weight: 1.5, fillOpacity: 0.06, interactive: false });
+            });
+            capaBloqueRiegoEditorA2 = L.layerGroup(capas).addTo(mapaEditorUbicacionA2);
+            if (btn) btn.textContent = '🗺️ Ocultar bloque de riego' + (predios.length ? ' (' + predios.length + ')' : ' (sin datos para esta toma)');
         }
 
         function inicializarMapaEditorUbicacionA2SiHaceFalta() {
@@ -1812,6 +1895,16 @@
                     actualizarEstadoEditorUbicacionA2();
                 });
                 mapaEditorUbicacionA2.setView([puntoTempA2.lat, puntoTempA2.lon], Math.max(mapaEditorUbicacionA2.getZoom(), 17));
+            }
+            // Polígono ya guardado (medido en campo o importado por KML) — capa de
+            // solo referencia, no interactiva, distinta del polígono EDITABLE del
+            // modo área (verticesAreaTempA2/capaAreaEditorA2).
+            if (capaPoligonoExistenteA2) { mapaEditorUbicacionA2.removeLayer(capaPoligonoExistenteA2); capaPoligonoExistenteA2 = null; }
+            if (verticesUtmExistentesA2.length >= 3) {
+                var latlngsExistente = verticesUtmExistentesA2.slice()
+                    .sort(function (a, b) { return (a.orden || 0) - (b.orden || 0); })
+                    .map(function (v) { return [v.lat, v.lon]; });
+                capaPoligonoExistenteA2 = L.polygon(latlngsExistente, { color: '#1d4ed8', fillColor: '#1d4ed8', fillOpacity: 0.15, weight: 2, interactive: false }).addTo(mapaEditorUbicacionA2);
             }
             actualizarEstadoEditorUbicacionA2();
         }
@@ -1890,6 +1983,14 @@
                 : null;
             verticesAreaTempA2 = [];
             ultimaAreaMedidaA2 = null;
+            // Polígono ya guardado (si lo hay) — se muestra de referencia en modo
+            // punto (redibujarPuntoEditorA2) y se precarga como editable al entrar
+            // a "Medir área" (btnMedirAreaA2), en vez de arrancar siempre en blanco.
+            verticesUtmExistentesA2 = (Array.isArray(r.verticesUtm) && r.verticesUtm.length >= 3) ? r.verticesUtm.slice() : [];
+            bloqueRiegoActivoA2 = false;
+            if (capaBloqueRiegoEditorA2 && mapaEditorUbicacionA2) { mapaEditorUbicacionA2.removeLayer(capaBloqueRiegoEditorA2); capaBloqueRiegoEditorA2 = null; }
+            var btnBloqueRiego = document.getElementById('btnBloqueRiegoA2');
+            if (btnBloqueRiego) btnBloqueRiego.textContent = '🗺️ Ver bloque de riego';
             document.getElementById('vistaEdicionA2Levantamiento').style.display = 'none';
             document.getElementById('vistaEditorUbicacionA2').style.display = 'flex';
             inicializarMapaEditorUbicacionA2SiHaceFalta();
@@ -1925,6 +2026,7 @@
 
         document.getElementById('btnGpsA2').addEventListener('click', abrirEditorUbicacionA2);
         document.getElementById('btnCerrarEditorUbicacionA2').addEventListener('click', cerrarEditorUbicacionA2);
+        document.getElementById('btnBloqueRiegoA2').addEventListener('click', toggleBloqueRiegoEditorA2);
 
         document.getElementById('btnFinalizarEditorUbicacionA2').addEventListener('click', function () {
             if (!puntoTempA2) { alert('Toca el mapa o usa "Fijar mi ubicación aquí" para colocar el punto antes de finalizar.'); return; }
@@ -1944,7 +2046,13 @@
         });
 
         document.getElementById('btnMedirAreaA2').addEventListener('click', function () {
-            verticesAreaTempA2 = [];
+            // Si ya existe un polígono guardado, se precarga como punto de partida
+            // editable (el sectorista ajusta/re-cierra en vez de empezar de cero).
+            verticesAreaTempA2 = verticesUtmExistentesA2.length >= 3
+                ? verticesUtmExistentesA2.slice().sort(function (a, b) { return (a.orden || 0) - (b.orden || 0); })
+                    .map(function (v) { return { easting: v.easting, northing: v.northing, lat: v.lat, lon: v.lon, origen: v.origen }; })
+                : [];
+            if (capaPoligonoExistenteA2) { mapaEditorUbicacionA2.removeLayer(capaPoligonoExistenteA2); capaPoligonoExistenteA2 = null; }
             redibujarAreaEditorA2();
             cambiarModoEditorUbicacionA2('area');
         });
@@ -1952,6 +2060,7 @@
             verticesAreaTempA2 = [];
             redibujarAreaEditorA2();
             cambiarModoEditorUbicacionA2('punto');
+            redibujarPuntoEditorA2(); // restaura la capa de referencia del polígono existente
         });
         document.getElementById('btnDeshacerVerticeAreaA2').addEventListener('click', function () {
             if (verticesAreaTempA2.length === 0) return;
@@ -1986,6 +2095,7 @@
                 return { orden: idx + 1, easting: v.easting, northing: v.northing, lat: v.lat, lon: v.lon, origen: v.origen || 'manual' };
             });
             registroA2Actual.verticesUtm = verticesParaGuardar;
+            verticesUtmExistentesA2 = verticesParaGuardar.slice(); // si vuelve a modo punto, la referencia ya está actualizada
             guardarCampoA2({ id: registroA2Actual.id, verticesUtm: verticesParaGuardar });
         }
         document.getElementById('btnTerminarMedicionA2').addEventListener('click', cerrarPoligonoAreaA2);

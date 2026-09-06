@@ -2724,7 +2724,7 @@
         const { data, error } = await window.CusshmiSupabase.ejecutarConsulta(
             (client) => {
                 let q = client.from('formato_a2_levantamiento')
-                    .select('id, toma_nombre, apellidos_nombres, unidad_catastral, estado_verificacion, verificado_en_campo, confirmado')
+                    .select('id, toma_nombre, apellidos_nombres, unidad_catastral, estado_verificacion, verificado_en_campo, confirmado, vertices_utm')
                     .eq('comision_id', comisionId)
                     .order('apellidos_nombres', { ascending: true });
                 if (filtrarPorToma) q = q.eq('toma_nombre', tomaNombre);
