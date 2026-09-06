@@ -1779,9 +1779,16 @@
         function inicializarMapaEditorUbicacionA2SiHaceFalta() {
             if (mapaEditorUbicacionA2) return;
             mapaEditorUbicacionA2 = L.map('mapaEditorUbicacionA2', { preferCanvas: true }).setView([-4.9, -80.6], 12);
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
-                maxZoom: 19
+            // Google Satellite en vez de Esri World_Imagery — Esri no tenía imagen en
+            // zoom alto para varias zonas rurales de Piura ("Map data not yet
+            // available"); Google sí, verificado contra la zona real. Nota: es la URL
+            // "de tiles" que usa el propio Google Maps, no la API oficial con clave/
+            // facturación — fuera de sus Términos de Servicio para este uso, decisión
+            // tomada explícitamente por el usuario tras comparar ambas.
+            L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                attribution: 'Imágenes © Google',
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 20
             }).addTo(mapaEditorUbicacionA2);
             mapaEditorUbicacionA2.on('click', function (e) {
                 if (modoEditorUbicacionA2 === 'punto') {

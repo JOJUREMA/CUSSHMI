@@ -891,9 +891,16 @@
         function inicializarMapaPreviewSiHaceFalta() {
             if (mapaLeaflet) return;
             mapaLeaflet = L.map('mapaVertices', { preferCanvas: true }).setView([-4.9, -80.6], 12);
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
-                maxZoom: 19
+            // Google Satellite en vez de Esri World_Imagery — Esri no tenía imagen en
+            // zoom alto para varias zonas rurales de Piura ("Map data not yet
+            // available"); Google sí, verificado contra la zona real. Nota: es la URL
+            // "de tiles" que usa el propio Google Maps, no la API oficial con clave/
+            // facturación — fuera de sus Términos de Servicio para este uso, decisión
+            // tomada explícitamente por el usuario tras comparar ambas.
+            L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                attribution: 'Imágenes © Google',
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 20
             }).addTo(mapaLeaflet);
         }
 
@@ -986,9 +993,11 @@
         function inicializarMapaEditorSiHaceFalta() {
             if (mapaEditor) return;
             mapaEditor = L.map('mapaEditorPoligono', { preferCanvas: true }).setView([-4.9, -80.6], 12);
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
-                maxZoom: 19
+            // Google Satellite en vez de Esri (ver nota más arriba en este archivo).
+            L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                attribution: 'Imágenes © Google',
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 20
             }).addTo(mapaEditor);
             mapaEditor.on('click', function (e) {
                 verticesEdicionTemp.push(construirVertice(e.latlng.lat, e.latlng.lng, null, 'manual', verticesEdicionTemp.length + 1));
@@ -1109,9 +1118,11 @@
         function dibujarPoligonoEnMiniMapa(mapaExistenteVar, contenedorId, latlngs, color) {
             if (!mapaExistenteVar) {
                 mapaExistenteVar = L.map(contenedorId, { preferCanvas: true }).setView([-4.9, -80.6], 12);
-                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                    attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
-                    maxZoom: 19
+                // Google Satellite en vez de Esri (ver nota más arriba en este archivo).
+                L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                    attribution: 'Imágenes © Google',
+                    subdomains: ['0', '1', '2', '3'],
+                    maxZoom: 20
                 }).addTo(mapaExistenteVar);
             }
             setTimeout(function () { mapaExistenteVar.invalidateSize(); }, 50);

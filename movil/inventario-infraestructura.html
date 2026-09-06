@@ -911,9 +911,16 @@
                 return;
             }
             mapaInventarioLeaflet = L.map('mapaInventario', { preferCanvas: true }).setView([-4.9, -80.6], 12);
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
-                maxZoom: 19
+            // Google Satellite en vez de Esri World_Imagery — Esri no tenía imagen en
+            // zoom alto para varias zonas rurales de Piura ("Map data not yet
+            // available"); Google sí, verificado contra la zona real. Nota: es la URL
+            // "de tiles" que usa el propio Google Maps, no la API oficial con clave/
+            // facturación — fuera de sus Términos de Servicio para este uso, decisión
+            // tomada explícitamente por el usuario tras comparar ambas.
+            L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                attribution: 'Imágenes © Google',
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 20
             }).addTo(mapaInventarioLeaflet);
             setTimeout(function () { mapaInventarioLeaflet.invalidateSize(); }, 50);
         }
@@ -1250,9 +1257,11 @@
         function inicializarMapaFichaSiHaceFalta() {
             if (mapaFichaLeaflet) { setTimeout(function () { mapaFichaLeaflet.invalidateSize(); }, 50); return; }
             mapaFichaLeaflet = L.map('mapaFichaUbicacion', { preferCanvas: true }).setView([-4.9, -80.6], 13);
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
-                maxZoom: 19
+            // Google Satellite en vez de Esri (ver nota más arriba en este archivo).
+            L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                attribution: 'Imágenes © Google',
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 20
             }).addTo(mapaFichaLeaflet);
             setTimeout(function () { mapaFichaLeaflet.invalidateSize(); }, 50);
         }
@@ -1364,9 +1373,11 @@
         function inicializarMapaEditorEstructuraSiHaceFalta() {
             if (mapaEditorEstructura) return;
             mapaEditorEstructura = L.map('mapaEditorEstructura', { preferCanvas: true }).setView([-4.9, -80.6], 12);
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics',
-                maxZoom: 19
+            // Google Satellite en vez de Esri (ver nota más arriba en este archivo).
+            L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                attribution: 'Imágenes © Google',
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 20
             }).addTo(mapaEditorEstructura);
             mapaEditorEstructura.on('click', function (e) {
                 var t = edicionEstructuraTemp;
